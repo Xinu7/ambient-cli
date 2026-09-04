@@ -1,0 +1,31 @@
+{
+  "name": "smoke",
+  "tasks": [
+    {
+      "id": "adds-a-function",
+      "prompt": "Create a file util.ts that exports a function `add(a: number, b: number): number` returning a + b. Do not add anything else.",
+      "checks": [
+        { "kind": "completed" },
+        { "kind": "file_exists", "path": "util.ts" },
+        { "kind": "file_contains", "path": "util.ts", "text": "export" }
+      ]
+    },
+    {
+      "id": "fixes-a-failing-test",
+      "prompt": "The test in sum.test.mjs fails because sum.mjs is wrong. Fix sum.mjs so the test passes. Do not change the test.",
+      "setup": {
+        "files": [
+          { "path": "sum.mjs", "content": "export const sum = (a, b) => a - b;\n" },
+          {
+            "path": "sum.test.mjs",
+            "content": "import { sum } from './sum.mjs';\nif (sum(2, 2) !== 4) { console.error('FAIL'); process.exit(1); }\nconsole.log('ok');\n"
+          }
+        ]
+      },
+      "checks": [
+        { "kind": "completed" },
+        { "kind": "command_succeeds", "command": "node sum.test.mjs" }
+      ]
+    }
+  ]
+}
