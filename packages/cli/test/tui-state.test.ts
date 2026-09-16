@@ -6,6 +6,7 @@ import {
   appendNotice,
   clearTranscript,
   initialState,
+  isSettled,
   nextPermission,
   optimisticEcho,
   reduce,
@@ -890,5 +891,174 @@ describe("tui reducer", () => {
     } as NewEvent);
     expect(s1).not.toBe(s0);
     expect(s0.transcript).toHaveLength(0);
+  });
+});
+
+describe("tui reducer — subagent visibility (Phase 6)", () => {
+  const startGroup = (s: ReturnType<typeof init>) =>
+    reduce(s, {
+      kind: "subagent.started",
+      schemaVersion: 1,
+      sessionId: "ses_a",
+      turnId: "trn_a",
+      attemptId: "att_a",
+      toolCallId: "tc_p",
+      childSessionId: "ses_c",
+      role: "scout",
+      label: "find-auth",
+      model: "qwen",
+      readOnly: true,
+      prompt: "find the auth flow",
+    } as NewEvent);
+
+  it("subagent.tool surfaces the child's action in the always-on activity line (not a frozen 'Delegating')", () => {
+    let s = startGroup(init());
+    s = reduce(s, {
+      kind: "subagent.tool",
+      schemaVersion: 1,
+      sessionId: "ses_a",
+      turnId: "trn_a",
+      attemptId: "att_a",
+      toolCallId: "tc_p",
+      childSessionId: "ses_c",
+      childToolCallId: "tc_1",
+      toolName: "grep",
+      status: "running",
+      preview: "/auth/",
+    } as NewEvent);
+    expect(s.status.activity?.verb).toContain("find-auth"); // WHICH subagent
+    expect(s.status.activity?.detail).toContain("/auth/"); // …and WHAT it's doing
+  });
+
+  it("on a child tool SETTLE the activity line shows a neutral 'working', not the stale completed action", () => {
+    const tool = (status: "running" | "ok", preview: string) =>
+      ({
+        kind: "subagent.tool",
+        schemaVersion: 1,
+        sessionId: "ses_a",
+        turnId: "trn_a",
+        attemptId: "att_a",
+        toolCallId: "tc_p",
+        childSessionId: "ses_c",
+        childToolCallId: "tc_1",
+        toolName: "grep",
+        status,
+        preview,
+      }) as NewEvent;
+    let s = startGroup(init());
+    s = reduce(s, tool("running", "/auth/"));
+    expect(s.status.activity?.detail).toContain("/auth/"); // running → shows the action
+    s = reduce(s, tool("ok", "12 hits"));
+    expect(s.status.activity?.verb).toContain("find-auth");
+    expect(s.status.activity?.detail).toBe("working"); // settled → neutral, NOT "searching 12 hits"
+  });
+
+  it("subagent.delta accumulates a bounded live-prose tail on the group (you SEE what it's thinking)", () => {
+    let s = startGroup(init());
+    s = reduce(s, {
+      kind: "subagent.delta",
+      schemaVersion: 1,
+      sessionId: "ses_a",
+      turnId: "trn_a",
+      attemptId: "att_a",
+      toolCallId: "tc_p",
+      text: "looking at the login handler",
+    } as NewEvent);
+    const group = s.transcript.find((t) => t.kind === "subagent");
+    expect(group?.kind === "subagent" ? group.liveText : "").toContain(
+      "looking at the login handler",
+    );
+  });
+});
+
+describe("tui reducer — steer (Phase 5)", () => {
+  it("a steer event shows the injected message as a user turn in the transcript", () => {
+    const s = reduce(init(), {
+      kind: "steer",
+      schemaVersion: 1,
+      sessionId: "ses_a",
+      turnId: "trn_a",
+      text: "actually, also run the tests",
+    } as NewEvent);
+    expect(s.transcript).toEqual([
+      { kind: "user", id: expect.any(String), text: "actually, also run the tests" },
+    ]);
+  });
+});
+
+describe("tui reducer — run telemetry (effort / round / tokens, Phase 4)", () => {
+  const started = () =>
+    ({ kind: "session.started", schemaVersion: 1, sessionId: "ses_a" }) as NewEvent;
+  const inf = (over: Record<string, unknown>) =>
+    ({ kind: "inference.response", ...base, empty: false, truncated: false, ...over }) as NewEvent;
+
+  it("folds the resolved effort and accumulates tokens across model calls", () => {
+    let s = reduce(init(), started());
+    s = reduce(s, inf({ effort: "high", promptTokens: 100, completionTokens: 20 }));
+    expect(s.status.resolvedEffort).toBe("high");
+    expect(s.status.tokensUsed).toBe(120);
+    s = reduce(s, inf({ effort: "high", promptTokens: 50, completionTokens: 10 }));
+    expect(s.status.tokensUsed).toBe(180); // cumulative
+  });
+
+  it("keeps cumulative tokens across runs; a NaN/absent usage never pollutes the count", () => {
+    let s = reduce(init(), started());
+    s = reduce(s, inf({ promptTokens: 100, completionTokens: 0 }));
+    expect(s.status.tokensUsed).toBe(100);
+    s = reduce(s, started()); // a new run
+    s = reduce(s, inf({ effort: "medium" })); // no token fields → no change to the running total
+    expect(s.status.tokensUsed).toBe(100); // tokens persist across the session, no NaN
+  });
+});
+
+describe("isSettled — the Static/live split for scrollback (Phase 3)", () => {
+  it("in-flight items are LIVE (re-rendered), finalized items are SETTLED (committed to scrollback)", () => {
+    // live
+    expect(isSettled({ kind: "assistant", id: "a", text: "…", streaming: true, spin: 0 })).toBe(
+      false,
+    );
+    expect(
+      isSettled({ kind: "tool", id: "t", name: "bash", preview: "$ x", status: "running" }),
+    ).toBe(false);
+    expect(
+      isSettled({
+        kind: "subagent",
+        id: "s",
+        children: [],
+        status: "running",
+        collapsed: false,
+        spin: 0,
+      }),
+    ).toBe(false);
+    // settled — a user item is ALWAYS settled, even an optimistic echo: its text never changes, and treating
+    // it as live would freeze the split forever if a run aborts before turn.started clears the flag.
+    expect(isSettled({ kind: "user", id: "u", text: "hi", optimistic: true })).toBe(true);
+    expect(isSettled({ kind: "assistant", id: "a", text: "done", streaming: false, spin: 0 })).toBe(
+      true,
+    );
+    expect(
+      isSettled({
+        kind: "tool",
+        id: "t",
+        name: "bash",
+        preview: "$ x",
+        status: "ok",
+        durationMs: 3,
+      }),
+    ).toBe(true);
+    expect(isSettled({ kind: "user", id: "u", text: "hi" })).toBe(true);
+    expect(isSettled({ kind: "notice", id: "n", level: "info", text: "ok" })).toBe(true);
+  });
+
+  it("keeps the settled prefix APPEND-ONLY when a later tool settles before an earlier one", () => {
+    // Two parallel tools: the SECOND settles first. The settled PREFIX must stop at the first still-running
+    // tool (so <Static> never sees an item reordered), not include the out-of-order settled one.
+    const transcript: TranscriptItem[] = [
+      { kind: "user", id: "u", text: "go" },
+      { kind: "tool", id: "t1", name: "grep", preview: "/a/", status: "running" },
+      { kind: "tool", id: "t2", name: "grep", preview: "/b/", status: "ok", durationMs: 2 },
+    ];
+    const firstLive = transcript.findIndex((it) => !isSettled(it));
+    expect(firstLive).toBe(1); // stops at the running t1 — t2 stays in the live tail until t1 settles
   });
 });

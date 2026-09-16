@@ -203,6 +203,13 @@ describe("reconstructTranscript + turnCount (warm-continue resume)", () => {
       schemaVersion: 1,
       sessionId: sid,
       turnId: tid,
+      kind: "steer",
+      text: "also make b.txt",
+    });
+    w.append({
+      schemaVersion: 1,
+      sessionId: sid,
+      turnId: tid,
       attemptId: aid,
       kind: "assistant.final",
       text: "Done.",
@@ -213,6 +220,7 @@ describe("reconstructTranscript + turnCount (warm-continue resume)", () => {
     expect(t).toContain("User: make a.txt");
     expect(t).toContain("called write");
     expect(t).toContain("write result: created");
+    expect(t).toContain("User (mid-run): also make b.txt"); // a steer survives reconstruction (resume/continuity)
     expect(t).toContain("Assistant: Done.");
   });
 

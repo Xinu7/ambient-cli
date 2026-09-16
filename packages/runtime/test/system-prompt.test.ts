@@ -23,6 +23,21 @@ describe("buildSystemPrompt", () => {
     expect(noGit).not.toContain("Git (at run start");
   });
 
+  it("selects the PLAN preamble in plan mode (read-only, present a plan) and the BUILD one otherwise", () => {
+    const plan = buildSystemPrompt({ cwd: "/w", model: "vendor/m", mode: "plan" });
+    expect(plan).toContain("PLAN MODE");
+    expect(plan).toContain("READ-ONLY");
+    expect(plan).toContain("`plan` tool"); // it records a plan and stops
+    expect(plan).not.toContain("run shell commands"); // no execution instruction to loop on
+    expect(plan).not.toContain("Verify your work by running"); // …and no build/test directive
+
+    const build = buildSystemPrompt({ cwd: "/w", model: "vendor/m", mode: "bypass" });
+    expect(build).toContain("run shell commands"); // build keeps the execution preamble
+    expect(build).not.toContain("PLAN MODE");
+    // default (no mode) is the build preamble
+    expect(buildSystemPrompt({ cwd: "/w", model: "vendor/m" })).not.toContain("PLAN MODE");
+  });
+
   it("pins the north-star goal FIRST in the dynamic block, with the self-check directive", () => {
     const p = buildSystemPrompt({ cwd: "/w", model: "vendor/m", goal: "ship the CSV export" });
     const dynamic = p.split(DYNAMIC_BOUNDARY)[1] ?? "";

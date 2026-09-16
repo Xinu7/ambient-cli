@@ -3,8 +3,31 @@ import {
   imageDimensions,
   looksLikeImagePath,
   normalizeDroppedPath,
+  normalizePastedText,
   sniffMediaType,
 } from "../src/tui/capture.js";
+
+describe("normalizePastedText (bracketed-paste + control-byte hygiene)", () => {
+  it("strips bracketed-paste markers, keeping the content and its newlines", () => {
+    const raw = "\x1b[200~first line\nsecond line\x1b[201~";
+    expect(normalizePastedText(raw)).toBe("first line\nsecond line");
+  });
+  it("strips a BARE [200~/[201~ marker too (Ink consumes the ESC, leaving the marker as text)", () => {
+    expect(normalizePastedText("[200~first line\nsecond[201~")).toBe("first line\nsecond");
+  });
+  it("normalizes CRLF and lone CR to LF", () => {
+    expect(normalizePastedText("a\r\nb\rc")).toBe("a\nb\nc");
+  });
+  it("drops stray control bytes and any lone ESC, but keeps \\n and \\t", () => {
+    expect(normalizePastedText("a\x07b\tc\nd")).toBe("ab\tc\nd");
+    expect(normalizePastedText("x\x1by")).toBe("xy"); // lone ESC removed
+  });
+  it("a drag-dropped path wrapped in paste markers survives as a clean path (still attach-detectable)", () => {
+    const cleaned = normalizePastedText("\x1b[200~/Users/z/pic.png\x1b[201~");
+    expect(cleaned).toBe("/Users/z/pic.png");
+    expect(looksLikeImagePath(cleaned)).toBe(true);
+  });
+});
 
 // A minimal PNG header: 8-byte signature + IHDR chunk with width=800, height=600.
 const png = new Uint8Array([

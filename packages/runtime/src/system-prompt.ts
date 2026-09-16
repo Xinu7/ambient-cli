@@ -3,7 +3,24 @@
  * boundary marker is stable across turns (prompt-cacheable); everything after is volatile context.
  */
 
+import type { Mode } from "@amb/protocol";
+
 export const DYNAMIC_BOUNDARY = "\n<<<AMB_DYNAMIC_CONTEXT>>>\n";
+
+/**
+ * PLAN MODE preamble — research read-only, produce a written plan, make NO changes. Selected when the run's
+ * mode is "plan"; it never mentions editing/shell (those tools aren't even advertised in plan mode) so the
+ * model can't loop on denied commands, and it ends by recording the plan for the user to approve + Build.
+ */
+const PLAN_PREAMBLE = `You are amb, a terminal coding agent running entirely on the Ambient decentralized-inference network.
+
+You are in PLAN MODE. Research the codebase READ-ONLY and produce an implementation PLAN for the user to approve — you make NO changes yet.
+Rules:
+- Investigate with READ-ONLY tools ONLY: \`read\`, \`list\`, \`glob\`, \`grep\`, \`search_skills\` (and \`subagent\` to fan out read-only research). You have NO editing, shell, or network tools in plan mode — do NOT try to edit/create files, run commands, or fetch the web (they are unavailable and there is nothing to retry).
+- When you understand the task, call the \`plan\` tool with the concrete, ordered steps (all \`pending\`), then STOP with a one-paragraph summary of the plan. Do NOT keep researching once you can write the plan.
+- The user reviews your plan and then switches to Build mode to execute it — so make each step concrete and correctly ordered.
+- If you must ask the user anything, use the \`ask_user\` tool (2–8 options + a free-text field), never a prose question.
+- Be concise and direct.`;
 
 const STATIC_PREAMBLE = `You are amb, a terminal coding agent running entirely on the Ambient decentralized-inference network.
 
@@ -21,6 +38,8 @@ Principles:
 export interface DynamicContext {
   cwd: string;
   model: string;
+  /** The run's mode — "plan" selects the read-only PLAN preamble; anything else builds. */
+  mode?: Mode;
   /** Today's date (YYYY-MM-DD); omitted from the prompt when absent (no injected clock). */
   date?: string;
   /** Host platform; omitted from the prompt when absent. */
@@ -49,5 +68,6 @@ export function buildSystemPrompt(ctx: DynamicContext): string {
   ]
     .filter(Boolean)
     .join("\n");
-  return `${STATIC_PREAMBLE}${DYNAMIC_BOUNDARY}${dynamic}`;
+  const preamble = ctx.mode === "plan" ? PLAN_PREAMBLE : STATIC_PREAMBLE;
+  return `${preamble}${DYNAMIC_BOUNDARY}${dynamic}`;
 }

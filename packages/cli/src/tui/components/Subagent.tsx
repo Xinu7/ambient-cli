@@ -36,13 +36,14 @@ function Child({
   child,
   spin,
   last,
-  collapsed,
+  expanded,
   width,
 }: {
   child: SubagentChild;
   spin: number;
   last: boolean;
-  collapsed: boolean;
+  /** Show this child's live tool rows (only when the wave is expanded — collapsed shows just the summary). */
+  expanded: boolean;
   width: number;
 }): ReactNode {
   const { glyph, color } = childGlyph(child.status, spin);
@@ -74,7 +75,7 @@ function Child({
         </Box>
       </Box>
 
-      {!collapsed && child.status === "running"
+      {expanded && child.status === "running"
         ? child.tools.map((t) => (
             <Box key={t.id}>
               <Box flexShrink={0}>
@@ -112,14 +113,28 @@ function Child({
  * `↳` summary (with the explore→summary compression) when done. Brand grammar only — no emoji; structure
  * (├─ / globe / ✓ / ↳) carries meaning even under NO_COLOR.
  */
-export function Subagent({ item, width = 80 }: { item: SubagentItem; width?: number }): ReactNode {
+export function Subagent({
+  item,
+  width = 80,
+  expanded = false,
+}: {
+  item: SubagentItem;
+  width?: number;
+  /** When the wave is LIVE, whether it's expanded to show each child's tool rows + streamed prose (↓ / Ctrl+O
+   *  toggles it). Collapsed by default so a big wave can't fill the screen; a finished wave ignores this. */
+  expanded?: boolean;
+}): ReactNode {
   const n = item.children.length;
   const roleWord =
     n > 0 && item.children.every((c) => c.role === item.children[0]?.role)
       ? `${item.children[0]?.role}${n === 1 ? "" : "s"}`
       : "agents";
   const running = item.status === "running";
-  const header = running ? `${n} ${roleWord} working` : `${n} ${roleWord} finished`;
+  const doneCount = item.children.filter((c) => c.status !== "running").length;
+  // A live wave shows a running count + how to expand; a finished wave just says finished.
+  const header = running
+    ? `${n - doneCount}/${n} ${roleWord} running${expanded ? " · ↑ collapse" : " · ↓ / ctrl+o to expand"}`
+    : `${n} ${roleWord} finished`;
   return (
     <Box flexDirection="column" marginTop={1}>
       <Box>
@@ -134,10 +149,22 @@ export function Subagent({ item, width = 80 }: { item: SubagentItem; width?: num
           child={c}
           spin={item.spin}
           last={i === item.children.length - 1}
-          collapsed={item.collapsed}
+          expanded={expanded}
           width={width}
         />
       ))}
+      {/* A dim live tail of the children's streamed prose (only when expanded) — so you SEE what they're
+          thinking, not just which tool ran (the user: "I can't tell what those subagents are even doing"). */}
+      {running && expanded && item.liveText ? (
+        <Box>
+          <Text color={AmbientTheme.dim}>{"  · "}</Text>
+          <Box flexShrink={1} minWidth={0}>
+            <Text color={AmbientTheme.dim} wrap="truncate">
+              {oneLine(item.liveText, Math.max(8, width - 6))}
+            </Text>
+          </Box>
+        </Box>
+      ) : null}
     </Box>
   );
 }

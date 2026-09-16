@@ -22,6 +22,7 @@ export function ActivityLine({
   phaseElapsed,
   frame,
   width = 80,
+  effort,
 }: {
   activity?: Activity;
   elapsed: number;
@@ -29,6 +30,8 @@ export function ActivityLine({
   phaseElapsed?: number;
   frame: number;
   width?: number;
+  /** The reasoning effort actually in use — shown next to "Thinking" so you see how hard it's reasoning. */
+  effort?: "low" | "medium" | "high";
 }): ReactNode {
   if (!activity) return null;
   const globe =
@@ -42,6 +45,10 @@ export function ActivityLine({
   const rowW = Math.max(0, Math.min(width - 2, 120));
   const textW = Math.max(6, rowW - globeW);
   const showRun = elapsed - phase > 1 && textW >= 40;
+  // The verb carries the effort while THINKING ("Thinking · high") so the user sees how hard it's reasoning
+  // — including the concrete level behind an `auto` setting.
+  const verbText =
+    effort && activity.verb === "Thinking" ? `${activity.verb} · ${effort}` : activity.verb;
   // Bound the verb STRING (when there's no shrinkable detail) to what's left after the clock, so a long verb
   // like "Fixing failed verification" can't clip the priority phase clock on a narrow row.
   const clockW =
@@ -49,9 +56,9 @@ export function ActivityLine({
     (showRun ? `  (run ${elapsedLabel(elapsed)})`.length : 0);
   const verbBudget = activity.detail ? undefined : Math.max(3, textW - clockW);
   const verb =
-    verbBudget !== undefined && activity.verb.length > verbBudget
-      ? `${activity.verb.slice(0, Math.max(1, verbBudget - 1))}…`
-      : activity.verb;
+    verbBudget !== undefined && verbText.length > verbBudget
+      ? `${verbText.slice(0, Math.max(1, verbBudget - 1))}…`
+      : verbText;
   return (
     <Box marginTop={1} width={rowW}>
       {/* The spinning Ambient globe — a real rotating braille orb, inline, brand signal blue. */}

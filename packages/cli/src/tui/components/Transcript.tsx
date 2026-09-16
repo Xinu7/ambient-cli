@@ -12,6 +12,29 @@ function clip(text: string, max: number): string {
   return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
 }
 
+/**
+ * Force a hard break inside any unbroken run longer than `width`. Ink's `wrap="wrap"` only breaks on
+ * whitespace, so a long token with no spaces (a JSON blob, a long path/URL, a minified line) spills off the
+ * right edge. Inserting a newline every `width` chars into such runs guarantees the line fits the terminal
+ * while leaving normal prose (which has spaces) to wrap naturally.
+ */
+export function hardWrap(text: string, width: number): string {
+  const w = Math.max(8, width);
+  return text.replace(new RegExp(`\\S{${w + 1},}`, "gu"), (run) => {
+    // Chunk by CODE POINTS (Array.from), never by UTF-16 code units, so a surrogate pair (emoji, non-BMP
+    // glyph) is never torn across the break into two lone surrogates (which render as garbage �).
+    const cps = Array.from(run);
+    const parts: string[] = [];
+    for (let i = 0; i < cps.length; i += w) parts.push(cps.slice(i, i + w).join(""));
+    return parts.join("\n");
+  });
+}
+
+/** While an answer is STREAMING it renders in the live region (re-drawn, not yet in <Static>); cap its
+ *  on-screen height so a long answer can't grow the dynamic tree past the terminal (which would force Ink's
+ *  scrollback-erasing full clear). The full text commits to <Static> the instant it finalizes. */
+const STREAM_MAX_LINES = 14;
+
 /** Status glyph for a tool call (geometric marks — never emoji). Settled SUCCESS is GREEN (conventional), not
  *  the cyan accent — a run fills the transcript with ✓ rows, so cyan there would blow the ~10% budget. Only a
  *  LIVE tool carries the signal accent. */
@@ -53,7 +76,9 @@ function Diff({ diff, width }: { diff: string; width: number }): ReactNode {
 /** A bounded, dimmed preview of a tool's OUTPUT (read contents / grep hits / bash stdout). */
 function Output({ text, width }: { text: string; width: number }): ReactNode {
   const lines = text.split("\n");
-  const shown = lines.slice(0, 6);
+  // The preview arrives already bounded (≤ ~8 lines + an honest marker) from the runtime, so show it whole
+  // rather than re-slicing at 6 (which would drop the runtime's "+N more lines" marker).
+  const shown = lines.slice(0, 12);
   const hidden = lines.length - shown.length;
   const inner = Math.max(1, width - 2);
   return (
@@ -69,27 +94,65 @@ function Output({ text, width }: { text: string; width: number }): ReactNode {
   );
 }
 
-function Item({ item, width }: { item: TranscriptItem; width: number }): ReactNode {
+/** Render one transcript item. Exported so App can feed SETTLED items to Ink's <Static> (scrollback) with
+ *  the exact same rendering as the live tail. */
+export function TranscriptRow({
+  item,
+  width,
+  subagentExpanded = false,
+}: { item: TranscriptItem; width: number; subagentExpanded?: boolean }): ReactNode {
   switch (item.kind) {
-    case "user":
+    case "user": {
+      // A multi-line paste is echoed as a labelled summary ("[pasted N lines] <first line>…") so the user can
+      // SEE that their paste landed (before, a multi-line prompt rendered as one truncated line — or a blank
+      // "›" when it began with a newline). A single-line prompt wraps in full so nothing runs off the edge.
+      const raw = item.text ?? "";
+      const lines = raw.replace(/\n+$/, "").split("\n"); // ignore trailing blank lines in the count
+      if (lines.length > 1) {
+        const firstLine = lines.find((l) => l.trim().length > 0) ?? lines[0] ?? "";
+        return (
+          <Box marginTop={1} width={width}>
+            <Text color={AmbientTheme.cyan}>{"› "}</Text>
+            <Text color={AmbientTheme.dim}>{`[pasted ${lines.length} lines] `}</Text>
+            <Text color={AmbientTheme.fg} wrap="truncate">
+              {clip(firstLine, Math.max(8, width - 20))}
+            </Text>
+          </Box>
+        );
+      }
       return (
-        <Box marginTop={1}>
+        <Box marginTop={1} width={width}>
           <Text color={AmbientTheme.cyan}>{"› "}</Text>
-          <Text color={AmbientTheme.fg} wrap="truncate">
-            {item.text}
+          <Text color={AmbientTheme.fg} wrap="wrap">
+            {hardWrap(raw, Math.max(8, width - 2))}
           </Text>
         </Box>
       );
+    }
 
-    case "assistant":
+    case "assistant": {
+      // Genuine prose — wrap it within the interior width, and hard-break any unbroken long token (a leaked
+      // JSON blob, a long URL/path) so it can never run off the right edge. While STREAMING, cap to the last
+      // N lines (the full text commits to <Static> on finalize) so the live region can't outgrow the screen.
+      const wrapped = hardWrap(item.text, width);
+      let shown = wrapped;
+      if (item.streaming) {
+        const lines = wrapped.split("\n");
+        if (lines.length > STREAM_MAX_LINES) {
+          shown = `…\n${lines.slice(lines.length - STREAM_MAX_LINES).join("\n")}`;
+        }
+      }
       return (
-        <Box marginTop={1}>
-          <Text color={AmbientTheme.fg}>{item.text}</Text>
-          {item.streaming ? (
-            <Text color={AmbientTheme.cyan}>{` ${globeFrame(item.spin, true)}`}</Text>
-          ) : null}
+        <Box marginTop={1} width={width}>
+          <Text color={AmbientTheme.fg} wrap="wrap">
+            {shown}
+            {item.streaming ? (
+              <Text color={AmbientTheme.cyan}>{` ${globeFrame(item.spin, true)}`}</Text>
+            ) : null}
+          </Text>
         </Box>
       );
+    }
 
     case "tool": {
       // Skills get a FRIENDLY, prominent treatment (user: "how do I know it used the skill correctly?"):
@@ -165,7 +228,7 @@ function Item({ item, width }: { item: TranscriptItem; width: number }): ReactNo
     }
 
     case "subagent":
-      return <Subagent item={item} width={width} />;
+      return <Subagent item={item} width={width} expanded={subagentExpanded} />;
 
     case "handoff":
       // A role handoff (planner→executor→…) — distinct glyph ⇢ from the ↪ substitution receipt below.
@@ -211,20 +274,33 @@ function Item({ item, width }: { item: TranscriptItem; width: number }): ReactNo
 }
 
 /**
- * The transcript — a calm, borderless column. Ink reflows the whole tree each render; we render the
- * last `window` items so a very long run stays responsive (older lines have scrolled off anyway). `width`
- * is threaded down so every volatile line truncates instead of wrapping (matching the Approval bar).
+ * The transcript — a calm, borderless column. Used for the LIVE tail (in-flight items); the settled history
+ * is printed once into terminal scrollback via <Static> in App. `width` is threaded down so every volatile
+ * line truncates/wraps within the interior. An optional `window` caps how many items render (a safety bound
+ * for the rare case the live tail grows large); by default it renders all of them.
  */
 export function Transcript({
   items,
-  window = 200,
+  window,
   width = 80,
-}: { items: TranscriptItem[]; window?: number; width?: number }): ReactNode {
-  const shown = items.length > window ? items.slice(items.length - window) : items;
+  subagentExpanded = false,
+}: {
+  items: TranscriptItem[];
+  window?: number;
+  width?: number;
+  subagentExpanded?: boolean;
+}): ReactNode {
+  const shown =
+    window !== undefined && items.length > window ? items.slice(items.length - window) : items;
   return (
     <Box flexDirection="column">
       {shown.map((item) => (
-        <Item key={item.id} item={item} width={width} />
+        <TranscriptRow
+          key={item.id}
+          item={item}
+          width={width}
+          subagentExpanded={subagentExpanded}
+        />
       ))}
     </Box>
   );

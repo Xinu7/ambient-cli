@@ -20,6 +20,29 @@ const EXT_MEDIA: Record<string, ImageAttachment["mediaType"]> = {
   ".gif": "image/gif",
 };
 
+/**
+ * Clean a burst arriving on stdin (a paste, or a drag-dropped path): drop bracketed-paste markers
+ * (`\x1b[200~`/`\x1b[201~`) and any other ANSI CSI escape, normalize CRLF/CR → LF, and strip stray C0
+ * control characters — without touching the visible text (keeps \n and \t). This keeps marker/control
+ * garbage out of the composer buffer and lets a dropped path still be recognized once its markers are gone.
+ */
+export function normalizePastedText(raw: string): string {
+  return (
+    raw
+      // Bracketed-paste markers, with the ESC OPTIONAL: Ink's key parser often consumes the ESC byte and
+      // delivers the bare `[200~` / `[201~` as text, so requiring the ESC would leak the marker into the buffer.
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: matching real terminal control sequences
+      .replace(/\x1b?\[20[01]~/g, "")
+      // any other ANSI CSI escape (ESC [ params intermediates final)
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: matching real terminal control sequences
+      .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+      .replace(/\r\n?/g, "\n") // CRLF / CR -> LF
+      // other C0 controls + DEL (keep \n and \t), incl. any lone ESC left after CSI stripping
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping stray terminal control bytes
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
+  );
+}
+
 /** Strip drag-drop decoration (surrounding quotes, backslash-escaped spaces) from a pasted path. */
 export function normalizeDroppedPath(raw: string): string {
   let s = raw.trim();

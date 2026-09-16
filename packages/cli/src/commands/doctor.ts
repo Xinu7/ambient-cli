@@ -1,4 +1,5 @@
 import { KEYS_URL, fetchCatalog, resolveConfig } from "@amb/ambient-api";
+import { createBuiltinRegistry } from "@amb/tools-core";
 import { githubStatus, githubSummary } from "../agent/github.js";
 import { bold, dim } from "../render/color.js";
 import { resolveApiKey } from "../secrets.js";
@@ -10,6 +11,11 @@ export async function runDoctor(): Promise<void> {
   process.stdout.write(`${bold("ambient doctor")}\n\n`);
 
   ok(`node ${process.version}`);
+
+  const builtins = createBuiltinRegistry().list();
+  ok(
+    `${builtins.length} built-in tools + subagent (plus your MCP servers) — see /tools in the TUI`,
+  );
 
   let baseUrl = "";
   try {

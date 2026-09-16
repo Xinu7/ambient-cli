@@ -11,6 +11,7 @@ export interface SlashCommand {
 /** The command palette shown when the composer text starts with `/`. Kept small + memorable. */
 export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/help", desc: "Show what ambient can do" },
+  { name: "/tools", desc: "List the tools the agent can use" },
   { name: "/model", desc: "Pick a live model (opens a picker)" },
   {
     name: "/effort",

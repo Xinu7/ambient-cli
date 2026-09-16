@@ -163,6 +163,10 @@ export interface RunOptions {
   /** Optional interactive-question port (backs `ask_user`). Absent ⇒ no human is reachable (headless run /
    *  subagent child), and the tool returns a proceed-on-best-judgment note instead of blocking. */
   ask?: AskPort;
+  /** Optional mid-run STEER port. The agent calls it at each turn boundary; any strings it returns are
+   *  injected as new user messages into the RUNNING conversation — the user redirecting the agent without
+   *  cancelling. Absent ⇒ no steering. Each call consumes what it returns (the port drains its own queue). */
+  steer?: () => string[];
   /** Session-scoped permission grants (mutated in place as the user picks "allow for this session"). Pass a
    *  STABLE array across turns so an allow-session grant actually persists — the TUI holds one per session.
    *  Absent ⇒ a fresh per-run array (grants last one run only). */

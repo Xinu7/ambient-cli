@@ -17,6 +17,7 @@ import {
   type CatalogModel,
   type Grant,
   type Lane,
+  type Mode,
   type StopReason,
   newAttemptId,
   newToolCallId,
@@ -192,7 +193,15 @@ export class Agent {
       opts.capabilities,
       opts.routedRole,
     );
-    const tools = toOpenAITools(this.registry.list());
+    // PLAN MODE advertises only the tools the permission engine ALLOWS in plan mode — every effect is "read"
+    // (vacuously true for zero-effect tools like `ask_user`/`propose_goal_update`). This drops bash/edit/write
+    // AND network (web_*), so the model is never offered a tool it would be denied and can't loop on it; it
+    // researches, records a `plan`, and stops. Build offers all.
+    const advertisedTools =
+      opts.mode === "plan"
+        ? this.registry.list().filter((t) => t.manifest.effects.every((e) => e === "read"))
+        : this.registry.list();
+    const tools = toOpenAITools(advertisedTools);
     const toolTokens = estimateTokens(JSON.stringify(tools));
 
     // Warm-continue resume: prior-session context is injected into the SYSTEM prompt, so the message
@@ -249,6 +258,7 @@ export class Agent {
       return buildSystemPrompt({
         cwd: opts.cwd,
         model: target,
+        mode: opts.mode,
         date: opts.workspace.date(),
         platform: opts.workspace.platform(),
         ...(opts.goal ? { goal: opts.goal } : {}),
@@ -366,6 +376,16 @@ export class Agent {
       }
       turns += 1;
       let compactions = 0;
+
+      // ── mid-run STEER: inject any user messages the human sent while this run was in flight, so the model
+      // adapts THIS turn instead of finishing wrong work first. Injected before compaction/budgeting so a
+      // steer is treated like any other recent message; each is durably logged so a resume rebuilds it. ──
+      for (const steerText of opts.steer?.() ?? []) {
+        const text = steerText.trim();
+        if (!text) continue;
+        messages.push({ role: "user", content: text });
+        emit({ schemaVersion: 1, kind: "steer", sessionId, turnId, text });
+      }
 
       // ── context management: compact if we're near the window. Counts toward MAX_COMPACTIONS. ──
       let model = liveCatalog.find((m) => m.id === target);
@@ -489,7 +509,7 @@ export class Agent {
         // Primacy (system anchor) + recency (this trailing reminder) = the goal "sandwich" so even a weak
         // model keeps the north-star in view right before it generates. Transient; never persisted.
         const reqMessages = withGoalReminder(
-          assisted ? this.withAssistedProtocol(messages) : messages,
+          assisted ? this.withAssistedProtocol(messages, opts.mode) : messages,
           opts.goal,
         );
         const reqTools = assisted ? [] : tools;
@@ -982,9 +1002,14 @@ export class Agent {
     return capabilities.laneFor(model);
   }
 
-  /** Return a copy of `messages` whose system prompt carries the assisted-lane tool protocol as text. */
-  private withAssistedProtocol(messages: Msg[]): Msg[] {
-    const protocol = assistedProtocol(this.registry.list());
+  /** Return a copy of `messages` whose system prompt carries the assisted-lane tool protocol as text. In
+   *  PLAN mode only the read-only tools are described (parity with the native lane's filtered advertisement). */
+  private withAssistedProtocol(messages: Msg[], mode?: Mode): Msg[] {
+    const list =
+      mode === "plan"
+        ? this.registry.list().filter((t) => t.manifest.effects.every((e) => e === "read"))
+        : this.registry.list();
+    const protocol = assistedProtocol(list);
     const [system, ...rest] = messages;
     const base = typeof system?.content === "string" ? system.content : "";
     return [{ role: "system", content: `${base}\n\n${protocol}` }, ...rest];

@@ -156,4 +156,17 @@ describe("stripActionBlock", () => {
     expect(t).toBe("Reading.");
     expect(t).not.toContain("amb-action");
   });
+
+  it('strips a BARE (unfenced) action object that is the whole reply — never leak raw {"tool":…} JSON', () => {
+    // A weak model emits its tool call with no fence. parseAssistedResponse nudges it to repair; the display
+    // path must not show the raw envelope (the wall of `{"command":…}` the user reported).
+    expect(stripActionBlock('{"tool":"bash","args":{"command":"wc -l a.log"}}')).toBe("");
+    expect(stripActionBlock('  {"tool":"read","args":{"path":"a"}}  ')).toBe("");
+  });
+
+  it("keeps a legitimate final JSON answer that is NOT an action envelope", () => {
+    // {tool} without an args OBJECT is a real answer, not a call — must survive (not be blanked).
+    const t = stripActionBlock('{"tool":"hammer","version":1}');
+    expect(t).toBe('{"tool":"hammer","version":1}');
+  });
 });

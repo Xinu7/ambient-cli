@@ -51,6 +51,20 @@ export function classifyHttpError(
       detail: body,
     });
   }
+  if (status === 404) {
+    // The chat endpoint URL is fixed and correct, so a 404 means the requested MODEL isn't available at the
+    // gateway right now (a decentralized fleet drops/rotates workers). Make it RETRYABLE so the run FAILS OVER
+    // to a warm model instead of hard-dying with "Unexpected Ambient status 404" — the user saw every
+    // queued/steered follow-up die this way. If the whole endpoint were wrong, ALL runs would 404 and the
+    // bounded failovers still surface a clear terminal error.
+    return new AmbError({
+      kind: "transport",
+      message: `Model ${model ?? "?"} is not available right now (404) — trying another.`,
+      retryable: true,
+      model,
+      detail: body,
+    });
+  }
   if (status >= 500) {
     return new AmbError({
       kind: "transport",

@@ -11,7 +11,7 @@ export interface RegistryDeps {
 }
 
 /**
- * Build the tool registry the CLI injects into `Agent` — the 14 builtins plus any MCP/subagent/extra tools.
+ * Build the tool registry the CLI injects into `Agent` — the 17 builtins plus any MCP/subagent/extra tools.
  * This is the single composition point at the edge (the runtime stays pure). `register` throws on a duplicate
  * name; MCP names are pre-namespaced (`mcp__…`) so they never collide with builtins.
  */

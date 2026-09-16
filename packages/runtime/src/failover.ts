@@ -135,12 +135,14 @@ export async function runChatWithFailover(
     });
     try {
       const stream = ctx.streamDeltas !== false;
+      // Re-resolved per attempt: a failover to a non-reasoning model drops the param automatically. Captured
+      // once so the same value drives BOTH the request and the inference.response readout.
+      const reqEffort = ctx.effortFor(model);
       const result = await deps.client.chat({
         ...params,
         model: current,
         maxTokens: sentOutput,
-        // Re-resolved per attempt: a failover to a non-reasoning model drops the param automatically.
-        reasoningEffort: ctx.effortFor(model),
+        reasoningEffort: reqEffort,
         onContent: stream
           ? (t) =>
               ctx.emit({
@@ -179,6 +181,7 @@ export async function runChatWithFailover(
         ...(result.usage?.completionTokens !== undefined
           ? { completionTokens: result.usage.completionTokens }
           : {}),
+        ...(reqEffort ? { effort: reqEffort } : {}),
         empty,
         truncated: result.finishReason === "length",
       });
@@ -224,8 +227,17 @@ export async function runChatWithFailover(
         await abortableSleep(deps.sleep, backoffSeconds(sameModelRetries), ctx.signal);
         continue;
       }
-      // Bound the number of FAILOVERS independently of same-model retries.
-      if (failovers >= MAX_FAILOVERS) throw err;
+      // Bound the number of FAILOVERS independently of same-model retries. On exhaustion, surface a CLEAR
+      // terminal message — not the last per-attempt "…trying another" (which reads as if a retry is still
+      // coming) and points at one model when the real cause (e.g. every model 404s) may be endpoint/config.
+      if (failovers >= MAX_FAILOVERS) {
+        throw new AmbError({
+          kind: err.kind,
+          message: `all ${failovers + 1} model attempts failed (last: ${err.message}) — check your Ambient endpoint/API key with \`ambient doctor\``,
+          retryable: false,
+          ...(err.model ? { model: err.model } : {}),
+        });
+      }
       failovers += 1;
       if (err.kind !== "cold")
         await abortableSleep(deps.sleep, backoffSeconds(failovers), ctx.signal);

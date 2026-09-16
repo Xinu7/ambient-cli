@@ -23,4 +23,10 @@ describe("classifyHttpError", () => {
   it("5xx => transport (retryable)", () => {
     expect(classifyHttpError(503, "bad gateway").retryable).toBe(true);
   });
+  it("404 => a RETRYABLE transport error so the run fails over to a warm model (not a hard die)", () => {
+    const e = classifyHttpError(404, "model not found", { model: "z-ai/glm-5.2" });
+    expect(e.kind).toBe("transport");
+    expect(e.retryable).toBe(true); // → the failover engine substitutes instead of dying with "404"
+    expect(e.message).toContain("glm-5.2");
+  });
 });

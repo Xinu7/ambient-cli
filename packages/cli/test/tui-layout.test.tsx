@@ -74,13 +74,13 @@ it("running layout is BOTTOM-anchored — empty space at the top, composer + fli
   const lines = frame.split("\n");
   const lastNonBlank =
     lines.length - 1 - [...lines].reverse().findIndex((l) => l.trim().length > 0);
+  const answerRow = lines.findIndex((l) => l.includes("hello from the model"));
   const composerRow = lines.findIndex((l) => l.includes("Describe a coding task"));
-  // Bottom-anchored: the composer + flightline are pinned to the LOWER part of the screen (not jammed to the
-  // top with a void below — the user's complaint), and the flightline is the very last line.
-  expect(composerRow).toBeGreaterThan(Math.floor(lines.length / 2));
+  // Scrollback model: the settled turn (the model's answer) is committed ABOVE, the composer + flightline
+  // flow BELOW it and the flightline is the very last line — a normal terminal log, not a fixed viewport.
+  expect(answerRow).toBeGreaterThanOrEqual(0); // the answer is on screen (committed to scrollback)
+  expect(composerRow).toBeGreaterThan(answerRow); // history above, the input below it
   expect(lines[lastNonBlank]).toContain("BUILD"); // the flightline sits at the very bottom
-  // …and the empty upper region is filled by the dim brand watermark, not a blank void (the "goes blank" fix).
-  expect(frame).toContain("AMBIENT");
   unmount();
 });
 

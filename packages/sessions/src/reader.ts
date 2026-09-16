@@ -102,6 +102,11 @@ export function reconstructTranscript(events: Event[]): string {
         case "turn.started":
           lines.push(`User: ${ev.input}`);
           break;
+        case "steer":
+          // A mid-run redirect the user injected — part of the conversation, so a resumed/continued session
+          // sees it (the event schema promises "a resumed session reconstructs the full conversation").
+          lines.push(`User (mid-run): ${ev.text}`);
+          break;
         case "tool.proposed":
           toolNames.set(ev.toolCallId, ev.toolName);
           lines.push(`  → called ${ev.toolName} ${ev.rawArgs}`);

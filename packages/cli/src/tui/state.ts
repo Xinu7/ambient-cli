@@ -76,7 +76,32 @@ export type TranscriptItem =
       collapsed: boolean;
       /** Monotonic spin counter driving the child globes. */
       spin: number;
+      /** A bounded live tail of the children's streamed prose (subagent.delta) — so you can SEE what they're
+       *  thinking, not just which tool they ran. Transient; cleared when the group settles. */
+      liveText?: string;
     };
+
+/**
+ * A transcript item is SETTLED once it can never change again — safe to commit ONCE to terminal scrollback
+ * via Ink's <Static>. The in-flight kinds (a streaming assistant, a running tool/subagent, an unconfirmed
+ * optimistic echo) stay LIVE (re-rendered) until they finalize, then flush to the static log.
+ */
+export function isSettled(item: TranscriptItem): boolean {
+  switch (item.kind) {
+    case "assistant":
+      return !item.streaming;
+    case "tool":
+    case "subagent":
+      return item.status !== "running";
+    // A `user` item is ALWAYS settled — even an optimistic echo. Its text is the user's own input and never
+    // changes (turn.started later just drops the `optimistic` flag with identical text). Treating it as live
+    // would be unsafe: if the run aborts/errors BEFORE turn.started fires (e.g. Esc during the catalog fetch),
+    // the flag is never cleared, so a "live" optimistic item would freeze the settled/live split forever and
+    // silently kill scrollback for the rest of the session.
+    default:
+      return true; // user, handoff, receipt, notice — never mutate meaningfully after they are pushed
+  }
+}
 
 /** One nested subagent's live state within a `subagent` transcript item. */
 export interface SubagentChild {
@@ -96,6 +121,8 @@ export interface SubagentChild {
 }
 
 const MAX_CHILD_TOOL_ROWS = 6;
+/** Bound for a subagent group's live-prose tail — a couple of lines, never an unbounded transcript. */
+const SUBAGENT_LIVETEXT_CHARS = 240;
 
 /**
  * The FLIGHTLINE's state — deliberately minimal (user: "all I care about is what model I'm running
@@ -124,6 +151,11 @@ export interface Status {
   stopReason?: string;
   /** The current action (Thinking / Reading / Editing / Running …) for the live activity line. */
   activity?: Activity;
+  /** Reasoning effort the runtime ACTUALLY sent for the latest model call (resolves an `auto` setting to a
+   *  concrete level) — shown next to "Thinking" so the user sees how hard it's reasoning right now. */
+  resolvedEffort?: "low" | "medium" | "high";
+  /** Cumulative tokens this session (prompt + completion) — a live, honest cost readout. */
+  tokensUsed?: number;
 }
 
 /** One step in the agent's visible task list (maintained via the `plan` tool). */
@@ -320,7 +352,7 @@ function settleSubagent(
 ): Extract<TranscriptItem, { kind: "subagent" }> {
   if (item.children.some((c) => c.status === "running")) return item;
   const anyFail = item.children.some((c) => c.status === "fail");
-  return { ...item, status: anyFail ? "fail" : "ok", collapsed: true };
+  return { ...item, status: anyFail ? "fail" : "ok", collapsed: true, liveText: undefined };
 }
 
 /** The fields that describe ONE run — reset per session so a second task never shows a stale model/gauge. */
@@ -418,12 +450,29 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
         },
       };
 
-    case "inference.response":
-      // The provider may report the model that ACTUALLY served (post-substitution) — fold it so the
-      // flightline names who is really flying. (No token/telemetry accumulation — the flightline is minimal.)
-      return ev.reportedModel
-        ? { ...state, status: { ...state.status, reportedModel: ev.reportedModel } }
-        : state;
+    case "inference.response": {
+      // Fold: who ACTUALLY served (post-substitution), the reasoning effort really sent (resolves `auto`),
+      // and cumulative session token usage (a live, honest cost readout).
+      const addTokens = (ev.promptTokens ?? 0) + (ev.completionTokens ?? 0);
+      return {
+        ...state,
+        status: {
+          ...state.status,
+          ...(ev.reportedModel ? { reportedModel: ev.reportedModel } : {}),
+          ...(ev.effort ? { resolvedEffort: ev.effort } : {}),
+          ...(addTokens > 0 ? { tokensUsed: (state.status.tokensUsed ?? 0) + addTokens } : {}),
+        },
+      };
+    }
+
+    case "steer":
+      // A mid-run steer the user injected into the running conversation — show it inline as a user turn
+      // (settled, so it commits to scrollback like any message).
+      return pushItem(state, (id) => ({
+        kind: "user",
+        id,
+        text: typeof ev.text === "string" ? ev.text : "",
+      }));
 
     case "reasoning.delta": {
       // Live model thinking for the CURRENT step — a rolling, bounded, transient tail (never persisted).
@@ -712,17 +761,35 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
       );
     }
 
-    case "subagent.tool":
+    case "subagent.delta": {
+      // A child's streamed prose (re-tagged to the parent group) — a bounded live tail so you can SEE what
+      // the subagents are thinking, not just which tool ran. Transient; never persisted, cleared on settle.
+      const text = typeof ev.text === "string" ? ev.text : "";
+      if (!text) return state;
       return updateSubagent(state, ev.toolCallId, (it) => ({
+        ...it,
+        liveText: `${it.liveText ?? ""}${text}`.slice(-SUBAGENT_LIVETEXT_CHARS),
+      }));
+    }
+
+    case "subagent.tool": {
+      // Reflect the child's CURRENT tool in the always-on activity line — before, it froze at "Delegating"
+      // for the whole (multi-minute) wave and never said what a child was actually doing.
+      let liveLabel = "";
+      let liveDetail = "";
+      const next = updateSubagent(state, ev.toolCallId, (it) => ({
         ...it,
         spin: it.spin + 1,
         children: it.children.map((c) => {
           if (c.childSessionId !== ev.childSessionId) return c;
+          const act = toolActivity(ev.toolName, {});
           const activity: Activity = {
-            ...toolActivity(ev.toolName, {}),
+            ...act,
             ...(ev.preview ? { detail: ev.preview } : {}),
           };
           if (ev.status === "running") {
+            liveLabel = c.label;
+            liveDetail = `${act.verb.toLowerCase()}${ev.preview ? ` ${ev.preview}` : ""}`;
             const tools = [
               ...c.tools,
               {
@@ -734,6 +801,10 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
             ].slice(-MAX_CHILD_TOOL_ROWS);
             return { ...c, activity, tools };
           }
+          // The child just FINISHED a tool and is between tools — don't leave the always-on line showing the
+          // completed action as if still in progress; show a neutral "working" for this child instead.
+          liveLabel = c.label;
+          liveDetail = "working";
           // settle the matching running tool row
           const tools = c.tools.map((t) =>
             t.id === ev.childToolCallId
@@ -743,6 +814,11 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
           return { ...c, activity, tools };
         }),
       }));
+      const liveActivity: Activity = liveLabel
+        ? { verb: `↳ ${liveLabel}`, detail: liveDetail }
+        : (next.status.activity ?? { verb: "Delegating" });
+      return { ...next, status: { ...next.status, activity: liveActivity } };
+    }
 
     case "subagent.finished":
       return updateSubagent(state, ev.toolCallId, (it) =>

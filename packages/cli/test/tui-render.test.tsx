@@ -7,12 +7,13 @@ import type { FleetRow } from "../src/render/fleet.js";
 import { App } from "../src/tui/App.js";
 import { ActivityLine } from "../src/tui/components/ActivityLine.js";
 import { Banner } from "../src/tui/components/Banner.js";
+import { Composer } from "../src/tui/components/Composer.js";
 import { ModelPicker } from "../src/tui/components/ModelPicker.js";
 import { Plan } from "../src/tui/components/Plan.js";
 import { SlashPalette, matchSlash } from "../src/tui/components/SlashPalette.js";
 import { StatusLine } from "../src/tui/components/StatusLine.js";
 import { Thinking } from "../src/tui/components/Thinking.js";
-import { Transcript } from "../src/tui/components/Transcript.js";
+import { Transcript, hardWrap } from "../src/tui/components/Transcript.js";
 import type { Status, TranscriptItem } from "../src/tui/state.js";
 
 const stubClient = {
@@ -93,6 +94,125 @@ describe("tui render", () => {
     unmount();
   });
 
+  it("wraps assistant prose and hard-breaks an unbroken long token within the width (no overflow — defect F)", () => {
+    const longToken = "x".repeat(300); // a single unbroken run, far wider than the terminal
+    const items: TranscriptItem[] = [
+      {
+        kind: "assistant",
+        id: "a",
+        text: `Here is a value: ${longToken} end.`,
+        streaming: false,
+        spin: 0,
+      },
+    ];
+    const width = 40;
+    const { lastFrame, unmount } = render(
+      <Box width={width} flexDirection="column">
+        <Transcript items={items} width={width} />
+      </Box>,
+    );
+    const frame = lastFrame() ?? "";
+    for (const line of frame.split("\n")) expect(line.length).toBeLessThanOrEqual(width);
+    expect(frame).toContain("Here is a value"); // the prose itself survives
+    unmount();
+  });
+
+  it("renders a tool RESULT preview as clean text — never a raw JSON envelope (defect A)", () => {
+    const items: TranscriptItem[] = [
+      {
+        kind: "tool",
+        id: "t",
+        name: "read",
+        preview: "a.ts",
+        status: "ok",
+        durationMs: 4,
+        resultPreview: "1\texport const x = 1;\n2\texport const y = 2;",
+      },
+    ];
+    const { lastFrame, unmount } = render(<Transcript items={items} width={80} />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("export const x = 1;");
+    expect(frame).toContain("export const y = 2;");
+    expect(frame).not.toContain('{"'); // no JSON envelope leaks through
+    unmount();
+  });
+
+  it("Composer shows a small multi-line paste as visible lines, not just the tail (defect B)", () => {
+    const { lastFrame, unmount } = render(
+      <Composer value={"first line\nsecond line\nthird line"} running={false} width={80} />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("first line"); // ALL lines visible, not only the last
+    expect(frame).toContain("second line");
+    expect(frame).toContain("third line");
+    unmount();
+  });
+
+  it("bounds a very long SINGLE-LINE input so the composer can't grow past a few rows (audit CRITICAL)", () => {
+    const { lastFrame, unmount } = render(
+      <Composer value={"x".repeat(2000)} running={false} width={80} />,
+    );
+    const frame = lastFrame() ?? "";
+    const rows = frame.split("\n").filter((l) => l.trim().length > 0);
+    expect(rows.length).toBeLessThanOrEqual(11); // MAX_INPUT_ROWS (6) + border + hint — bounded, no strobe
+    expect(frame).toContain("…"); // the head is elided; the tail (caret) stays visible
+    unmount();
+  });
+
+  it("Composer collapses a LARGE paste to a [pasted N lines] chip + its tail (defect B)", () => {
+    const value = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n");
+    const { lastFrame, unmount } = render(<Composer value={value} running={false} width={80} />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("[pasted 30 lines]");
+    expect(frame).toContain("line 30"); // the tail (where the caret is) stays visible
+    unmount();
+  });
+
+  it("caps a STREAMING answer to its recent lines but shows a SETTLED one in full (Phase-3 review #2)", () => {
+    const text = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join("\n");
+    const streaming = render(
+      <Transcript
+        items={[{ kind: "assistant", id: "a", text, streaming: true, spin: 0 }]}
+        width={80}
+      />,
+    );
+    const sFrame = streaming.lastFrame() ?? "";
+    const sLines = sFrame.split("\n").filter((l) => l.trim().length > 0);
+    expect(sLines.length).toBeLessThanOrEqual(16); // STREAM_MAX_LINES (14) + a little chrome — bounded
+    expect(sFrame).toContain("line 40"); // the most recent line is visible
+    expect(sFrame).not.toContain("line 5"); // an old line is capped off (bounds the live region height)
+    streaming.unmount();
+
+    const settled = render(
+      <Transcript
+        items={[{ kind: "assistant", id: "a", text, streaming: false, spin: 0 }]}
+        width={80}
+      />,
+    );
+    const dLines = (settled.lastFrame() ?? "").split("\n").filter((l) => l.trim().length > 0);
+    expect(dLines.length).toBeGreaterThanOrEqual(40); // finalized → the FULL text (commits to scrollback)
+    settled.unmount();
+  });
+
+  it("hardWrap never splits a surrogate pair (emoji) into lone surrogates (Phase-1 review #1)", () => {
+    const out = hardWrap("🔥".repeat(10), 8); // 10 code points > 8 → forced break
+    // content preserved (no garbled �), and the break landed on a code-point boundary
+    expect([...out].filter((c) => c !== "\n").join("")).toBe("🔥".repeat(10));
+    expect(out).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/); // no lone high surrogate
+    expect(out.split("\n").length).toBe(2); // 8 + 2
+  });
+
+  it("echoes a multi-line paste as a [pasted N lines] summary, never a blank › (defect B)", () => {
+    const items: TranscriptItem[] = [
+      { kind: "user", id: "u", text: "\nfirst line of paste\nsecond\nthird" },
+    ];
+    const { lastFrame, unmount } = render(<Transcript items={items} width={80} />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("[pasted 4 lines]");
+    expect(frame).toContain("first line of paste"); // previews the first NON-empty line
+    unmount();
+  });
+
   it("Transcript renders the nested subagent tree (running) and its collapsed summaries", () => {
     const running: TranscriptItem[] = [
       {
@@ -114,14 +234,32 @@ describe("tui render", () => {
         ],
       },
     ];
+    // COLLAPSED by default (N): the header shows the running status + how to expand, each child's summary
+    // shows its current action — but the per-tool rows are HIDDEN so a big wave can't fill the screen.
     const r1 = render(<Transcript items={running} />);
     const f1 = r1.lastFrame() ?? "";
     expect(f1).toContain("◆"); // subagent header mark (no emoji)
     expect(f1).toContain("subagent");
+    expect(f1).toContain("running"); // live status ("1/1 scout running")
+    expect(f1).toContain("expand"); // the expand affordance (↓ / ctrl+o)
     expect(f1).toContain("SCOUT"); // role
     expect(f1).toContain("http-rate-limit"); // label
-    expect(f1).toContain("grep"); // its live tool row is visible — you SEE it working
+    expect(f1).toContain("Searching"); // the child's current action (summary line)
+    expect(f1).not.toContain("grep"); // …but the per-tool row is collapsed away by default
     r1.unmount();
+
+    // EXPANDED (↓ / ctrl+o): the per-tool rows + the streamed-prose tail become visible.
+    const withProse: TranscriptItem[] = [
+      {
+        ...(running[0] as Extract<TranscriptItem, { kind: "subagent" }>),
+        liveText: "tracing the ws upgrade path",
+      },
+    ];
+    const rp = render(<Transcript items={withProse} width={80} subagentExpanded={true} />);
+    const fp = rp.lastFrame() ?? "";
+    expect(fp).toContain("grep"); // the live tool row is visible when expanded — you SEE it working
+    expect(fp).toContain("tracing the ws upgrade path"); // …and what the child is thinking
+    rp.unmount();
 
     const done: TranscriptItem[] = [
       {
@@ -306,6 +444,85 @@ describe("tui render", () => {
     unmount();
   });
 
+  it("ActivityLine shows the reasoning EFFORT next to Thinking (Phase 4)", () => {
+    const { lastFrame, unmount } = render(
+      <ActivityLine
+        activity={{ verb: "Thinking" }}
+        elapsed={12}
+        phaseElapsed={12}
+        frame={0}
+        width={90}
+        effort="high"
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Thinking · high"); // the effort behind the thinking
+    unmount();
+  });
+
+  it("ActivityLine effort rides only on Thinking, not on a tool verb (Phase 4)", () => {
+    const frame =
+      render(
+        <ActivityLine
+          activity={{ verb: "Reading", detail: "a.ts" }}
+          elapsed={3}
+          frame={0}
+          width={90}
+          effort="high"
+        />,
+      ).lastFrame() ?? "";
+    expect(frame).toContain("Reading");
+    expect(frame).not.toContain("Reading · high"); // effort is a thinking readout, not a tool one
+  });
+
+  it("StatusLine shows a cumulative token readout when tokens have been used (Phase 4)", () => {
+    const status: Status = {
+      agentMode: "build",
+      permission: "ask",
+      effort: "auto",
+      requestedModel: "z-ai/glm-5.2",
+      running: true,
+      tokensUsed: 4200,
+    };
+    const frame =
+      render(<StatusLine status={status} width={120} active={true} />).lastFrame() ?? "";
+    expect(frame).toContain("4.2k tok");
+  });
+
+  it("renders a large, mixed transcript at extreme widths without crashing or overflowing (stress)", () => {
+    const items: TranscriptItem[] = [];
+    for (let i = 0; i < 120; i++) {
+      items.push({ kind: "user", id: `u${i}`, text: `question ${i} `.repeat(8) });
+      items.push({
+        kind: "assistant",
+        id: `a${i}`,
+        text: `${"x".repeat(200)} answer ${i}`, // a long unbroken token + prose
+        streaming: false,
+        spin: 0,
+      });
+      items.push({
+        kind: "tool",
+        id: `t${i}`,
+        name: "read",
+        preview: `file-${i}.ts`,
+        status: "ok",
+        durationMs: 5,
+        resultPreview: Array.from({ length: 30 }, (_, k) => `line ${k}`).join("\n"),
+      });
+    }
+    for (const w of [1, 2, 20, 80, 300]) {
+      const { lastFrame, unmount } = render(<Transcript items={items} width={w} />);
+      const frame = lastFrame() ?? "";
+      expect(typeof frame).toBe("string"); // rendered without throwing at any width
+      // At REALISTIC widths, no line runs past the interior (hardWrap/clip hold). Below ~8 cols (no real
+      // terminal) hardWrap floors its chunk at 8, so we only assert no-crash there.
+      if (w >= 20) {
+        for (const line of frame.split("\n")) expect(line.length).toBeLessThanOrEqual(w);
+      }
+      unmount();
+    }
+  });
+
   it("SlashPalette lists the matching commands with the selected one highlighted", () => {
     const matches = matchSlash("/mod"); // → /model (a SINGLE model command, not /model + /models)
     expect(matches.map((c) => c.name)).toEqual(["/model"]);
@@ -463,6 +680,7 @@ describe("tui render", () => {
     expect(matchSlash("hello")).toEqual([]);
     expect(matchSlash("/").length).toBeGreaterThanOrEqual(8);
     expect(matchSlash("/plan").map((c) => c.name)).toEqual(["/plan"]);
+    expect(matchSlash("/tools").map((c) => c.name)).toEqual(["/tools"]); // tool-visibility command (I)
   });
 
   it("matchSlash merges discovered (Claude/Codex) commands into the palette", () => {

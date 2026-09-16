@@ -23,7 +23,7 @@ function permissionStyle(p: Permission): { label: string; color: string } {
 }
 
 /** Effort label + color — `high` reads active (it thinks harder), `off`/`auto`/`low` stay calm. */
-function effortStyle(e: Effort): { label: string; color: string } {
+function effortStyle(e: Effort): { label: string; color: string | undefined } {
   switch (e) {
     case "off":
       return { label: "off", color: AmbientTheme.dim };
@@ -36,6 +36,13 @@ function effortStyle(e: Effort): { label: string; color: string } {
     case "high":
       return { label: "high", color: AmbientTheme.signal };
   }
+}
+
+/** Compact token count: 1234 → "1.2k", 2_500_000 → "2.5M". A live, honest cost readout. */
+function shortTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(Math.round(n));
 }
 
 /** Short model name — drop the vendor prefix (defensive against a non-string from a malformed event). */
@@ -146,6 +153,9 @@ export function StatusLine({
   if (status.lane) head.push({ t: "  ", color: dim }, { t: status.lane, color: dim });
   // `think` shows when the live-reasoning view is on (toggle: /thinking or Ctrl+T) — present = on, absent = off.
   if (showThinking) head.push({ t: "  ", color: dim }, { t: "think", color: signal });
+  // A live, cumulative token count (cost readout) — low priority, clips before the ctx%/state tail.
+  if (status.tokensUsed && status.tokensUsed > 0)
+    head.push({ t: "  ", color: dim }, { t: `${shortTokens(status.tokensUsed)} tok`, color: dim });
 
   // ctx% + run state are the PRIORITY TAIL (user: "what model + how much context"): both are pinned and
   // survive clipping, so the effort/lane/model in the head clip FIRST on a narrow terminal — never the ctx %.

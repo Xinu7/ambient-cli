@@ -1260,3 +1260,79 @@ describe("Agent loop", () => {
     expect(res.turns).toBe(2);
   });
 });
+
+describe("Agent — mid-run steering", () => {
+  it("injects a steer message at the next turn boundary and emits a durable steer event", async () => {
+    const seenUserMsgs: string[][] = [];
+    const client: ChatClient = {
+      fetchCatalog: async () => catalog,
+      chat: async (p) => {
+        seenUserMsgs.push(
+          p.messages.filter((m) => m.role === "user").map((m) => String(m.content)),
+        );
+        // Turn 1 makes a read-only tool call so the loop continues to turn 2 (where the steer is injected).
+        if (seenUserMsgs.length === 1) {
+          return {
+            content: "",
+            toolCalls: [{ id: "tc_l", name: "list", args: { path: "." }, rawArgs: '{"path":"."}' }],
+          };
+        }
+        return { content: "done", toolCalls: [] };
+      },
+    };
+    let steerCalls = 0;
+    const steer = () => {
+      steerCalls += 1;
+      return steerCalls >= 2 ? ["also check the readme"] : []; // arrives while turn 1 runs
+    };
+    await new Agent(client).run("start", baseOpts({ steer }));
+
+    expect(seenUserMsgs.length).toBeGreaterThanOrEqual(2);
+    // The steer reached the model as a user message on turn 2 (it did NOT wait for a whole new run).
+    expect(seenUserMsgs[1]).toContain("also check the readme");
+    // …and it was durably emitted so a resumed session rebuilds the full conversation.
+    const steerEvents = collected.filter((e) => e.kind === "steer") as unknown as {
+      text: string;
+    }[];
+    expect(steerEvents.map((e) => e.text)).toContain("also check the readme");
+  });
+
+  it("ignores an empty steer queue (no injection, no event)", async () => {
+    const client = new MockClient([{ content: "done", toolCalls: [] }]);
+    await new Agent(client).run("hi", baseOpts({ steer: () => [] }));
+    expect(collected.some((e) => e.kind === "steer")).toBe(false);
+  });
+});
+
+describe("Agent — plan mode", () => {
+  const toolNames = (p?: ChatParams): string[] =>
+    (p?.tools ?? [])
+      .map((t) => (t as { function?: { name?: string } })?.function?.name)
+      .filter((n): n is string => Boolean(n));
+
+  it("advertises ONLY read-only tools in plan mode — no bash/edit/write to loop on", async () => {
+    const client = new MockClient([{ content: "here is my plan", toolCalls: [] }]);
+    await new Agent(client).run("plan a change", baseOpts({ mode: "plan" }));
+    const names = toolNames(client.calls[0]);
+    expect(names).toContain("read"); // research tools stay
+    expect(names).toContain("grep");
+    expect(names).toContain("plan"); // …and the plan tool (its plan-completion mechanism)
+    expect(names).toContain("ask_user"); // …and ask_user (zero-effect — the prompt tells it to use this)
+    expect(names).not.toContain("bash"); // …but NOT the mutating/shell tools
+    expect(names).not.toContain("edit");
+    expect(names).not.toContain("write");
+    expect(names).not.toContain("web_fetch"); // …nor network (denied by the permission engine in plan mode)
+    // and the system prompt is the PLAN preamble
+    const sys = client.calls[0]?.messages.find((m) => m.role === "system");
+    expect(typeof sys?.content === "string" ? sys.content : "").toContain("PLAN MODE");
+  });
+
+  it("build mode still advertises the mutating tools", async () => {
+    const client = new MockClient([{ content: "done", toolCalls: [] }]);
+    await new Agent(client).run("do it", baseOpts({ mode: "bypass" }));
+    const names = toolNames(client.calls[0]);
+    expect(names).toContain("bash");
+    expect(names).toContain("edit");
+    expect(names).toContain("write");
+  });
+});

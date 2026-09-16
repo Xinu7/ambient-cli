@@ -7,26 +7,6 @@ import { Rule } from "./primitives.js";
 /** One canonical tagline (capitalized), used in both the wide + compact lockups. */
 const TAGLINE = "A terminal coding agent for the Ambient network.";
 
-/**
- * A calm, DIM brand watermark for the empty upper region of a sparse running screen — the orbital globe +
- * wordmark, centered, so a fresh/near-empty session reads as a deliberate home screen instead of a blank
- * void. Dim (never the cyan accent) so it recedes behind the conversation as it grows.
- */
-export function Watermark(): ReactNode {
-  return (
-    <Box flexDirection="column" alignItems="center">
-      {BRAILLE_GLOBE.map((line, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: fixed glyph rows never reorder
-        <Text key={i} color={AmbientTheme.dim}>
-          {line}
-        </Text>
-      ))}
-      <Box marginTop={1}>
-        <Text color={AmbientTheme.dim}>{LOCKUP_COMPACT}</Text>
-      </Box>
-    </Box>
-  );
-}
 /** The wide lockup's true width: globe + a 3-col gap + the block wordmark. Drives the responsive breakpoint
  *  (measured, not a magic number) so the wordmark can never be forced to wrap on the very first screen. */
 const LOCKUP_W = (BRAILLE_GLOBE[0]?.length ?? 20) + 3 + (AMBIENT_BANNER[0]?.length ?? 30);

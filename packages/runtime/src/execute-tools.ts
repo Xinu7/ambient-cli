@@ -10,6 +10,7 @@ import {
 } from "@amb/protocol";
 import { type ToolRegistry, sha256 } from "@amb/tools-core";
 import type { Approver, RunOptions, ToolCall } from "./ports.js";
+import { previewResult } from "./tool-result-preview.js";
 
 export interface ToolOutcome {
   /** The branded event id (tc_…) used in the durable log. */
@@ -458,12 +459,6 @@ function capDiff(diff: string): string {
 }
 
 function previewOf(o: ToolOutcome): string | undefined {
-  if (o.error) return o.error.slice(0, 400);
-  let s: string;
-  try {
-    s = typeof o.result === "string" ? o.result : JSON.stringify(o.result);
-  } catch {
-    s = "[unserializable result]";
-  }
-  return s ? s.slice(0, 400) : undefined;
+  // Tool-aware, human-readable preview (file contents / stdout / matches …) — NEVER a raw JSON envelope.
+  return previewResult(o.toolName, o.result, o.error);
 }

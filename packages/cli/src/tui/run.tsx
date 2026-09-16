@@ -12,10 +12,14 @@ import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
 import { App } from "./App.js";
 import type { AgentMode, Effort, Permission } from "./state.js";
 
-// Enter/leave the alternate screen buffer so the TUI TAKES OVER the terminal (like Claude Code / Codex):
-// the old scrollback is hidden while amb runs, and restored intact on exit.
-const ALT_ENTER = "\x1b[?1049h\x1b[2J\x1b[H";
-const ALT_EXIT = "\x1b[?1049l";
+// We DON'T use the alternate screen buffer: settled turns are committed to the terminal's real scrollback
+// (via Ink's <Static>) so the user can scroll back through history with the trackpad/wheel like a normal
+// terminal log (the user: "I can't even scroll and see the history"). The alt-screen has no scrollback.
+// Bracketed paste: the terminal wraps a paste in \x1b[200~ … \x1b[201~ so it arrives as ONE coherent burst
+// (an embedded newline can't submit early, and a large paste can't be split into a stray Enter). The App
+// strips the wrapping markers via normalizePastedText, so they never reach the buffer.
+const PASTE_ON = "\x1b[?2004h";
+const PASTE_OFF = "\x1b[?2004l";
 
 export interface TuiOptions {
   agentMode: AgentMode;
@@ -96,14 +100,14 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // assigns it — the finally/ signal handlers read it live to close the servers on exit.
   const mcpConn: { current: McpConnection | null } = { current: null };
 
-  // Take over the terminal, and ALWAYS restore it (normal exit, Ctrl-C, or a crash) so we never leave the
-  // user stranded in the alternate screen.
-  process.stdout.write(ALT_ENTER);
+  // Enable bracketed paste, and ALWAYS disable it (normal exit, Ctrl-C, or a crash) so we never leave the
+  // user's shell in bracketed-paste mode.
+  process.stdout.write(PASTE_ON);
   let restored = false;
   const restore = (): void => {
     if (restored) return;
     restored = true;
-    process.stdout.write(ALT_EXIT);
+    process.stdout.write(PASTE_OFF);
   };
   process.once("exit", restore);
   // An EXTERNAL signal (kill, terminal close) terminates Node WITHOUT firing `exit`, which would strand

@@ -16,7 +16,8 @@ import {
   reconstructTranscript,
   saveObject,
 } from "@amb/sessions";
-import { Box, Text, useApp, useInput, useStdout } from "ink";
+import { createBuiltinRegistry } from "@amb/tools-core";
+import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createDurableEventSink } from "../agent/event-sink.js";
@@ -30,6 +31,7 @@ import {
   captureClipboardImage,
   downscaleForWindow,
   looksLikeImagePath,
+  normalizePastedText,
 } from "./capture.js";
 import { ActivityLine } from "./components/ActivityLine.js";
 import {
@@ -39,7 +41,7 @@ import {
   defaultApprovalSel,
   resolveApprovalKey,
 } from "./components/Approval.js";
-import { Banner, Watermark } from "./components/Banner.js";
+import { Banner } from "./components/Banner.js";
 import { Composer } from "./components/Composer.js";
 import { EffortPicker } from "./components/EffortPicker.js";
 import { Goal } from "./components/Goal.js";
@@ -55,7 +57,7 @@ import {
 } from "./components/SlashPalette.js";
 import { StatusLine } from "./components/StatusLine.js";
 import { Thinking } from "./components/Thinking.js";
-import { Transcript } from "./components/Transcript.js";
+import { Transcript, TranscriptRow } from "./components/Transcript.js";
 import {
   type AgentMode,
   EFFORTS,
@@ -67,6 +69,7 @@ import {
   appendNotice,
   clearTranscript,
   initialState,
+  isSettled,
   nextPermission,
   optimisticEcho,
   reduce,
@@ -218,6 +221,12 @@ export function App(deps: AppDeps): ReactNode {
   const [pickerSel, setPickerSelState] = useState(0);
   const [approvalSel, setApprovalSelState] = useState(0);
   const [tick, setTick] = useState(0);
+  // Whether the LIVE subagent wave is expanded (shows each child's tool rows + streamed prose) — collapsed
+  // by default so a big wave can't fill the screen; ↓ / Ctrl+O expands, ↑ collapses.
+  const [subagentExpanded, setSubagentExpanded] = useState(false);
+  // Bumped on a terminal resize so width/rows (read fresh each render) reflow even while idle — Ink's
+  // useStdout does NOT re-render on resize, so without this a resize left content overflowing the new width.
+  const [, setResizeTick] = useState(0);
   const runStartRef = useRef(0);
   const phaseStartRef = useRef(0);
 
@@ -258,6 +267,9 @@ export function App(deps: AppDeps): ReactNode {
   const busyRef = useRef(false);
   const inputRef = useRef("");
   const queueRef = useRef<{ text: string; attachments: ImageAttachment[] }[]>([]);
+  // Text messages the user sent WHILE a run is in flight — the running agent pulls these at each turn
+  // boundary and injects them (steering). Anything left when the run ends drains as a follow-up turn.
+  const steerRef = useRef<string[]>([]);
   const cancellingRef = useRef(false);
   const agentModeRef = useRef<AgentMode>(deps.agentMode);
   const permissionRef = useRef<Permission>(deps.permission);
@@ -395,8 +407,19 @@ export function App(deps: AppDeps): ReactNode {
 
   const abortRun = useCallback(() => {
     cancellingRef.current = true;
+    // Don't SILENTLY drop pending messages on cancel (the user noticed queued items just vanished) —
+    // clear them but say so.
+    const dropped = steerRef.current.length + queueRef.current.length;
     queueRef.current = [];
+    steerRef.current = [];
     setQueued([]);
+    if (dropped > 0) {
+      dispatch({
+        t: "notice",
+        level: "info",
+        text: `cancelled — discarded ${dropped} queued message${dropped === 1 ? "" : "s"}`,
+      });
+    }
     controllerRef.current?.abort();
     const resolve = approvalResolver.current;
     if (resolve) {
@@ -506,6 +529,15 @@ export function App(deps: AppDeps): ReactNode {
           emit,
           approve,
           ask, // the `ask_user` tool opens the questionnaire overlay through this
+          // Mid-run STEER: the running agent pulls any messages the user sent while it was working and
+          // injects them at the next turn boundary. Consumed items leave the visible queue.
+          steer: () => {
+            if (steerRef.current.length === 0) return [];
+            const msgs = steerRef.current;
+            steerRef.current = [];
+            setQueued([...queueRef.current.map((q) => q.text)]);
+            return msgs;
+          },
           grants: sessionGrantsRef.current, // persist "allow for this session" across turns
           ...(goalRef.current ? { goal: goalRef.current } : {}), // the session north-star, pinned in the anchor
           ...(priorContext ? { resumeContext: priorContext } : {}), // remember earlier turns this session
@@ -570,10 +602,27 @@ export function App(deps: AppDeps): ReactNode {
         }
         setQuestion(null);
         cancellingRef.current = false;
-        const next = queueRef.current.shift();
-        if (next) {
+        // A PLAN-mode run that produced a plan: tell the user how to run it (Tab → Build → Enter).
+        if (agentModeRef.current === "plan" && planRef.current.some((t) => t.status !== "done")) {
+          dispatch({
+            t: "notice",
+            level: "info",
+            text: "Plan ready — press Tab to switch to Build, then Enter to execute it.",
+          });
+        }
+        // Steer messages the agent didn't consume (it finished before the next turn boundary) run as a
+        // follow-up turn; otherwise drain the next queued (attachment) message. Either way nothing is lost.
+        const leftoverSteer = steerRef.current;
+        steerRef.current = [];
+        if (leftoverSteer.length > 0) {
           setQueued(queueRef.current.map((q) => q.text));
-          void runTaskRef.current?.(next.text, next.attachments);
+          void runTaskRef.current?.(leftoverSteer.join("\n"), []);
+        } else {
+          const next = queueRef.current.shift();
+          if (next) {
+            setQueued(queueRef.current.map((q) => q.text));
+            void runTaskRef.current?.(next.text, next.attachments);
+          }
         }
       }
     },
@@ -596,6 +645,17 @@ export function App(deps: AppDeps): ReactNode {
     const id = setInterval(() => setTick((t) => t + 1), 120);
     return () => clearInterval(id);
   }, [runActive]);
+
+  // Reflow on terminal resize (Ink's useStdout doesn't trigger a re-render on its own).
+  useEffect(() => {
+    const out = stdout;
+    if (!out?.on) return;
+    const onResize = () => setResizeTick((n) => n + 1);
+    out.on("resize", onResize);
+    return () => {
+      out.off?.("resize", onResize);
+    };
+  }, [stdout]);
 
   // Reset the per-phase clock whenever the live activity verb changes (P1.10 — thinking-duration timer).
   // biome-ignore lint/correctness/useExhaustiveDependencies: the verb is the CHANGE TRIGGER, not a value used
@@ -676,6 +736,34 @@ export function App(deps: AppDeps): ReactNode {
           text: `commands — ${SLASH_COMMANDS.map((c) => c.name).join("  ")}`,
         });
         break;
+      case "/tools": {
+        // Make the tool set VISIBLE (the user: "idk if it can even use all the tools"). Built-ins are
+        // always wired; MCP tools connect in the background; the subagent tool delegates. Plan mode offers
+        // only the read-only ones.
+        const mcp = deps.getMcpTools?.() ?? deps.mcpTools ?? [];
+        const builtins = createBuiltinRegistry().list();
+        // A tool is available in PLAN mode iff every effect is "read" (true for zero-effect tools like
+        // ask_user) — matching the permission engine. Everything else is Build-only.
+        const planSafe = (t: (typeof builtins)[number]) =>
+          t.manifest.effects.every((e) => e === "read");
+        const inPlan = builtins.filter(planSafe).map((t) => t.manifest.name);
+        const buildOnly = builtins.filter((t) => !planSafe(t)).map((t) => t.manifest.name);
+        dispatch({
+          t: "notice",
+          level: "info",
+          text: `tools · ${builtins.length} built-in + subagent${mcp.length ? ` + ${mcp.length} MCP` : ""} (all offered in Build; only the Plan-safe ones in Plan)`,
+        });
+        dispatch({ t: "notice", level: "info", text: `Plan + Build: ${inPlan.join(" ")}` });
+        dispatch({ t: "notice", level: "info", text: `Build only: ${buildOnly.join(" ")}` });
+        if (mcp.length > 0) {
+          dispatch({
+            t: "notice",
+            level: "info",
+            text: `mcp: ${mcp.map((t) => t.manifest.name).join(" ")}`,
+          });
+        }
+        break;
+      }
       case "/model":
         if (arg) {
           modelRef.current = arg;
@@ -904,6 +992,27 @@ export function App(deps: AppDeps): ReactNode {
       return;
     }
 
+    // Expand/collapse the LIVE subagent wave so you can SEE what the children are doing (the user's ask):
+    // Ctrl+O toggles anytime; ↓ expands / ↑ collapses when no overlay owns the arrows. View-only, safe mid-run.
+    const hasRunningSubagent = state.transcript.some(
+      (t) => t.kind === "subagent" && t.status === "running",
+    );
+    if (hasRunningSubagent && key.ctrl && ch === "o") {
+      setSubagentExpanded((v) => !v);
+      return;
+    }
+    // Use the REFS (not the possibly-stale useState values) for overlay precedence — parity with the
+    // approval/question/picker handlers below, so a just-opened overlay can never lose an arrow to this.
+    const arrowsFree =
+      !approvalResolver.current &&
+      !questionRef.current &&
+      pickerRef.current === null &&
+      !inputRef.current.startsWith("/");
+    if (hasRunningSubagent && arrowsFree && (key.downArrow || key.upArrow)) {
+      setSubagentExpanded(key.downArrow === true);
+      return;
+    }
+
     // Ctrl+V pastes an image from the clipboard (macOS) — attach it to the next message.
     if (key.ctrl && ch === "v") {
       void captureImage();
@@ -1084,8 +1193,14 @@ export function App(deps: AppDeps): ReactNode {
       if (busyRef.current) {
         if (cancellingRef.current) return;
         if (!task && !hasAttach) return;
-        queueRef.current = [...queueRef.current, { text: task, attachments: attach }];
-        setQueued(queueRef.current.map((q) => q.text));
+        // Text-only → STEER the running agent (injected at its next turn boundary). With an attachment →
+        // queue a follow-up RUN (images need the full run setup and can't be injected mid-conversation).
+        if (task && !hasAttach) {
+          steerRef.current = [...steerRef.current, task];
+        } else {
+          queueRef.current = [...queueRef.current, { text: task, attachments: attach }];
+        }
+        setQueued([...steerRef.current, ...queueRef.current.map((q) => q.text)]);
         setAttachments([]);
         setBuffer("");
       } else {
@@ -1104,10 +1219,12 @@ export function App(deps: AppDeps): ReactNode {
       setBuffer(inputRef.current.slice(0, -1));
       return;
     }
-    // A MULTI-char burst that is a single image PATH (drag-drop / paste) attaches the file instead of typing it.
-    // If the read FAILS, fall back to inserting the burst as text so a paste is NEVER silently lost.
-    if (ch && ch.length > 1 && !key.ctrl && !key.meta && looksLikeImagePath(ch)) {
-      const burst = ch;
+    // A MULTI-char burst (a paste / drag-drop). Normalize it FIRST — strip bracketed-paste markers + stray
+    // control bytes and normalize newlines — so markers never leak into the buffer and a dropped path is
+    // still recognized once its wrapping markers are gone.
+    const burst = ch && ch.length > 1 ? normalizePastedText(ch) : ch;
+    // A single-line image PATH attaches the file instead of typing it; on a failed read, fall back to text.
+    if (burst && burst.length > 1 && !key.ctrl && !key.meta && looksLikeImagePath(burst)) {
       void attachImageFile(burst, "drag").then((res) => {
         if (res.ok) addAttachment(res.attachment);
         else {
@@ -1117,7 +1234,7 @@ export function App(deps: AppDeps): ReactNode {
       });
       return;
     }
-    if (ch && !key.ctrl && !key.meta) setBuffer(inputRef.current + ch);
+    if (burst && !key.ctrl && !key.meta) setBuffer(inputRef.current + burst);
   });
 
   function finishApproval(decision: ApprovalDecision): void {
@@ -1147,69 +1264,75 @@ export function App(deps: AppDeps): ReactNode {
   const phaseElapsed =
     runActive && phaseStartRef.current ? (Date.now() - phaseStartRef.current) / 1000 : 0;
   const readyCount = fleet ? fleet.filter((r) => r.avail === "ready").length : undefined;
+  // Split the transcript into a SETTLED prefix (committed ONCE to terminal scrollback via <Static>) and the
+  // LIVE tail (re-rendered until it settles). Splitting at the FIRST unsettled item keeps <Static> strictly
+  // append-only even when parallel tools settle out of order — Static must never see an item re-ordered.
+  const firstLive = state.transcript.findIndex((it) => !isSettled(it));
+  const settledCount = firstLive < 0 ? state.transcript.length : firstLive;
+  const settledItems = state.transcript.slice(0, settledCount);
+  const liveItems = state.transcript.slice(settledCount);
+  const interior = Math.max(1, width - 2);
+  // Visible queue rows — a rows-derived budget so the always-on panel stack stays under the screen height.
+  const qMax = Math.min(5, Math.max(1, rows - 20));
 
   return (
-    <Box flexDirection="column" width={width} height={rows} paddingX={1}>
-      {/* SPLASH: banner at top, a spacer pushes the input to the bottom (fills the window).
-          RUNNING: the transcript fills the space above the composer and is BOTTOM-anchored (justifyContent
-          flex-end) — the newest line sits just above the input like a normal terminal chat, empty space is
-          at the TOP (room for scrollback), and the composer + flightline stay pinned to the bottom. */}
-      {onSplash ? (
-        <>
-          <Banner
-            width={width}
-            fleet={readyCount !== undefined ? { ready: readyCount } : undefined}
-          />
-          <Box flexGrow={1} />
-        </>
-      ) : (
-        <Box
-          flexDirection="column"
-          // ALWAYS grow so the composer + flightline (and any open picker) stay pinned to the BOTTOM with the
-          // empty space at the top — never jam to the top with a void below. When a picker is open the transcript
-          // YIELDS its space (flexShrink 1 + overflow hidden) to the picker panel (which is flexShrink 0 below),
-          // so the overlay keeps its full height and the whole stack sits at the bottom.
-          flexGrow={1}
-          flexShrink={1}
-          justifyContent="flex-end"
-          overflow="hidden"
-        >
-          {/* When the conversation is SPARSE and IDLE, a dim brand watermark fills the empty upper region so the
-              screen reads as a deliberate home, not a blank void. Hidden during an ACTIVE run so it never
-              competes with the spinning-globe activity line for the eye (user: "the globe is in a weird
-              place") — the empty space above the bottom-anchored transcript is normal terminal chat. */}
-          {state.transcript.length <= 3 && !picker && !runActive ? (
-            <Box flexGrow={1} flexShrink={1} alignItems="center" justifyContent="center">
-              <Watermark />
-            </Box>
-          ) : null}
-          <Transcript items={state.transcript} window={Math.max(4, rows - 9)} width={width} />
-        </Box>
-      )}
+    // NATURAL height (no fixed height): the dynamic tree renders at its TRUE size, which stays below the
+    // terminal height — so Ink never takes its over-height branch (which writes CSI 3J and erases the real
+    // scrollback). Overlays (skills/approval) are sized to fit; the one unbounded grower, a STREAMING answer,
+    // is line-capped in TranscriptRow (its full text commits to <Static> when it finalizes).
+    <Box flexDirection="column" width={width} paddingX={1}>
+      {/* SETTLED turns print ONCE into the terminal's REAL scrollback via <Static> — scroll up (trackpad/
+          wheel) to see history. Never re-rendered, so each turn commits cleanly instead of repainting. */}
+      <Static items={settledItems}>
+        {(item) => <TranscriptRow key={item.id} item={item} width={interior} />}
+      </Static>
 
-      {/* Optional middle panels — allowed to SHRINK + clip during a run so they can never push the composer/
-          status below the viewport on a short terminal (those are pinned with flexShrink={0} below). BUT when a
-          picker/overlay is open it must keep its FULL height (flexShrink 0) — the transcript above yields instead,
-          so the overlay isn't clipped and the composer stays pinned to the bottom. */}
-      <Box flexDirection="column" flexShrink={picker ? 0 : 1} overflow="hidden">
+      {/* Idle home: the brand banner (scrolls into history once the conversation starts). */}
+      {onSplash ? (
+        <Banner
+          width={width}
+          fleet={readyCount !== undefined ? { ready: readyCount } : undefined}
+        />
+      ) : null}
+
+      {/* The LIVE tail — the current turn's in-flight items (a streaming answer is line-capped while live). */}
+      {liveItems.length > 0 ? (
+        <Transcript items={liveItems} width={interior} subagentExpanded={subagentExpanded} />
+      ) : null}
+
+      {/* Middle panels: goal, plan, live reasoning, the activity flightline, the queue, and any open picker. */}
+      <Box flexDirection="column">
         <Goal goal={state.goal} plan={state.plan} running={state.status.running} />
-        <Plan tasks={state.plan} max={Math.max(3, rows - 12)} />
-        <Thinking text={state.thinking} show={state.showThinking} width={width} />
+        {/* Cap the plan SMALL (windowed around the active step) so the live region can't approach the terminal
+            height — which would make Ink full-clear every frame (the "strobe" + it erases native scrollback). */}
+        <Plan tasks={state.plan} max={Math.min(9, Math.max(3, rows - 14))} />
+        <Thinking
+          text={state.thinking}
+          show={state.showThinking}
+          width={width}
+          maxLines={Math.min(6, Math.max(1, rows - 18))}
+        />
         <ActivityLine
           activity={state.status.activity}
           elapsed={elapsed}
           phaseElapsed={phaseElapsed}
           frame={tick}
           width={width}
+          effort={state.status.resolvedEffort}
         />
+        {/* The queue/steer panel — labelled + count (the user: "I can't even see the queue"). Its visible
+            rows are capped to a rows-budget (qMax) so the always-on stack can't grow past the screen. */}
         {queued.length > 0 ? (
           <Box flexDirection="column" marginTop={1}>
-            {queued.slice(0, 3).map((q, i) => (
+            <Text color={AmbientTheme.signal}>
+              {`↳ ${queued.length} queued — the agent picks ${queued.length === 1 ? "it" : "them"} up next`}
+            </Text>
+            {queued.slice(0, qMax).map((q, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: queue order is stable within a render
-              <Text key={i} color={AmbientTheme.dim}>{`  ⤴ ${q}`}</Text>
+              <Text key={i} color={AmbientTheme.dim} wrap="truncate-end">{`   • ${q}`}</Text>
             ))}
-            {queued.length > 3 ? (
-              <Text color={AmbientTheme.dim}>{`  ⤴ … ${queued.length - 3} more queued`}</Text>
+            {queued.length > qMax ? (
+              <Text color={AmbientTheme.dim}>{`   • … ${queued.length - qMax} more`}</Text>
             ) : null}
           </Box>
         ) : null}

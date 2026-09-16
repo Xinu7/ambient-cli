@@ -90,6 +90,9 @@ export const EventSchema = z.discriminatedUnion("kind", [
     attachments: z.array(AttachmentRefSchema).optional(),
   }),
   tev("turn.finished", { stopReason: StopReasonSchema }),
+  // A mid-run STEER: a user message injected into the RUNNING conversation (the user redirected the agent
+  // without cancelling). Durable so a resumed session reconstructs the full conversation.
+  tev("steer", { text: z.string() }),
   // How an attached image was handled: seen NATIVELY by a vision model, DESCRIBED via a relay vision model,
   // or degraded (no vision model / cold / failed). Drives a single calm UI line; never carries image bytes.
   tev("vision.relay", {
@@ -151,6 +154,9 @@ export const EventSchema = z.discriminatedUnion("kind", [
     finishReason: z.string().optional(),
     promptTokens: z.number().int().nonnegative().optional(),
     completionTokens: z.number().int().nonnegative().optional(),
+    /** The reasoning effort actually SENT for this attempt (resolved per served model) — drives the live
+     *  "Thinking · high" readout so the user sees the effort behind an `auto` setting. */
+    effort: z.enum(["low", "medium", "high"]).optional(),
     empty: z.boolean(),
     truncated: z.boolean(),
   }),

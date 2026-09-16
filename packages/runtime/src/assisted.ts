@@ -175,5 +175,11 @@ export function parseAssistedResponse(text: string): AssistedParse {
 /** Strip the action envelope(s) from the reply so the user sees only the model's reasoning text. */
 export function stripActionBlock(text: string): string {
   // Remove complete fences first, then any dangling UNTERMINATED open fence through EOF.
-  return text.replace(FENCE_RE_G, "").replace(OPEN_FENCE_RE, "").trim();
+  const stripped = text.replace(FENCE_RE_G, "").replace(OPEN_FENCE_RE, "").trim();
+  // A weak model may emit a BARE action object with NO fence as its entire reply (`{"tool":…,"args":{…}}`).
+  // That is an attempted tool call, not prose — never surface it as a finished answer (it would leak raw
+  // protocol JSON, the "wall of {"command":…}" the user saw). We still don't EXECUTE an unfenced block
+  // (parseAssistedResponse nudges the model to re-emit with the fence); we only refuse to DISPLAY it.
+  if (looksLikeBareAction(stripped)) return "";
+  return stripped;
 }
