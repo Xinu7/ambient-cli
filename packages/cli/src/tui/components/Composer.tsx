@@ -1,7 +1,14 @@
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
 import { clampCursor, composerTextWidth, layoutRows, offsetToRowCol } from "../editor.js";
+import type { AgentMode } from "../state.js";
 import { AmbientTheme } from "../theme.js";
+
+/** Mode → colour for the composer's border tint + label pill. Matches the StatusLine: PLAN calm (gray),
+ *  BUILD active (signal blue). Reverse-video makes the pill read big regardless. */
+function modeColor(m: AgentMode): string {
+  return m === "plan" ? AmbientTheme.dim : AmbientTheme.signal;
+}
 
 /**
  * The input box — ALWAYS visible (idle and in-flight), so there's never any doubt where you type.
@@ -127,9 +134,11 @@ export function Composer({
   cursor = value.length,
   running,
   width,
+  agentMode = "build",
   maxRows = MIN_INPUT_ROWS,
   planReady = false,
   planReview = false,
+  planReviewSteps = 0,
   attachments = [],
 }: {
   value: string;
@@ -137,6 +146,8 @@ export function Composer({
   cursor?: number;
   running: boolean;
   width: number;
+  /** PLAN vs BUILD — tints the composer border + shows a mode pill so you always know where you are. */
+  agentMode?: AgentMode;
   /** How many rows of content the composer may show — the App raises this when there's free vertical space
    *  (a fresh screen) so a big paste expands; it stays at the floor while running / on a short terminal. */
   maxRows?: number;
@@ -144,6 +155,8 @@ export function Composer({
   planReady?: boolean;
   /** PLAN mode just produced a plan and is waiting for the user → Enter approves & builds; typing revises. */
   planReview?: boolean;
+  /** How many undone steps the ready plan has (shown in the plan-review header). */
+  planReviewSteps?: number;
   /** Pending image attachments shown as chips above the input (Ctrl+V / drag-drop / /attach). */
   attachments?: { bytes: number }[];
 }): ReactNode {
@@ -174,7 +187,36 @@ export function Composer({
           </Text>
         </Box>
       ) : null}
-      <Box borderStyle="round" borderColor={AmbientTheme.dim} paddingX={1} width={boxW}>
+      {/* The label on the input frame + its border colour. In plan-review it's the SINGLE approve/revise
+          prompt (a signal "◆ PLAN READY" header + signal border — no second overlapping banner); otherwise a
+          bold reverse-video mode pill so PLAN vs BUILD is unmistakable where you type. */}
+      {planReview ? (
+        <Box paddingX={1} width={boxW}>
+          <Text wrap="truncate-end">
+            <Text
+              color={AmbientTheme.signal}
+              bold
+            >{`◆ PLAN READY (${planReviewSteps} step${planReviewSteps === 1 ? "" : "s"})`}</Text>
+            <Text color={AmbientTheme.dim}>{"  ·  "}</Text>
+            <Text color={AmbientTheme.fg}>↵ approve & build</Text>
+            <Text color={AmbientTheme.dim}>{"  ·  type to revise  ·  tab keeps planning"}</Text>
+          </Text>
+        </Box>
+      ) : (
+        <Box paddingX={1}>
+          <Text
+            color={modeColor(agentMode)}
+            inverse
+            bold
+          >{` ${agentMode === "plan" ? "PLAN" : "BUILD"} `}</Text>
+        </Box>
+      )}
+      <Box
+        borderStyle="round"
+        borderColor={planReview ? AmbientTheme.signal : modeColor(agentMode)}
+        paddingX={1}
+        width={boxW}
+      >
         {/* the prompt ▸ is dim chrome; the signal ▋ caret is the one live mark. When empty the caret leads the
             placeholder; while typing the input WRAPS (grows down, up to `rows`) so you can READ the whole
             message you're sending — never truncated off the right edge ("I can't read what I am sending"). */}

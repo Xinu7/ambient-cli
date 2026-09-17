@@ -71,6 +71,8 @@ interface Seg {
   t: string;
   color?: string;
   bold?: boolean;
+  /** Reverse-video (swap fg/bg) — used for the PLAN/BUILD mode pill so the mode reads big + unmistakable. */
+  inverse?: boolean;
 }
 
 function segWidth(segs: Seg[]): number {
@@ -139,8 +141,9 @@ export function StatusLine({
   const rowW = Math.max(0, Math.min(width - 2, 120));
 
   const head: Seg[] = [
-    // mode not bold (its color distinguishes PLAN/BUILD); double-space grouping throughout (one delimiter system).
-    { t: mode.label, color: mode.color },
+    // Mode is a bold REVERSE-VIDEO pill so PLAN/BUILD reads big + unmistakable (founder: "make it more clear
+    // what mode I'm in"). Colour still carries the calm(PLAN)/active(BUILD) distinction.
+    { t: ` ${mode.label} `, color: mode.color, inverse: true, bold: true },
     { t: "  ", color: dim },
     { t: perm.label, color: perm.color },
     { t: "  ", color: dim },
@@ -178,7 +181,7 @@ export function StatusLine({
       <Text>
         {segs.map((s, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: a per-render segment list never reorders
-          <Text key={i} color={s.color} bold={s.bold}>
+          <Text key={i} color={s.color} bold={s.bold} inverse={s.inverse}>
             {s.t}
           </Text>
         ))}

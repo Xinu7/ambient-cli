@@ -54,7 +54,6 @@ import { EffortPicker } from "./components/EffortPicker.js";
 import { Goal } from "./components/Goal.js";
 import { ModelPicker } from "./components/ModelPicker.js";
 import { Plan } from "./components/Plan.js";
-import { PLAN_REVIEW_ROWS, PlanReview } from "./components/PlanReview.js";
 import { Question, type QuestionState } from "./components/Question.js";
 import { type SkillRow, SkillsBrowser } from "./components/SkillsBrowser.js";
 import {
@@ -680,7 +679,7 @@ export function App(deps: AppDeps): ReactNode {
         }
         setQuestion(null);
         cancellingRef.current = false;
-        // A PLAN-mode run that produced a plan: arm the review state so the prominent PlanReview banner shows
+        // A PLAN-mode run that produced a plan: arm the review state so the composer shows the approve prompt
         // (the main "it's done, your move" signal); this scrollback notice records the same two choices.
         if (agentModeRef.current === "plan" && planRef.current.some((t) => t.status !== "done")) {
           setPlanReview(true);
@@ -1507,15 +1506,7 @@ export function App(deps: AppDeps): ReactNode {
             <Goal goal={state.goal} plan={state.plan} running={state.status.running} />
             {/* Cap the plan SMALL (windowed around the active step) so the live region can't approach the terminal
             height — which would make Ink full-clear every frame (the "strobe" + it erases native scrollback). */}
-            {/* When the plan-review banner shows it adds PLAN_REVIEW_ROWS to the stack — subtract them from the
-            plan panel's budget so the idle stack can't reach the terminal height (the CSI-3J strobe). */}
-            <Plan
-              tasks={state.plan}
-              max={Math.min(
-                9,
-                Math.max(3, rows - 14 - (planAwaitingReview ? PLAN_REVIEW_ROWS : 0)),
-              )}
-            />
+            <Plan tasks={state.plan} max={Math.min(9, Math.max(3, rows - 14))} />
             <Thinking
               text={state.thinking}
               show={state.showThinking}
@@ -1608,28 +1599,24 @@ export function App(deps: AppDeps): ReactNode {
                 maxPreview={Math.max(0, Math.min(14, rows - 21))}
               />
             ) : (
-              <>
-                {planAwaitingReview ? (
-                  <PlanReview
-                    steps={state.plan.filter((t) => t.status !== "done").length}
-                    width={width}
-                  />
-                ) : null}
-                <Composer
-                  value={input}
-                  cursor={cursor}
-                  running={runActive}
-                  width={width}
-                  maxRows={composerMaxRows}
-                  attachments={attachments}
-                  planReview={planAwaitingReview}
-                  planReady={
-                    !runActive &&
-                    state.status.agentMode === "build" &&
-                    state.plan.some((t) => t.status !== "done")
-                  }
-                />
-              </>
+              // The composer IS the single plan-review surface (one clear prompt, no second overlapping
+              // banner): in plan-review it shows a "PLAN READY" header + a signal border; Enter approves.
+              <Composer
+                value={input}
+                cursor={cursor}
+                running={runActive}
+                width={width}
+                agentMode={state.status.agentMode}
+                maxRows={composerMaxRows}
+                attachments={attachments}
+                planReview={planAwaitingReview}
+                planReviewSteps={state.plan.filter((t) => t.status !== "done").length}
+                planReady={
+                  !runActive &&
+                  state.status.agentMode === "build" &&
+                  state.plan.some((t) => t.status !== "done")
+                }
+              />
             )}
           </Box>
           <Box flexShrink={0}>
