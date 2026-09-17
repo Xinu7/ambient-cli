@@ -73,9 +73,11 @@ describe("/goal — set → shows in the UI → reaches the run → persists", (
     for (const ch of "/goal ship the CSV export") stdin.write(ch);
     await settle(30);
     stdin.write("\r");
-    // The pinned goal line shows the objective.
-    const withGoal = await waitFor(lastFrame, "ship the CSV export");
-    expect(withGoal).toContain("◎");
+    // Wait for the goal to actually be SET — the ◎ pin marker only appears after Enter processes the
+    // command (waiting for the objective text alone would match it while it's still in the composer input,
+    // before submit — a race React's render timing can expose).
+    const withGoal = await waitFor(lastFrame, "◎");
+    expect(withGoal).toContain("ship the CSV export");
 
     // Run a task — the goal must be pinned in the system prompt the model receives.
     for (const ch of "do it") stdin.write(ch);

@@ -156,4 +156,36 @@ describe("TUI session continuity (one session per launch, prior turns remembered
 
     unmount();
   });
+
+  it("renders a full turn under Ink 7 / React 19 — the answer stays visible and the composer follows it", async () => {
+    // A post-migration smoke check: the committed answer stays on screen (in <Static>) and the composer is
+    // rendered after it. (This asserts the natural inline layout, NOT a bottom-anchor — ink-testing-library
+    // runs Ink in debug mode, so it can't exercise the interactive CSI-3J/overflow path anyway.)
+    const chat: ChatClient["chat"] = async () => ({ content: "VISIBLE-ANSWER", toolCalls: [] });
+    const client = { fetchCatalog: async () => catalog, chat } as unknown as ChatClient;
+    const { lastFrame, stdin, unmount } = render(
+      <App
+        client={client}
+        makeWriter={(id: string) => new SessionWriter(id, () => new Date().toISOString())}
+        agentMode="build"
+        permission="bypass"
+        effort="auto"
+        requestedModel="vendor/m"
+        maxTurns={30}
+        cwd="/w"
+        workspaceRoot="/w"
+      />,
+    );
+    await settle(40);
+    for (const ch of "hi") stdin.write(ch);
+    await settle(30);
+    stdin.write("\r");
+    await waitFor(lastFrame, "VISIBLE-ANSWER");
+    const frame = lastFrame() ?? "";
+    // The bottom spacer must NOT scroll the just-finished answer off-screen (the earlier full-height attempt
+    // did exactly that — "flashed then went away"). The answer stays visible AND the composer is still shown.
+    expect(frame).toContain("VISIBLE-ANSWER");
+    expect(frame).toContain("Describe a coding task");
+    unmount();
+  });
 });

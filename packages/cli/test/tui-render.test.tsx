@@ -258,6 +258,25 @@ describe("tui render", () => {
     settled.unmount();
   });
 
+  it("caps a STREAMING answer to the ROWS-RELATIVE maxStreamLines (so panels+stream can't overflow -> CSI-3J)", () => {
+    const text = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join("\n");
+    // On a short terminal (or with panels up) the App passes a small maxStreamLines; the streamed preview must
+    // shrink to it so the live region stays under the viewport height (Ink 7 still erases scrollback on overflow).
+    const { lastFrame, unmount } = render(
+      <Transcript
+        items={[{ kind: "assistant", id: "a", text, streaming: true, spin: 0 }]}
+        width={80}
+        maxStreamLines={5}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    const lines = frame.split("\n").filter((l) => l.trim().length > 0);
+    expect(lines.length).toBeLessThanOrEqual(7); // ~5 streamed lines + the elision/spinner chrome
+    expect(frame).toContain("line 40"); // the most recent line stays visible
+    expect(frame).not.toContain("line 30"); // …older lines are trimmed to keep the region bounded
+    unmount();
+  });
+
   it("hardWrap never splits a surrogate pair (emoji) into lone surrogates (Phase-1 review #1)", () => {
     const out = hardWrap("🔥".repeat(10), 8); // 10 code points > 8 → forced break
     // content preserved (no garbled �), and the break landed on a code-point boundary

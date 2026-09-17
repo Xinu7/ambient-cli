@@ -17,6 +17,7 @@ import {
 } from "@amb/runtime";
 import {
   type SessionWriter,
+  parsePlanTasks,
   readObject,
   readSession,
   reconstructTranscript,
@@ -515,9 +516,25 @@ export function App(deps: AppDeps): ReactNode {
         const emit = createDurableEventSink({
           writer,
           consume: (ev: NewEvent) => {
-            // A goal.set emitted mid-run (propose_goal_update, user-approved) is already persisted by this
-            // sink — mark it so the next run-start doesn't re-append the same goal.
-            if (ev.kind === "goal.set") persistedGoalRef.current = ev.text;
+            // A goal.set emitted mid-run (propose_goal_update, user-approved) is persisted by this sink.
+            // Mirror it SYNCHRONOUSLY onto BOTH refs: the run-completion handler + a drained follow-up run
+            // read goalRef/persistedGoalRef the instant the run ends, and the useEffect that mirrors state.goal
+            // can lag a frame (React batching), which would silently revert the north-star into the durable
+            // log. Apply the SAME transform the reducer's setGoal uses (trim + cap) so the refs never diverge
+            // from state.goal and the run-start guard doesn't re-append a spurious goal.set.
+            if (ev.kind === "goal.set") {
+              const g = ev.text.trim().slice(0, MAX_GOAL_CHARS);
+              goalRef.current = g;
+              persistedGoalRef.current = g;
+            }
+            // Sync planRef SYNCHRONOUSLY as the model records/updates its plan. The run-completion handler
+            // reads planRef the instant the run ends to decide whether to arm the review banner; the
+            // useEffect that mirrors state.plan can lag a frame under React's batching, which would miss a
+            // just-produced plan (parsePlanTasks is the SAME parser the reducer uses, so they never diverge).
+            if (ev.kind === "tool.proposed" && ev.toolName === "plan") {
+              const parsed = parsePlanTasks(ev.args);
+              if (parsed) planRef.current = parsed;
+            }
             dispatch({ t: "event", ev });
           },
           onWriteError: () => {
@@ -1357,12 +1374,27 @@ export function App(deps: AppDeps): ReactNode {
     (attachments.length > 0 ? 1 : 0) + // the attachment chip
     9; // status + hint + border + margins + a safety cushion so the whole stack stays under `rows`
   const composerMaxRows = composerCanGrow ? Math.max(6, rows - composerReserve) : 6;
+  // Cap the STREAMING answer's on-screen height so the live region (streaming + panels + footer) can never
+  // exceed the terminal height — Ink 7 STILL writes CSI 2J+3J (erasing native scrollback) on overflow; its
+  // synchronized-output only makes that atomic, not harmless. Reserve the worst-case panel stack + footer;
+  // over-reserving is SAFE — it only trims the streamed PREVIEW (the full answer commits to <Static> the
+  // instant it finalizes). Rows-relative so a short terminal caps tighter.
+  const panelReserve =
+    (state.plan.length > 0 ? 11 : 0) + // Plan panel (rows-capped ~9 + header/margin)
+    (state.showThinking ? 7 : 0) + // reasoning panel (rows-capped ~6 + margin)
+    (queued.length > 0 ? 7 : 0) + // queue panel (rows-capped ~5 + header/margin)
+    2; // activity line + margin
+  const maxStreamLines = Math.max(3, rows - panelReserve - 11); // 11 ≈ composer + status + hint + margins
 
   return (
-    // NATURAL height (no fixed height): the dynamic tree renders at its TRUE size, which stays below the
-    // terminal height — so Ink never takes its over-height branch (which writes CSI 3J and erases the real
-    // scrollback). Settled turns commit to <Static> (real terminal scrollback) so they STAY visible where
-    // printed; the one unbounded grower, a STREAMING answer, is line-capped in TranscriptRow.
+    // NATURAL height (no fixed height): the dynamic (non-<Static>) tree renders at its TRUE size, kept UNDER
+    // the terminal height by the per-panel caps (plan/thinking/queue) + the streaming line-cap. Ink 7 still
+    // writes CSI 2J+3J (which erases native scrollback) when the dynamic frame OVERFLOWS the viewport — its
+    // synchronized-output wrapper only makes that atomic (no visible tearing), it does NOT stop the scrollback
+    // erase — so the invariant is: never let this tree exceed `rows`. That's also why we do NOT add a bottom
+    // spacer to pin the composer low: growing the dynamic region toward full height risks that overflow. The
+    // composer therefore floats after the content (settling at the bottom as the conversation fills the
+    // screen). Settled turns commit to <Static> (real terminal scrollback) so they STAY visible where printed.
     <Box flexDirection="column" width={width} paddingX={1}>
       {/* SETTLED turns print ONCE into the terminal's REAL scrollback via <Static> — scroll up (trackpad/
           wheel) to see history. Never re-rendered, so each turn commits cleanly instead of repainting. */}
@@ -1380,7 +1412,12 @@ export function App(deps: AppDeps): ReactNode {
 
       {/* The LIVE tail — the current turn's in-flight items (a streaming answer is line-capped while live). */}
       {liveItems.length > 0 ? (
-        <Transcript items={liveItems} width={interior} subagentExpanded={subagentExpanded} />
+        <Transcript
+          items={liveItems}
+          width={interior}
+          subagentExpanded={subagentExpanded}
+          maxStreamLines={maxStreamLines}
+        />
       ) : null}
 
       {/* Middle panels: goal, plan, live reasoning, the activity flightline, the queue, and any open picker. */}

@@ -107,7 +107,13 @@ export function TranscriptRow({
   item,
   width,
   subagentExpanded = false,
-}: { item: TranscriptItem; width: number; subagentExpanded?: boolean }): ReactNode {
+  maxStreamLines = STREAM_MAX_LINES,
+}: {
+  item: TranscriptItem;
+  width: number;
+  subagentExpanded?: boolean;
+  maxStreamLines?: number;
+}): ReactNode {
   switch (item.kind) {
     case "user": {
       // A multi-line paste is echoed as a labelled summary ("[pasted N lines] <first line>…") so the user can
@@ -144,9 +150,10 @@ export function TranscriptRow({
       const wrapped = hardWrap(item.text, width);
       let shown = wrapped;
       if (item.streaming) {
+        const cap = Math.max(3, maxStreamLines);
         const lines = wrapped.split("\n");
-        if (lines.length > STREAM_MAX_LINES) {
-          shown = `…\n${lines.slice(lines.length - STREAM_MAX_LINES).join("\n")}`;
+        if (lines.length > cap) {
+          shown = `…\n${lines.slice(lines.length - cap).join("\n")}`;
         }
       }
       return (
@@ -293,11 +300,13 @@ export function Transcript({
   window,
   width = 80,
   subagentExpanded = false,
+  maxStreamLines = STREAM_MAX_LINES,
 }: {
   items: TranscriptItem[];
   window?: number;
   width?: number;
   subagentExpanded?: boolean;
+  maxStreamLines?: number;
 }): ReactNode {
   const shown =
     window !== undefined && items.length > window ? items.slice(items.length - window) : items;
@@ -309,6 +318,7 @@ export function Transcript({
           item={item}
           width={width}
           subagentExpanded={subagentExpanded}
+          maxStreamLines={maxStreamLines}
         />
       ))}
     </Box>
