@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
+import { clampCursor, composerTextWidth, layoutRows, offsetToRowCol } from "../editor.js";
 import { AmbientTheme } from "../theme.js";
 
 /**
@@ -19,93 +20,111 @@ function kb(bytes: number): string {
  *  short terminal, so the live region never reaches the terminal height (the CSI-3J strobe + scrollback erase). */
 const MIN_INPUT_ROWS = 6;
 
-/**
- * Bound a long single-line value to at most `maxRows` wrapped rows by showing its TAIL (where the caret is —
- * what you're currently typing) prefixed with "…". A normal message fits whole; only a pathological one-liner
- * (a long pasted URL/JSON with no newlines) collapses — which keeps the composer legible AND bounded.
- */
-function boundInput(value: string, boxW: number, maxRows: number): string {
-  const usable = Math.max(8, boxW - 4); // "▸ " + caret + interior padding
-  const maxChars = maxRows * usable;
-  return value.length > maxChars ? `…${value.slice(-(maxChars - 1))}` : value;
-}
-
-function Line({
+/** One visual row of the editor. When `caretUnit` is set, the ▋ caret is drawn INLINE at that code-unit
+ *  offset within the row's text (splitting the run), so you can edit anywhere — not just at the end. */
+function Row({
   text,
   first,
-  caret,
-}: { text: string; first?: boolean; caret?: boolean }): ReactNode {
+  caretUnit,
+}: {
+  text: string;
+  first?: boolean;
+  caretUnit?: number;
+}): ReactNode {
+  const gutter = <Text color={AmbientTheme.dim}>{first ? "▸ " : "  "}</Text>;
+  if (caretUnit === undefined) {
+    return (
+      <Text wrap="truncate-end">
+        {gutter}
+        <Text color={AmbientTheme.fg}>{text}</Text>
+      </Text>
+    );
+  }
+  const at = Math.max(0, Math.min(caretUnit, text.length));
   return (
     <Text wrap="truncate-end">
-      <Text color={AmbientTheme.dim}>{first ? "▸ " : "  "}</Text>
-      <Text color={AmbientTheme.fg}>{text}</Text>
-      {caret ? <Text color={AmbientTheme.signal}>▋</Text> : null}
+      {gutter}
+      <Text color={AmbientTheme.fg}>{text.slice(0, at)}</Text>
+      <Text color={AmbientTheme.signal}>▋</Text>
+      <Text color={AmbientTheme.fg}>{text.slice(at)}</Text>
     </Text>
   );
 }
 
+/** Pick a window of `maxRows` visual rows around the caret, reserving one row for a "… N above/below" marker
+ *  on each truncated side. Guarantees the caret row is inside the window. */
+function pickWindow(
+  total: number,
+  caretRow: number,
+  maxRows: number,
+): { start: number; count: number; above: number; below: number } {
+  if (total <= maxRows) return { start: 0, count: total, above: 0, below: 0 };
+  const around = (budget: number): number => {
+    const b = Math.max(1, budget);
+    return Math.max(0, Math.min(caretRow - Math.floor(b / 2), total - b));
+  };
+  const guess = Math.max(1, maxRows - 2);
+  const s1 = around(guess);
+  const reserve = (s1 > 0 ? 1 : 0) + (s1 + guess < total ? 1 : 0);
+  const content = Math.max(1, maxRows - reserve);
+  const start = around(content);
+  return { start, count: content, above: start, below: total - (start + content) };
+}
+
 /**
- * Render a MULTI-LINE buffer (a paste, or text with newlines). It EXPANDS to use the height it's given:
- * - fits within `maxRows` → show the whole buffer (the box grows into the free space, like a normal input);
- * - taller but there's ROOM (maxRows grew past the floor) → show the HEAD of the paste + a "[pasted N lines]"
- *   count + the last line (where the caret is), filling the budget so you can actually SEE what you pasted;
- * - taller and space is TIGHT (a run is active / a short terminal) → a single clean "[pasted N lines]" chip
- *   plus a short trailing line, so it can never overflow. The full buffer is always what gets sent.
+ * Render the editable buffer as a WINDOW of visual rows around the caret (not a "[pasted N lines]" chip), with
+ * the ▋ caret drawn inline at the cursor — so a large paste can be arrowed through and edited in place. The box
+ * grows up to `maxRows`; beyond that it scrolls the window and shows "… N above/below" markers.
  */
-function MultilineValue({
+function EditorView({
   value,
-  boxW,
+  cursor,
+  width,
   maxRows,
 }: {
   value: string;
-  boxW: number;
+  cursor: number;
+  width: number;
   maxRows: number;
 }): ReactNode {
-  const lines = value.replace(/\n+$/, "").split("\n"); // ignore trailing blank lines in the count/preview
-  if (lines.length <= maxRows) {
-    return (
-      <Box flexDirection="column">
-        {lines.map((ln, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: line list within one render never reorders
-          <Line key={i} text={ln} first={i === 0} caret={i === lines.length - 1} />
-        ))}
-      </Box>
-    );
-  }
-  const tail = lines[lines.length - 1] ?? "";
-  // ROOM to expand → show the head of the paste + a count + the caret line (fills the free space).
-  if (maxRows > MIN_INPUT_ROWS) {
-    const headCount = Math.max(1, maxRows - 2);
-    return (
-      <Box flexDirection="column">
-        {lines.slice(0, headCount).map((ln, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: line list within one render never reorders
-          <Line key={i} text={ln} first={i === 0} />
-        ))}
-        <Text wrap="truncate-end" color={AmbientTheme.cyan}>
-          {`  … [pasted ${lines.length} lines — showing first ${headCount}]`}
-        </Text>
-        <Line text={tail} caret />
-      </Box>
-    );
-  }
-  // TIGHT → a single clean chip; a SHORT trailing line (typed prose) still shows so it can never overflow.
-  const shortTail = tail.trim();
-  const showTail = shortTail.length > 0 && shortTail.length <= Math.max(8, boxW - 6);
+  const usable = composerTextWidth(width);
+  const rows = layoutRows(value, usable);
+  const caret = clampCursor(value, cursor);
+  const { row: caretRow } = offsetToRowCol(rows, caret);
+  const { start, count, above, below } = pickWindow(rows.length, caretRow, maxRows);
+  const shown = rows.slice(start, start + count);
   return (
     <Box flexDirection="column">
-      <Text wrap="truncate-end">
-        <Text color={AmbientTheme.dim}>▸ </Text>
-        <Text color={AmbientTheme.cyan}>{`[pasted ${lines.length} lines]`}</Text>
-        {showTail ? null : <Text color={AmbientTheme.signal}>{" ▋"}</Text>}
-      </Text>
-      {showTail ? <Line text={shortTail} caret /> : null}
+      {above > 0 ? (
+        <Text
+          color={AmbientTheme.cyan}
+          wrap="truncate-end"
+        >{`  … ${above} more line${above === 1 ? "" : "s"} above`}</Text>
+      ) : null}
+      {shown.map((r, i) => {
+        const idx = start + i;
+        return (
+          <Row
+            key={r.startOffset}
+            text={r.text}
+            first={idx === 0}
+            caretUnit={idx === caretRow ? caret - r.startOffset : undefined}
+          />
+        );
+      })}
+      {below > 0 ? (
+        <Text
+          color={AmbientTheme.cyan}
+          wrap="truncate-end"
+        >{`  … ${below} more line${below === 1 ? "" : "s"} below`}</Text>
+      ) : null}
     </Box>
   );
 }
 
 export function Composer({
   value,
+  cursor = value.length,
   running,
   width,
   maxRows = MIN_INPUT_ROWS,
@@ -114,6 +133,8 @@ export function Composer({
   attachments = [],
 }: {
   value: string;
+  /** Caret offset into `value` (composer editing). Defaults to end (back-compat for callers/tests). */
+  cursor?: number;
   running: boolean;
   width: number;
   /** How many rows of content the composer may show — the App raises this when there's free vertical space
@@ -163,15 +184,10 @@ export function Composer({
             <Text color={AmbientTheme.signal}>▋</Text>
             <Text color={AmbientTheme.dim}>{placeholder}</Text>
           </Text>
-        ) : value.includes("\n") ? (
-          // A paste / multi-line buffer — show it so it's never "lost off the right edge".
-          <MultilineValue value={value} boxW={boxW} maxRows={rows} />
         ) : (
-          <Text wrap="wrap">
-            <Text color={AmbientTheme.dim}>▸ </Text>
-            <Text color={AmbientTheme.fg}>{boundInput(value, boxW, rows)}</Text>
-            <Text color={AmbientTheme.signal}>▋</Text>
-          </Text>
+          // The editable buffer as a window of visual rows with the caret drawn inline — arrow-navigable +
+          // editable anywhere, single-line or a big multi-line paste.
+          <EditorView value={value} cursor={cursor} width={width} maxRows={rows} />
         )}
       </Box>
       <Box paddingX={1}>
