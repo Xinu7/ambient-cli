@@ -13,7 +13,9 @@ export default defineConfig({
   define: { __AMB_VERSION__: JSON.stringify(version) },
   // Bundle the workspace packages + pure-JS deps into one self-contained `amb` file. React/Ink stay
   // external (installed in node_modules) — they use conditional exports that don't bundle cleanly.
-  noExternal: [/^@amb\//, "zod"],
+  // string-width (and its deps) are pure JS and MUST be bundled — they aren't declared in the published
+  // manifest, so leaving them external would break a global install.
+  noExternal: [/^@amb\//, "zod", "string-width"],
   // undici (web_fetch's IP-pinned dispatcher) stays external — it's CJS with `require("assert")` internals
   // that don't survive ESM bundling; loaded from node_modules at runtime like react/ink.
   external: [
