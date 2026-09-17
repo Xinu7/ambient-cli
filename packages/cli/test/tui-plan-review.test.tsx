@@ -107,11 +107,11 @@ describe("plan review — a prominent approve/revise prompt when a plan is ready
     stdin.write("\r");
 
     // ONE clear prompt on the composer (not two overlapping banners — the founder's "rendered terribly").
-    const banner = await waitFor(lastFrame, "PLAN READY");
+    const banner = await waitFor(lastFrame, "Plan ready");
     expect(banner).toContain("approve & build");
     expect(banner).toContain("revise");
     // Exactly one plan-review affordance — the separate bordered banner is gone, so "PLAN READY" appears once.
-    expect((banner.match(/PLAN READY/g) ?? []).length).toBe(1);
+    expect((banner.match(/Plan ready/g) ?? []).length).toBe(1);
 
     // Empty Enter APPROVES → flips to Build and executes the plan.
     stdin.write("\r");
@@ -156,7 +156,7 @@ describe("plan review — a prominent approve/revise prompt when a plan is ready
     for (const ch of "plan a change") stdin.write(ch);
     await settle(30);
     stdin.write("\r");
-    await waitFor(lastFrame, "PLAN READY");
+    await waitFor(lastFrame, "Plan ready");
 
     // Typing feedback + Enter revises — the run stays in PLAN mode and the current plan is pinned so the
     // agent reads it and adjusts (not a from-scratch replan, and it survives compaction).
@@ -199,7 +199,7 @@ describe("plan review — a prominent approve/revise prompt when a plan is ready
     for (const ch of "plan a change") stdin.write(ch);
     await settle(30);
     stdin.write("\r");
-    await waitFor(lastFrame, "PLAN READY");
+    await waitFor(lastFrame, "Plan ready");
 
     // /clear wipes the screen and starts a fresh session; the kept plan is now stale.
     for (const ch of "/clear") stdin.write(ch);
@@ -256,7 +256,7 @@ describe("plan review — a prominent approve/revise prompt when a plan is ready
     for (const ch of "plan a change") stdin.write(ch);
     await settle(30);
     stdin.write("\r");
-    await waitFor(lastFrame, "PLAN READY");
+    await waitFor(lastFrame, "Plan ready");
 
     // Attach an image while the plan-review prompt is up.
     for (const ch of `/attach ${pngPath}`) stdin.write(ch);
