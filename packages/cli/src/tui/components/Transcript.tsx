@@ -2,8 +2,10 @@ import { Box, Text } from "ink";
 import type { ReactNode } from "react";
 import { mmss } from "../format.js";
 import { globeFrame } from "../logo.js";
+import { renderMarkdown } from "../markdown.js";
 import type { TranscriptItem } from "../state.js";
 import { AmbientTheme } from "../theme.js";
+import { hardWrap } from "../wrap.js";
 
 /** Flatten newlines + truncate one line to `max` cols so nothing wraps the borderless column (Approval bar). */
 function clip(text: string, max: number): string {
@@ -12,23 +14,9 @@ function clip(text: string, max: number): string {
   return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
 }
 
-/**
- * Force a hard break inside any unbroken run longer than `width`. Ink's `wrap="wrap"` only breaks on
- * whitespace, so a long token with no spaces (a JSON blob, a long path/URL, a minified line) spills off the
- * right edge. Inserting a newline every `width` chars into such runs guarantees the line fits the terminal
- * while leaving normal prose (which has spaces) to wrap naturally.
- */
-export function hardWrap(text: string, width: number): string {
-  const w = Math.max(8, width);
-  return text.replace(new RegExp(`\\S{${w + 1},}`, "gu"), (run) => {
-    // Chunk by CODE POINTS (Array.from), never by UTF-16 code units, so a surrogate pair (emoji, non-BMP
-    // glyph) is never torn across the break into two lone surrogates (which render as garbage �).
-    const cps = Array.from(run);
-    const parts: string[] = [];
-    for (let i = 0; i < cps.length; i += w) parts.push(cps.slice(i, i + w).join(""));
-    return parts.join("\n");
-  });
-}
+// `hardWrap` moved to ../wrap.js (shared with the markdown renderer without a cycle); re-exported for callers
+// (and the render test) that import it from here.
+export { hardWrap };
 
 /** Cap an already-wrapped string to at most `n` lines with an honest elision — so a long error/output the user
  *  WANTS to read still wraps and stays readable, but a giant one can't grow the live region past the screen. */
@@ -142,25 +130,29 @@ export function TranscriptRow({
     }
 
     case "assistant": {
-      // Genuine prose — wrap it within the interior width, and hard-break any unbroken long token (a leaked
-      // JSON blob, a long URL/path) so it can never run off the right edge. While STREAMING, cap to the last
-      // N lines (the full text commits to <Static> on finalize) so the live region can't outgrow the screen.
+      // SETTLED prose renders as Markdown (bold/headers/lists/code/tables) so raw `**`/`#`/`|` never show.
+      // The LIVE streaming tail stays RAW (markers arrive unclosed mid-stream, and it commits to <Static> the
+      // instant it finalizes) — capped to the last N lines + hard-broken so the live region can't outgrow the
+      // screen. Each completed paragraph commits settled (splitCommittable) and thus renders Markdown as it goes.
+      if (!item.streaming) {
+        return (
+          <Box marginTop={1} width={width}>
+            {renderMarkdown(item.text, width)}
+          </Box>
+        );
+      }
       const wrapped = hardWrap(item.text, width);
       let shown = wrapped;
-      if (item.streaming) {
-        const cap = Math.max(3, maxStreamLines);
-        const lines = wrapped.split("\n");
-        if (lines.length > cap) {
-          shown = `…\n${lines.slice(lines.length - cap).join("\n")}`;
-        }
+      const cap = Math.max(3, maxStreamLines);
+      const lines = wrapped.split("\n");
+      if (lines.length > cap) {
+        shown = `…\n${lines.slice(lines.length - cap).join("\n")}`;
       }
       return (
         <Box marginTop={1} width={width}>
           <Text color={AmbientTheme.fg} wrap="wrap">
             {shown}
-            {item.streaming ? (
-              <Text color={AmbientTheme.cyan}>{` ${globeFrame(item.spin, true)}`}</Text>
-            ) : null}
+            <Text color={AmbientTheme.cyan}>{` ${globeFrame(item.spin, true)}`}</Text>
           </Text>
         </Box>
       );
