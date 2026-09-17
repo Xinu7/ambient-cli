@@ -18,9 +18,13 @@ describe("normalizePastedText (bracketed-paste + control-byte hygiene)", () => {
   it("normalizes CRLF and lone CR to LF", () => {
     expect(normalizePastedText("a\r\nb\rc")).toBe("a\nb\nc");
   });
-  it("drops stray control bytes and any lone ESC, but keeps \\n and \\t", () => {
-    expect(normalizePastedText("a\x07b\tc\nd")).toBe("ab\tc\nd");
+  it("drops stray control bytes and any lone ESC, keeps \\n, and expands \\t to spaces", () => {
+    expect(normalizePastedText("a\x07b\tc\nd")).toBe("ab  c\nd"); // tab → 2 spaces (exact width math)
     expect(normalizePastedText("x\x1by")).toBe("xy"); // lone ESC removed
+  });
+
+  it("expands tabs in a code paste so width/caret math matches the terminal", () => {
+    expect(normalizePastedText("\t\tif (x) {\n\t\t\treturn;")).toBe("    if (x) {\n      return;");
   });
   it("a drag-dropped path wrapped in paste markers survives as a clean path (still attach-detectable)", () => {
     const cleaned = normalizePastedText("\x1b[200~/Users/z/pic.png\x1b[201~");

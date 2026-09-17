@@ -18,8 +18,9 @@ export const EDITOR_GUTTER = 2;
 export function composerTextWidth(width: number): number {
   const boxW = Math.max(0, Math.min(width - 2, 120)); // mirrors Composer.tsx boxW
   // reserve paddingX (2), the "▸ " gutter, and ONE column for the caret so a full-width caret row never
-  // truncates the ▋ off the right edge.
-  return Math.max(8, boxW - 2 - EDITOR_GUTTER - 1);
+  // truncates the ▋ off the right edge. Floor at 1 (NOT a larger constant) so the caret reserve holds even on
+  // a pathologically narrow pane — a fixed floor of 8 would exceed the text area at boxW<13 and clip the caret.
+  return Math.max(1, boxW - 2 - EDITOR_GUTTER - 1);
 }
 
 /** Visual width of a string (wide CJK = 2, most emoji = 2, control/zero-width = 0). */

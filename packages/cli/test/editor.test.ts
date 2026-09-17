@@ -133,9 +133,15 @@ describe("editor — vertical + line motion", () => {
 });
 
 describe("editor — composerTextWidth", () => {
-  it("mirrors the composer box math and floors at 8", () => {
+  it("mirrors the composer box math and reserves paddingX + gutter + a caret column", () => {
     expect(composerTextWidth(80)).toBe(Math.min(80 - 2, 120) - 2 - 2 - 1); // paddingX + gutter + caret col
-    expect(composerTextWidth(10)).toBe(8); // tiny terminal floors at 8
     expect(composerTextWidth(400)).toBe(120 - 2 - 2 - 1); // caps at 120-wide box
+    // The caret-reserve invariant holds at EVERY width (usable + the ▋ column ≤ the box text area = boxW-4),
+    // including pathologically narrow panes where a fixed floor of 8 would have overflowed the caret.
+    for (let w = 4; w <= 40; w++) {
+      const boxW = Math.max(0, Math.min(w - 2, 120));
+      const textArea = Math.max(0, boxW - 4); // paddingX(2) + gutter(2)
+      expect(composerTextWidth(w) + 1).toBeLessThanOrEqual(Math.max(2, textArea));
+    }
   });
 });
