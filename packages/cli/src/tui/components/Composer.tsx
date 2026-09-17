@@ -32,11 +32,13 @@ function boundInput(value: string, boxW: number): string {
 }
 
 /**
- * Render a MULTI-LINE buffer (a paste, or text with newlines) so the user can actually SEE it — the old
- * single-line `truncate-start` showed only the tail, so a paste looked lost. Up to MAX_VISIBLE_LINES render
- * as a growing block; a larger paste collapses to a "[pasted N lines]" chip plus its tail (where the caret is).
+ * Render a MULTI-LINE buffer (a paste, or text with newlines). Up to MAX_VISIBLE_LINES render as a growing
+ * block so a small paste is fully readable; a LARGE paste collapses to a single clean "[pasted N lines]" chip
+ * — never a wall of truncated content, which looked broken. If the buffer's last line is SHORT (a message the
+ * user typed alongside the paste), it's shown cleanly below the chip so they can still read what they're
+ * adding; a long trailing line (more pasted code) is left to the chip. The full buffer is always what's sent.
  */
-function MultilineValue({ value }: { value: string }): ReactNode {
+function MultilineValue({ value, boxW }: { value: string; boxW: number }): ReactNode {
   const lines = value.replace(/\n+$/, "").split("\n"); // ignore trailing blank lines in the count/preview
   if (lines.length <= MAX_VISIBLE_LINES) {
     return (
@@ -52,20 +54,24 @@ function MultilineValue({ value }: { value: string }): ReactNode {
       </Box>
     );
   }
-  const firstShown = lines.find((l) => l.trim().length > 0) ?? lines[0] ?? "";
-  const tail = lines[lines.length - 1] ?? "";
+  // Only surface a trailing line when it's short enough to fit ON ONE ROW (i.e. typed prose, not more code) —
+  // so the composer can never render a truncated/overflowing content line for a big paste.
+  const tail = (lines[lines.length - 1] ?? "").trim();
+  const showTail = tail.length > 0 && tail.length <= Math.max(8, boxW - 6);
   return (
     <Box flexDirection="column">
       <Text wrap="truncate-end">
         <Text color={AmbientTheme.dim}>▸ </Text>
-        <Text color={AmbientTheme.cyan}>{`[pasted ${lines.length} lines] `}</Text>
-        <Text color={AmbientTheme.dim}>{firstShown}</Text>
+        <Text color={AmbientTheme.cyan}>{`[pasted ${lines.length} lines]`}</Text>
+        {showTail ? null : <Text color={AmbientTheme.signal}>{" ▋"}</Text>}
       </Text>
-      <Text wrap="truncate-start">
-        <Text color={AmbientTheme.dim}>{"  … "}</Text>
-        <Text color={AmbientTheme.fg}>{tail}</Text>
-        <Text color={AmbientTheme.signal}>▋</Text>
-      </Text>
+      {showTail ? (
+        <Text wrap="truncate-end">
+          <Text color={AmbientTheme.dim}>{"  "}</Text>
+          <Text color={AmbientTheme.fg}>{tail}</Text>
+          <Text color={AmbientTheme.signal}>{" ▋"}</Text>
+        </Text>
+      ) : null}
     </Box>
   );
 }
@@ -75,6 +81,7 @@ export function Composer({
   running,
   width,
   planReady = false,
+  planReview = false,
   attachments = [],
 }: {
   value: string;
@@ -82,15 +89,19 @@ export function Composer({
   width: number;
   /** BUILD mode with a saved plan and idle → Enter on an empty line executes the plan. */
   planReady?: boolean;
+  /** PLAN mode just produced a plan and is waiting for the user → Enter approves & builds; typing revises. */
+  planReview?: boolean;
   /** Pending image attachments shown as chips above the input (Ctrl+V / drag-drop / /attach). */
   attachments?: { bytes: number }[];
 }): ReactNode {
   const boxW = Math.max(0, Math.min(width - 2, 120));
   const placeholder = running
     ? "Steer the agent — type to redirect it, it picks it up next turn…"
-    : planReady
-      ? "Enter to build the plan · or describe a task · type / for commands"
-      : "Describe a coding task · type / for commands";
+    : planReview
+      ? "↵ approve the plan · or describe what to change to revise it…"
+      : planReady
+        ? "Enter to build the plan · or describe a task · type / for commands"
+        : "Describe a coding task · type / for commands";
   const hint = running
     ? "enter steers the agent · esc cancels"
     : "tab plan/build · shift+tab permission · enter runs · ctrl+c quits";
@@ -121,7 +132,7 @@ export function Composer({
           </Text>
         ) : value.includes("\n") ? (
           // A paste / multi-line buffer — show it so it's never "lost off the right edge".
-          <MultilineValue value={value} />
+          <MultilineValue value={value} boxW={boxW} />
         ) : (
           <Text wrap="wrap">
             <Text color={AmbientTheme.dim}>▸ </Text>

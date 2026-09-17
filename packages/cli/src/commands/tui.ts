@@ -23,7 +23,7 @@ export function parseArgs(args: string[], config: AmbConfig = {}): TuiArgs {
   let agentMode: AgentMode = axes.agentMode;
   let permission: Permission = axes.permission;
   let effort: Effort = config.effort ?? "auto";
-  let maxTurns = config.maxTurns ?? 30;
+  let maxTurns = config.maxTurns ?? 50;
   let noMcp = config.noMcp ?? false;
   let goal: string | undefined;
   let error: string | undefined;

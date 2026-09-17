@@ -116,7 +116,7 @@ describe("config precedence — config sets defaults, a flag overrides", () => {
     expect(a.effort).toBe("auto");
     expect(a.permission).toBe("ask");
     expect(a.agentMode).toBe("build");
-    expect(a.maxTurns).toBe(30);
+    expect(a.maxTurns).toBe(50); // a generous default so real multi-step builds/loops don't hit the cap
   });
 
   it("parses --goal (and -g) into a length-capped north-star", () => {

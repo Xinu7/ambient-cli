@@ -896,7 +896,7 @@ export function appendNotice(
   return pushItem(state, (id) => ({ kind: "notice", id, level, text }));
 }
 
-/** Clear the visible transcript + plan (the /clear slash command). Keeps the run status. */
+/** Clear the visible transcript (the /clear slash command). KEEPS the pinned plan + run status (see below). */
 export function clearTranscript(state: ViewState): ViewState {
   // Only wipe the visible scrollback — KEEP the pinned plan + the in-flight execution bookkeeping
   // (pending/active) so a mid-run /clear can't lose the plan or strand the activity verb.

@@ -49,11 +49,12 @@ afterEach(() => {
 });
 
 describe("TUI session continuity (one session per launch, prior turns remembered)", () => {
-  it("threads turn 1 into turn 2's context and writes ONE session log", async () => {
-    const systems: string[] = [];
+  it("carries turn 1's REAL messages into turn 2 (lossless), not a system reconstruction, and writes ONE log", async () => {
+    const calls: ChatParams[] = [];
     let turn = 0;
     const chat: ChatClient["chat"] = async (params) => {
-      systems.push(systemText(params));
+      // Snapshot at send time (the runtime pushes the final assistant message after this returns).
+      calls.push({ ...params, messages: params.messages.map((m) => ({ ...m })) });
       turn += 1;
       return { content: `ANSWER-${turn}`, toolCalls: [] };
     };
@@ -84,10 +85,21 @@ describe("TUI session continuity (one session per launch, prior turns remembered
     stdin.write("\r");
     await waitFor(lastFrame, "ANSWER-2");
 
-    // Turn 1 has NO prior context; turn 2's system prompt must carry turn 1's user input (continuity).
-    expect(systems.length).toBe(2);
-    expect(systems[0]).not.toContain("widget count is 42");
-    expect(systems[1]).toContain("remember the widget count is 42");
+    expect(calls.length).toBe(2);
+    const contents = (p: ChatParams): string[] =>
+      p.messages.map((m) =>
+        typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+      );
+
+    // Turn 1 has NO prior conversation (no earlier answer visible).
+    expect(contents(calls[0] as ChatParams).some((c) => c.includes("ANSWER"))).toBe(false);
+
+    // Turn 2 carries turn 1's REAL user message AND the assistant's actual answer — the lossless conversation,
+    // not the old lossy text reconstruction folded into the system prompt.
+    const t2 = contents(calls[1] as ChatParams);
+    expect(t2.some((c) => c.includes("remember the widget count is 42"))).toBe(true);
+    expect(t2.some((c) => c.includes("ANSWER-1"))).toBe(true);
+    expect(systemText(calls[1] as ChatParams)).not.toContain("Prior session"); // no reconstruction block used
 
     // Exactly ONE durable session log for the whole launch (not one file per submit).
     const files = readdirSync(join(home, "sessions")).filter((f) => f.endsWith(".jsonl"));

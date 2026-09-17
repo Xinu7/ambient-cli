@@ -8,7 +8,13 @@ import {
   type ToolDefinition,
   newSessionId,
 } from "@amb/protocol";
-import { Agent, type CapabilityPort, type ChatClient, type RunOptions } from "@amb/runtime";
+import {
+  Agent,
+  type CapabilityPort,
+  type ChatClient,
+  type Msg,
+  type RunOptions,
+} from "@amb/runtime";
 import {
   type SessionWriter,
   readObject,
@@ -47,6 +53,7 @@ import { EffortPicker } from "./components/EffortPicker.js";
 import { Goal } from "./components/Goal.js";
 import { ModelPicker } from "./components/ModelPicker.js";
 import { Plan } from "./components/Plan.js";
+import { PLAN_REVIEW_ROWS, PlanReview } from "./components/PlanReview.js";
 import { Question, type QuestionState } from "./components/Question.js";
 import { type SkillRow, SkillsBrowser } from "./components/SkillsBrowser.js";
 import {
@@ -276,6 +283,21 @@ export function App(deps: AppDeps): ReactNode {
   const effortRef = useRef<Effort>(deps.effort);
   const modelRef = useRef<string>(deps.requestedModel);
   const planRef = useRef<PlanTask[]>([]);
+  // True ONLY right after a PLAN-mode run produced a plan that's awaiting the user's approve/revise — so the
+  // banner + the one-key approve gesture fire only on a FRESH plan, never a stale one (a build run that hit
+  // maxTurns, or a plan kept across /clear). Cleared when any run starts and on /clear. `state` drives the
+  // banner render; the ref lets the synchronous key handler read it without a frame's lag.
+  const [planReviewPending, setPlanReviewPending] = useState(false);
+  const planReviewPendingRef = useRef(false);
+  const setPlanReview = (v: boolean) => {
+    planReviewPendingRef.current = v;
+    setPlanReviewPending(v);
+  };
+  // The LIVE conversation carried across messages in this session: the non-system messages the last run
+  // returned (full tool bodies + reasoning, already compacted by the runtime if it grew). The next run
+  // continues this real array instead of a lossy text reconstruction — so the runtime's own compaction
+  // manages the whole session and the agent stops forgetting on long threads. Reset by /clear (new session).
+  const conversationRef = useRef<Msg[]>([]);
   // The live north-star goal (synchronously read by runTask) + the last goal persisted to the CURRENT
   // session's log, so a changed goal is recorded once per session for `amb resume` to restore.
   const goalRef = useRef<string>(deps.initialGoal ?? "");
@@ -444,11 +466,13 @@ export function App(deps: AppDeps): ReactNode {
       runStartRef.current = Date.now();
       setTick(0);
       setRunActive(true);
+      setPlanReview(false); // a run is starting — the previous plan (if any) is no longer awaiting review
       // One session id + writer for the whole TUI launch (minted lazily on the first turn, reset by /clear).
       if (!sessionIdRef.current || !writerRef.current) {
         sessionIdRef.current = newSessionId();
         writerRef.current = deps.makeWriter(sessionIdRef.current);
         persistedGoalRef.current = undefined; // a fresh session log hasn't recorded the goal yet
+        conversationRef.current = []; // a fresh session starts with no carried-forward conversation
       }
       const sessionId = sessionIdRef.current;
       const writer = writerRef.current;
@@ -463,10 +487,12 @@ export function App(deps: AppDeps): ReactNode {
         } as NewEvent);
         persistedGoalRef.current = goalRef.current;
       }
-      // Conversational continuity: replay the prior turns of THIS session into the next run's context so the
-      // agent actually remembers what was just said (each turn is an independent Agent.run). Turn 1 has none.
-      // The runtime budgets + trims this to the served window (resumeContext is the first thing it drops).
-      const priorContext = reconstructTranscript(readSession(sessionId).events);
+      // Conversational continuity. Once this session has run at least once we carry the REAL message array
+      // forward (lossless, runtime-compacted) — the strong path. Only the FIRST run of a session (or a
+      // process that resumed an on-disk session with no live Msg[]) falls back to the lossy text
+      // reconstruction, which the runtime budgets/trims to the served window.
+      const carryForward = conversationRef.current.length > 0;
+      const priorContext = carryForward ? "" : reconstructTranscript(readSession(sessionId).events);
       const controller = new AbortController();
       controllerRef.current = controller;
       // Snapshot the axes for THIS run (a mid-run Tab/Shift+Tab must not change what's already flying).
@@ -540,7 +566,11 @@ export function App(deps: AppDeps): ReactNode {
           },
           grants: sessionGrantsRef.current, // persist "allow for this session" across turns
           ...(goalRef.current ? { goal: goalRef.current } : {}), // the session north-star, pinned in the anchor
-          ...(priorContext ? { resumeContext: priorContext } : {}), // remember earlier turns this session
+          // The lossless live conversation (preferred) OR the reconstruction (first run / resume) — never both.
+          ...(carryForward ? { priorMessages: conversationRef.current } : {}),
+          ...(priorContext ? { resumeContext: priorContext } : {}),
+          // Pin the outstanding plan into the anchor so a multi-message session keeps adhering to it.
+          ...(planRef.current.length > 0 ? { plan: { tasks: planRef.current } } : {}),
           ...(sized.length > 0 ? { attachments: sized } : {}),
           capabilities: deps.capabilities,
           workspace: makeWorkspaceContextPort(),
@@ -570,8 +600,19 @@ export function App(deps: AppDeps): ReactNode {
         });
 
         const result = await new Agent(deps.client, registry).run(finalTask, opts);
+        // Carry the real conversation forward (drop [0], the run's fresh system anchor — the next run rebuilds
+        // it with the current goal/plan/repo-map). This is what makes the interactive session use the runtime's
+        // own compaction instead of a lossy per-message reconstruction.
+        if (result.messages && result.messages.length > 1) {
+          conversationRef.current = result.messages.slice(1);
+        }
         dispatch({ t: "stop", stopReason: result.stopReason });
       } catch (err) {
+        // An UNEXPECTED throw (classified errors return a result and carry forward normally): we didn't get
+        // this run's messages, so the carried conversation is now behind the durable log. Reset it to [] so the
+        // NEXT message rebuilds from the event log (reconstruction), which still holds this failed turn — rather
+        // than silently continuing on a stale conversation that's missing it.
+        conversationRef.current = [];
         dispatch({ t: "stop", stopReason: "error" });
         dispatch({
           t: "event",
@@ -602,12 +643,14 @@ export function App(deps: AppDeps): ReactNode {
         }
         setQuestion(null);
         cancellingRef.current = false;
-        // A PLAN-mode run that produced a plan: tell the user how to run it (Tab → Build → Enter).
+        // A PLAN-mode run that produced a plan: arm the review state so the prominent PlanReview banner shows
+        // (the main "it's done, your move" signal); this scrollback notice records the same two choices.
         if (agentModeRef.current === "plan" && planRef.current.some((t) => t.status !== "done")) {
+          setPlanReview(true);
           dispatch({
             t: "notice",
             level: "info",
-            text: "Plan ready — press Tab to switch to Build, then Enter to execute it.",
+            text: "Plan ready — press Enter to approve & build it, or type what to change to revise it.",
           });
         }
         // Steer messages the agent didn't consume (it finished before the next turn boundary) run as a
@@ -892,6 +935,9 @@ export function App(deps: AppDeps): ReactNode {
           sessionIdRef.current = null;
           writerRef.current = null;
         }
+        // The kept plan is now from a cleared session — retire the review prompt/gesture so an empty Enter can't
+        // silently execute a stale plan in the fresh session.
+        setPlanReview(false);
         dispatch({ t: "clear" });
         break;
       case "/quit":
@@ -1186,9 +1232,17 @@ export function App(deps: AppDeps): ReactNode {
         !task &&
         agentModeRef.current === "build" &&
         planRef.current.some((t) => t.status !== "done");
+      // In PLAN mode with a ready plan, Enter on an empty line APPROVES it → flip to Build + execute (the
+      // approve half of the plan-review prompt; typing instead sends a revision that the agent edits into).
+      const canApprovePlan =
+        !task &&
+        attachmentsRef.current.length === 0 && // an image-only send is NOT an approval — it revises with the image
+        planReviewPendingRef.current && // only a FRESH plan (not a build-leftover, or one kept across /clear)
+        agentModeRef.current === "plan" &&
+        planRef.current.some((t) => t.status !== "done");
       const hasAttach = attachmentsRef.current.length > 0;
       // Allow an image-only send (attachment + no text) — a common "look at this" flow.
-      if (!task && !canRunPlan && !hasAttach) return;
+      if (!task && !canRunPlan && !canApprovePlan && !hasAttach) return;
       const attach = attachmentsRef.current;
       if (busyRef.current) {
         if (cancellingRef.current) return;
@@ -1204,6 +1258,11 @@ export function App(deps: AppDeps): ReactNode {
         setAttachments([]);
         setBuffer("");
       } else {
+        // Approve → switch to Build so the empty-Enter run executes the plan (withPlan needs build mode).
+        if (canApprovePlan) {
+          agentModeRef.current = "build";
+          dispatch({ t: "agentMode", agentMode: "build" });
+        }
         setBuffer("");
         setAttachments([]);
         void runTask(task, attach);
@@ -1274,6 +1333,14 @@ export function App(deps: AppDeps): ReactNode {
   const interior = Math.max(1, width - 2);
   // Visible queue rows — a rows-derived budget so the always-on panel stack stays under the screen height.
   const qMax = Math.min(5, Math.max(1, rows - 20));
+  // PLAN mode, idle, with a FRESH plan the run just produced → WAITING for the user. `planReviewPending` gates
+  // out a stale plan (a build run that hit maxTurns, or a plan kept across /clear), so the prominent
+  // approve/revise banner shows only when it truly means "done, your move".
+  const planAwaitingReview =
+    !runActive &&
+    planReviewPending &&
+    state.status.agentMode === "plan" &&
+    state.plan.some((t) => t.status !== "done");
 
   return (
     // NATURAL height (no fixed height): the dynamic tree renders at its TRUE size, which stays below the
@@ -1305,7 +1372,12 @@ export function App(deps: AppDeps): ReactNode {
         <Goal goal={state.goal} plan={state.plan} running={state.status.running} />
         {/* Cap the plan SMALL (windowed around the active step) so the live region can't approach the terminal
             height — which would make Ink full-clear every frame (the "strobe" + it erases native scrollback). */}
-        <Plan tasks={state.plan} max={Math.min(9, Math.max(3, rows - 14))} />
+        {/* When the plan-review banner shows it adds PLAN_REVIEW_ROWS to the stack — subtract them from the
+            plan panel's budget so the idle stack can't reach the terminal height (the CSI-3J strobe). */}
+        <Plan
+          tasks={state.plan}
+          max={Math.min(9, Math.max(3, rows - 14 - (planAwaitingReview ? PLAN_REVIEW_ROWS : 0)))}
+        />
         <Thinking
           text={state.thinking}
           show={state.showThinking}
@@ -1394,17 +1466,26 @@ export function App(deps: AppDeps): ReactNode {
             maxPreview={Math.max(0, Math.min(14, rows - 21))}
           />
         ) : (
-          <Composer
-            value={input}
-            running={runActive}
-            width={width}
-            attachments={attachments}
-            planReady={
-              !runActive &&
-              state.status.agentMode === "build" &&
-              state.plan.some((t) => t.status !== "done")
-            }
-          />
+          <>
+            {planAwaitingReview ? (
+              <PlanReview
+                steps={state.plan.filter((t) => t.status !== "done").length}
+                width={width}
+              />
+            ) : null}
+            <Composer
+              value={input}
+              running={runActive}
+              width={width}
+              attachments={attachments}
+              planReview={planAwaitingReview}
+              planReady={
+                !runActive &&
+                state.status.agentMode === "build" &&
+                state.plan.some((t) => t.status !== "done")
+              }
+            />
+          </>
         )}
       </Box>
       <Box flexShrink={0}>

@@ -39,6 +39,11 @@ describe("decide — mode ladder", () => {
   it("plan denies a write", () => {
     expect(decide(input("plan", ["write"])).effect).toBe("deny");
   });
+  it("plan denies network egress too (read-only: touches nothing AND transmits nothing)", () => {
+    expect(
+      decide(input("plan", ["network"], { toolName: "web_fetch", resolvedResources: [] })).effect,
+    ).toBe("deny");
+  });
   it("ask asks for a write", () => {
     expect(decide(input("ask", ["write"])).effect).toBe("ask");
   });

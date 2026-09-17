@@ -41,9 +41,11 @@ import {
   capToolResult,
   catalogHash,
   fallbackModel,
+  flattenNativeToolTurns,
   isAbortError,
   isMutationOutcome,
   renderPlanAnchor,
+  sanitizeContinuation,
   stringifyResult,
   withGoalReminder,
 } from "./agent-support.js";
@@ -81,6 +83,13 @@ export interface AgentResult {
   stopReason: StopReason;
   turns: number;
   finalText: string;
+  /**
+   * The final message array of the run (system anchor + full conversation, already compacted if it grew).
+   * The interactive TUI carries this forward as the next run's `priorMessages` so the live session keeps the
+   * REAL conversation (full tool bodies + goal/plan anchor) instead of a lossy reconstruction. Absent only
+   * when the run ended before the conversation was constructed (e.g. an empty fleet).
+   */
+  messages?: Msg[];
 }
 
 export interface AgentOptions {
@@ -196,7 +205,7 @@ export class Agent {
     // PLAN MODE advertises only the tools the permission engine ALLOWS in plan mode — every effect is "read"
     // (vacuously true for zero-effect tools like `ask_user`/`propose_goal_update`). This drops bash/edit/write
     // AND network (web_*), so the model is never offered a tool it would be denied and can't loop on it; it
-    // researches, records a `plan`, and stops. Build offers all.
+    // researches, records a `plan`, and stops. Must mirror the `plan` case in permissions/decide. Build offers all.
     const advertisedTools =
       opts.mode === "plan"
         ? this.registry.list().filter((t) => t.manifest.effects.every((e) => e === "read"))
@@ -218,9 +227,13 @@ export class Agent {
     const memoryBlock = memory
       ? `## Project memory (.ambient/MEMORY.md — durable notes from prior sessions; re-verify with tools, don't trust blindly)\n${memory}`
       : "";
-    const resumeBlock = opts.resumeContext
-      ? `## Prior session (resumed — context only; the CURRENT task is the user message below)\n${opts.resumeContext}`
-      : "";
+    // Prefer the lossless live conversation (`priorMessages`) when present — the reconstruction is only for
+    // cross-process resume, where no in-memory Msg[] exists. Injecting both would double-count the history.
+    const hasPriorMessages = (opts.priorMessages?.length ?? 0) > 0;
+    const resumeBlock =
+      opts.resumeContext && !hasPriorMessages
+        ? `## Prior session (resumed — context only; the CURRENT task is the user message below)\n${opts.resumeContext}`
+        : "";
     // Fleet-aware repo map (Karpathy/aider): a ranked, signatures-only map budgeted to a small share of the
     // ACTIVE model's window — a small model gets a small map, a flagship a fuller one. Injected into the
     // SYSTEM prompt so "where is X" is answered without reading files, and it survives compaction.
@@ -270,7 +283,10 @@ export class Agent {
     // The system-prompt anchor (never compacted). The live plan is re-folded onto THIS each turn so the model
     // always sees its checklist even after compaction, without the plan block ever compounding.
     let baseSystem = buildBaseAnchor(modelWindow);
-    let currentPlanBlock = "";
+    // Seed the pinned plan from the caller's outstanding checklist (a multi-message session passes the plan
+    // it already has), so "## Current plan (ADHERE to it…)" is resident from turn 1 of every message and
+    // survives compaction — even before the model re-calls `plan`. Empty when no plan is carried in.
+    let currentPlanBlock = opts.plan ? renderPlanAnchor(opts.plan) : "";
 
     // ── Image attachments ─────────────────────────────────────────────────────────────────────────────
     // A VISION-capable served model sees the images directly (image_url content-parts, adaptively fit to its
@@ -332,8 +348,19 @@ export class Agent {
         await relayViaText("blind");
       }
     }
+    // Seed with the fresh system anchor, the carried-forward prior conversation (lossless, already compacted
+    // by the last run if it grew), then this message's new user turn. On the first message priorMessages is
+    // empty → the classic [system, user] pair. The runtime's own compaction manages growth from here.
+    // sanitizeContinuation trims any dangling tool-call turn so appending the new user message stays wire-valid.
+    const carried = opts.priorMessages ? sanitizeContinuation(opts.priorMessages) : [];
     let messages: Msg[] = [
-      { role: "system", content: baseSystem },
+      // Fold the seeded plan (if any) into the anchor from turn 1 so a multi-message session adheres to it
+      // before the model re-calls `plan`; the in-loop fold keeps it current as the model updates the plan.
+      {
+        role: "system",
+        content: currentPlanBlock ? `${baseSystem}\n\n${currentPlanBlock}` : baseSystem,
+      },
+      ...carried,
       { role: "user", content: firstUserContent },
     ];
     // Track the project memory across compactions so each summary COMPOUNDS the last, and write it.
@@ -372,7 +399,7 @@ export class Agent {
           turnId,
           stopReason: "cancelled",
         });
-        return { stopReason: "cancelled", turns, finalText };
+        return { stopReason: "cancelled", turns, finalText, messages };
       }
       turns += 1;
       let compactions = 0;
@@ -492,7 +519,7 @@ export class Agent {
               turnId,
               stopReason: "blocked",
             });
-            return { stopReason: "blocked", turns, finalText };
+            return { stopReason: "blocked", turns, finalText, messages };
           }
           messages = reduced;
           compactions += 1;
@@ -585,7 +612,7 @@ export class Agent {
               turnId,
               stopReason: "cancelled",
             });
-            return { stopReason: "cancelled", turns, finalText };
+            return { stopReason: "cancelled", turns, finalText, messages };
           }
           // Provider-reported context overflow → compact and retry, bounded.
           if (err instanceof AmbError && err.kind === "overflow") {
@@ -626,7 +653,7 @@ export class Agent {
                 turnId,
                 stopReason: "blocked",
               });
-              return { stopReason: "blocked", turns, finalText };
+              return { stopReason: "blocked", turns, finalText, messages };
             }
             messages = reduced;
             compactions += 1;
@@ -648,7 +675,7 @@ export class Agent {
               turnId,
               stopReason: "error",
             });
-            return { stopReason: "error", turns, finalText };
+            return { stopReason: "error", turns, finalText, messages };
           }
           throw err;
         }
@@ -761,7 +788,7 @@ export class Agent {
       // A genuinely empty (or whitespace-only) response with no tool calls is NOT success.
       if (displayText.trim().length === 0 && toolCalls.length === 0) {
         emit({ schemaVersion: 1, kind: "turn.finished", sessionId, turnId, stopReason: "blocked" });
-        return { stopReason: "blocked", turns, finalText };
+        return { stopReason: "blocked", turns, finalText, messages };
       }
 
       // no tool calls → natural stop. But if the run was aborted (e.g. a persistence write failed and the
@@ -810,6 +837,13 @@ export class Agent {
               continue; // re-enter the loop with the failure fed back, instead of reporting success
             }
           }
+        }
+        // Record the model's final answer in the conversation itself so a carried-forward interactive session
+        // keeps it — the next message must see what the agent last said. Only on the actual stop (the verify
+        // re-ask above `continue`s, so this isn't reached until the run truly finishes). The tool-call turns
+        // are already recorded (assistant + results) inside the loop; this closes the final no-tool-call turn.
+        if (displayText.trim().length > 0) {
+          messages.push({ role: "assistant", content: displayText });
         }
         // Honest stop: if the LAST verification failed and we're no longer re-asking (attempts exhausted, or
         // the model gave up without fixing), the run did NOT verify — never report a clean `complete`.
@@ -992,7 +1026,7 @@ export class Agent {
     emit({ schemaVersion: 1, kind: "turn.finished", sessionId, turnId, stopReason });
     // Re-check once more: emitting the final event may itself be the write that failed and aborted us.
     if (opts.signal.aborted && stopReason === "complete") stopReason = "cancelled";
-    return { stopReason, turns, finalText };
+    return { stopReason, turns, finalText, messages };
   }
 
   /** The evidence-based lane for a model (defaults to `direct` when there's no evidence layer). */
@@ -1012,7 +1046,10 @@ export class Agent {
     const protocol = assistedProtocol(list);
     const [system, ...rest] = messages;
     const base = typeof system?.content === "string" ? system.content : "";
-    return [{ role: "system", content: `${base}\n\n${protocol}` }, ...rest];
+    // Flatten any native tool turns in the history to text — an assisted request declares no tools, so native
+    // tool_calls/role:tool messages (carried from a native-model run, or a mid-run native→assisted failover)
+    // would be an invalid, protocol-contradicting payload. See flattenNativeToolTurns.
+    return [{ role: "system", content: `${base}\n\n${protocol}` }, ...flattenNativeToolTurns(rest)];
   }
 
   private resolveModel(

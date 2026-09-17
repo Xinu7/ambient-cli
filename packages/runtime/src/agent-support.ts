@@ -49,6 +49,63 @@ export function withGoalReminder(messages: Msg[], goal: string | undefined): Msg
 }
 
 /**
+ * Make a carried-forward conversation SAFE to continue. The wire contract requires every assistant
+ * `tool_calls` message to be answered by matching `tool` results before the next user turn. A prior run can
+ * stop with a DANGLING native tool-call turn — the doom-loop guard breaks after recording the assistant call
+ * but before its results, or a cancel throws mid-execution — and appending a new user message after that
+ * makes the provider 400. This trims a trailing incomplete tool-call turn so the result always ends on a
+ * fully-answered turn (or plain text). Only the LAST tool-calling assistant can be incomplete (the loop
+ * appends a full result batch before the next generation). Assisted-lane turns record results as plain text
+ * (no `toolCalls`/`toolCallId`), so they are never trimmed. Returns a copy; a no-op when already valid.
+ */
+export function sanitizeContinuation(msgs: readonly Msg[]): Msg[] {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (m && m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
+      const answered = new Set<string>();
+      for (let j = i + 1; j < msgs.length; j++) {
+        const t = msgs[j];
+        if (t && t.role === "tool" && typeof t.toolCallId === "string") answered.add(t.toolCallId);
+      }
+      const complete = m.toolCalls.every((tc) => answered.has(tc.id));
+      return complete ? [...msgs] : msgs.slice(0, i);
+    }
+  }
+  return [...msgs];
+}
+
+/**
+ * Rewrite native tool turns (an assistant message carrying `tool_calls`, and its `role:"tool"` results) into
+ * the ASSISTED lane's plain-text form. The assisted lane declares NO `tools` and speaks a text action-envelope,
+ * so native tool structure in the history — carried in from a prior native-model run of the same session, or
+ * left behind by a mid-run native→assisted failover — must not ride along: sending `tool_calls` with `tools:[]`
+ * is a wire-contract mismatch strict backends 400, and it contradicts the text protocol the weak model is told
+ * to use. This flattens each such message so the weak model sees the SAME information as text. Applied only to
+ * the transient per-attempt request (never the stored conversation), so native runs keep native structure.
+ */
+export function flattenNativeToolTurns(messages: Msg[]): Msg[] {
+  const nameById = new Map<string, string>();
+  for (const m of messages) {
+    if (m.role === "assistant" && m.toolCalls) {
+      for (const tc of m.toolCalls) nameById.set(tc.id, tc.name);
+    }
+  }
+  return messages.map((m): Msg => {
+    if (m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
+      const text = typeof m.content === "string" ? m.content : "";
+      const calls = m.toolCalls.map((tc) => `[called ${tc.name} ${tc.rawArgs}]`).join("\n");
+      return { role: "assistant", content: [text, calls].filter(Boolean).join("\n") };
+    }
+    if (m.role === "tool") {
+      const name = (m.toolCallId && nameById.get(m.toolCallId)) || "tool";
+      const body = typeof m.content === "string" ? m.content : "";
+      return { role: "user", content: `Result of ${name}:\n${body}` };
+    }
+    return m;
+  });
+}
+
+/**
  * Plan a last-resort context SPILL: keep the goal anchor (the first 2 messages — system + goal) plus
  * the newest turn, and evict everything in between. Reuses the group-safe compaction planner so a tool call
  * and its result never land on opposite sides of the cut. Returns the serialized middle + the anchor/recent

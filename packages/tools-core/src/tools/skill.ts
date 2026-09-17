@@ -1,6 +1,7 @@
-import { loadSkillBody } from "@amb/context";
+import { loadSkill } from "@amb/context";
 import type { ToolContext, ToolDefinition } from "@amb/protocol";
 import { z } from "zod";
+import { resolveInWorkspace } from "../paths.js";
 
 const Input = z.object({
   name: z
@@ -36,14 +37,32 @@ export const skillTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Out
   inputSchema: Input,
   outputSchema: Output,
   async execute(input, ctx: ToolContext) {
-    const body = loadSkillBody(ctx.workspaceRoot, input.name);
-    if (body === undefined) {
+    const loaded = loadSkill(ctx.workspaceRoot, input.name);
+    if (loaded === undefined) {
       return {
         name: input.name,
         found: false,
         body: `No skill named "${input.name}" was found. Use \`search_skills\` to find a valid skill name.`,
       };
     }
+    // Surface the skill's own directory so the model can open the sidecar files a full Claude-style skill
+    // bundle ships (scripts/, references/, templates the instructions refer to) — but ONLY when that dir is
+    // actually reachable by `read`/`list`, which enforce the workspace boundary. A skill under ~/.claude/skills
+    // or a plugin dir is outside the workspace, so those tools would refuse it and the hint would be a lie;
+    // resolveInWorkspace throws for exactly those paths (the same boundary read/list use), keeping this honest.
+    // Built-in skills have no dir (body lives in code).
+    let reachableDir: string | undefined;
+    if (loaded.dir) {
+      try {
+        resolveInWorkspace(ctx.workspaceRoot, loaded.dir);
+        reachableDir = loaded.dir;
+      } catch {
+        reachableDir = undefined;
+      }
+    }
+    const body = reachableDir
+      ? `${loaded.body}\n\n---\nThis skill's files are in: ${reachableDir}\nIf the instructions above reference bundled files (e.g. scripts/, references/, templates), open them from that directory with \`list\`/\`read\`.`
+      : loaded.body;
     return { name: input.name, found: true, body };
   },
 };

@@ -196,8 +196,26 @@ export interface RunOptions {
   /**
    * Optional prior-session transcript for warm-continue resume. Injected into the SYSTEM prompt (NOT as
    * chat messages) so it never displaces the compaction goal anchor (system + the new instruction).
+   * Used for CROSS-PROCESS resume (`ambient resume`), where no live `Msg[]` exists. Ignored when
+   * `priorMessages` is present (the live in-memory conversation is lossless and always preferred).
    */
   resumeContext?: string;
+  /**
+   * The prior interactive conversation — the non-system messages returned by the LAST `run` in this same
+   * live session. When present, the agent continues the REAL message array (`[freshSystem, ...priorMessages,
+   * newUser]`) instead of rebuilding context from the lossy `resumeContext` reconstruction. This routes the
+   * whole multi-message interactive session through the runtime's own compaction (which keeps full tool
+   * bodies + the goal/plan anchor), instead of degrading to 8-line previews between messages. Absent ⇒ a
+   * fresh conversation (the first message of a session, or a cross-process resume).
+   */
+  priorMessages?: readonly Msg[];
+  /**
+   * The outstanding plan checklist to PIN into the system anchor from turn 1 of this run. Lets a multi-message
+   * session keep adhering to the plan even before the model re-calls `plan`, and keeps it visible after
+   * compaction summarizes the earlier `plan` tool-calls away. Same `{ tasks }` shape the `plan` tool takes.
+   * Absent ⇒ no seeded plan (the model establishes one via the `plan` tool as usual).
+   */
+  plan?: { tasks: { text: string; status: "pending" | "active" | "done" }[] };
   /**
    * The user's session-long NORTH-STAR objective (set via `/goal`). Baked into the system-prompt anchor at the
    * top of the dynamic block so it stays resident every turn and survives compaction (it never enters the

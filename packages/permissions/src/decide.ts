@@ -69,6 +69,10 @@ function baseDecide(input: PermissionInput): PermissionDecision {
 
   switch (mode) {
     case "plan":
+      // Plan mode is strictly read-only: reads are auto-allowed above; everything else (write/process/network/
+      // secret) is denied so a plan run touches nothing AND transmits nothing — no silent outbound egress, and
+      // no approval checkpoint is skipped. (Network research in plan mode was considered and rejected: scouts
+      // are force-run in plan mode, so allowing it would auto-approve outbound requests in every session.)
       return deny("plan mode is read-only");
     case "accept-edits":
       return effects.every((e) => e === "read" || e === "write")

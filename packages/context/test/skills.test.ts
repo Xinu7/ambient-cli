@@ -9,6 +9,7 @@ import {
   MAX_SKILL_BODY_CHARS,
   discoverInjectableSkills,
   discoverSkills,
+  loadSkill,
   loadSkillBody,
   parseSkill,
   pinSkill,
@@ -76,6 +77,14 @@ describe("discoverSkills + loadSkillBody + renderSkillCatalog", () => {
   it("loads a skill body ON DEMAND by name; unknown name → undefined", () => {
     expect(loadSkillBody(ws, "deploy", home)).toBe("run make release");
     expect(loadSkillBody(ws, "nope", home)).toBeUndefined();
+  });
+
+  it("loadSkill returns the body AND the skill's dir (so the model can read bundled sidecar files)", () => {
+    const loaded = loadSkill(ws, "deploy", home);
+    expect(loaded?.body).toBe("run make release");
+    // The directory of a real Claude-style skill bundle — where scripts/, references/, templates live.
+    expect(loaded?.dir).toBe(join(ws, ".ambient", "skills", "deploy"));
+    expect(loadSkill(ws, "nope", home)).toBeUndefined();
   });
 
   it("returns only built-ins + empty catalog when there's no USER skills dir (honest empty state)", () => {

@@ -21,7 +21,7 @@ export async function runConfig(args: string[]): Promise<void> {
   if (!exists) {
     process.stdout.write(
       `${dim("\nCreate it to set defaults. Example:\n")}` +
-        `${dim('  { "model": "auto", "effort": "auto", "mode": "ask", "maxTurns": 30, "allow": [] }\n')}`,
+        `${dim('  { "model": "auto", "effort": "auto", "mode": "ask", "maxTurns": 50, "allow": [] }\n')}`,
     );
     return;
   }

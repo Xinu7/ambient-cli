@@ -108,7 +108,11 @@ export async function compact(
     // MUST start with SUMMARY_MARKER (the SAME constant the deterministic path reads) so a LATER compaction
     // carries this summary forward verbatim instead of dropping it — otherwise repeated compaction
     // progressively loses earlier state (the exact drift compaction is meant to prevent).
-    content: `${SUMMARY_MARKER} (another model may have written this — re-verify with your tools before relying on it)\n${summary}`,
+    // The RE-ORIENTATION footer tells the model how to recalibrate cleanly after a compaction: the older turns
+    // are now this summary, so lean on the pinned plan (kept in the system anchor, never summarized) + this
+    // summary to resume from the right place — keep the plan current and continue the next unfinished step
+    // instead of redoing completed work. (Appended to the message only, NOT to the persisted project memory.)
+    content: `${SUMMARY_MARKER} (another model may have written this — re-verify with your tools before relying on it)\n${summary}\n\n→ The turns above were just summarized to save context. Re-read your pinned plan and this summary, update the plan with the \`plan\` tool (mark finished steps done), then CONTINUE FROM THE NEXT UNFINISHED STEP — do not repeat work already completed.`,
   };
   const next: Msg[] = [...anchor, summaryMsg, ...recent];
   const after = estimateMessagesTokens(next);

@@ -159,12 +159,27 @@ describe("tui render", () => {
     unmount();
   });
 
-  it("Composer collapses a LARGE paste to a [pasted N lines] chip + its tail (defect B)", () => {
+  it("Composer collapses a LARGE paste to a [pasted N lines] chip; a SHORT trailing line stays readable", () => {
     const value = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n");
     const { lastFrame, unmount } = render(<Composer value={value} running={false} width={80} />);
     const frame = lastFrame() ?? "";
     expect(frame).toContain("[pasted 30 lines]");
-    expect(frame).toContain("line 30"); // the tail (where the caret is) stays visible
+    expect(frame).toContain("line 30"); // a short trailing line (typed prose) stays visible
+    unmount();
+  });
+
+  it("a LARGE paste of LONG lines shows ONLY the clean chip — no truncated content dump (founder report)", () => {
+    // The founder's case: a big paste whose lines are long code — the old chip dumped a truncated content
+    // line next to it and "looked terrible". It must now render just the chip, bounded, with no code leaking in.
+    const longLine =
+      "const PLAN_PREAMBLE = `You are amb, a terminal coding agent running entirely on the Ambient network`;";
+    const value = Array.from({ length: 30 }, () => longLine).join("\n");
+    const { lastFrame, unmount } = render(<Composer value={value} running={false} width={80} />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("[pasted 30 lines]"); // the clean chip
+    expect(frame).not.toContain("PLAN_PREAMBLE"); // NO long content line dumped into the composer
+    const rows = frame.split("\n").filter((l) => l.trim().length > 0);
+    expect(rows.length).toBeLessThanOrEqual(6); // bounded — a couple of rows, never a wall (no strobe)
     unmount();
   });
 

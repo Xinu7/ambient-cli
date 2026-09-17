@@ -1310,7 +1310,7 @@ describe("Agent — plan mode", () => {
       .map((t) => (t as { function?: { name?: string } })?.function?.name)
       .filter((n): n is string => Boolean(n));
 
-  it("advertises ONLY read-only tools in plan mode — no bash/edit/write to loop on", async () => {
+  it("advertises ONLY read-only tools in plan mode — no bash/edit/write/network to loop on", async () => {
     const client = new MockClient([{ content: "here is my plan", toolCalls: [] }]);
     await new Agent(client).run("plan a change", baseOpts({ mode: "plan" }));
     const names = toolNames(client.calls[0]);
@@ -1321,7 +1321,8 @@ describe("Agent — plan mode", () => {
     expect(names).not.toContain("bash"); // …but NOT the mutating/shell tools
     expect(names).not.toContain("edit");
     expect(names).not.toContain("write");
-    expect(names).not.toContain("web_fetch"); // …nor network (denied by the permission engine in plan mode)
+    expect(names).not.toContain("web_fetch"); // …nor network (plan mode transmits nothing — no silent egress)
+    expect(names).not.toContain("web_search");
     // and the system prompt is the PLAN preamble
     const sys = client.calls[0]?.messages.find((m) => m.role === "system");
     expect(typeof sys?.content === "string" ? sys.content : "").toContain("PLAN MODE");
