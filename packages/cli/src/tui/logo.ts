@@ -17,7 +17,6 @@ export const BRAILLE_GLOBE: readonly string[] = [
   "⠀⠀⠀⠀⠘⠷⣌⡙⠻⢿⣶⡟⢋⣡⠾⠃⠀⠀⠀⠀",
   "⠀⠀⠀⠀⠀⠀⠈⠙⠛⠛⠛⠛⠋⠁⠀⠀⠀⠀⠀⠀",
 ];
-export const GLOBE_WIDTH = 20;
 
 const BLOCK: Record<string, readonly string[]> = {
   A: [" ██ ", "█  █", "████", "█  █", "█  █"],

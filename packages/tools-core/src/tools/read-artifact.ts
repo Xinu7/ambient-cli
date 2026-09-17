@@ -4,8 +4,8 @@ import { z } from "zod";
 const DEFAULT_LIMIT = 6_000;
 const MAX_LIMIT = 10_000;
 // The returned page's serialized JSON envelope must stay under the model-facing result byte cap
-// (MAX_TOOL_RESULT_CHARS = 24000 UTF-8 bytes) or the runtime re-truncates + re-offloads it into a NESTED handle
-//. A CHARACTER ceiling is not a reliable proxy for serialized BYTES: JSON escapes a control char
+// (MAX_TOOL_RESULT_CHARS = 24000 UTF-8 bytes) or the runtime re-truncates + re-offloads it into a NESTED handle.
+// A CHARACTER ceiling is not a reliable proxy for serialized BYTES: JSON escapes a control char
 // to 6 bytes (backslash-u-XXXX) and a CJK char is 3 UTF-8 bytes — so we size the page by the ACTUAL serialized
 // byte length, keeping a margin under the cap for the dynamic (often lower) per-result budget.
 const PAGE_BYTE_BUDGET = 16_000;

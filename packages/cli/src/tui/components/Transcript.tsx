@@ -1,15 +1,9 @@
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
+import { mmss } from "../format.js";
 import { globeFrame } from "../logo.js";
 import type { TranscriptItem } from "../state.js";
 import { AmbientTheme } from "../theme.js";
-
-/** m:ss for a subagent-line's duration. */
-function fmtMs(ms?: number): string {
-  if (ms == null) return "";
-  const s = Math.round(ms / 1000);
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
 
 /** Flatten newlines + truncate one line to `max` cols so nothing wraps the borderless column (Approval bar). */
 function clip(text: string, max: number): string {
@@ -264,7 +258,7 @@ export function TranscriptRow({
       }
       const okMark = item.childStatus !== "fail";
       const meta = `${item.turns ?? 0} turn${item.turns === 1 ? "" : "s"}${
-        item.durationMs != null ? ` · ${fmtMs(item.durationMs)}` : ""
+        item.durationMs != null ? ` · ${mmss(Math.round(item.durationMs / 1000))}` : ""
       }`;
       const summary = item.summary
         ? capLines(hardWrap(item.summary, Math.max(8, width - 4)), 6)

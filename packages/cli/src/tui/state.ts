@@ -131,7 +131,7 @@ export interface WaveState {
   /** Each running child's current action, bounded — the expanded-panel lines. */
   actions: WaveAction[];
   /** True when `total` came from a `subagent.wave` event (authoritative) — so `subagent.started` doesn't
-   *  double-count. Absent/false ⇒ we're counting children up from `subagent.started` (old-log fallback). */
+   *  double-count. Absent/false ⇒ a defensive path counts children up from `subagent.started` instead. */
   exactTotal?: boolean;
   /** childSessionId → label, from `subagent.started` — the later tool/finished events carry only the id. */
   labels: Record<string, string>;
@@ -147,9 +147,8 @@ export interface WaveAction {
 const MAX_WAVE_ACTIONS = 4;
 
 /** Pluralize a child role for the wave header/record ("scout" → "scouts"; mixed/unknown → "agents"). */
-function pluralizeRole(role: string | undefined, mixed = false): string {
-  if (mixed || !role) return "agents";
-  return `${role}s`;
+function pluralizeRole(role: string | undefined): string {
+  return role ? `${role}s` : "agents";
 }
 
 /**
@@ -820,7 +819,7 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
           },
         };
       }
-      // No wave event seen (old log / safety) — start the counting-up fallback from this child.
+      // Defensive: a `subagent.started` with no preceding `subagent.wave` still shows a panel, counting up.
       return {
         ...state,
         status,
