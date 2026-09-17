@@ -108,11 +108,13 @@ export function TranscriptRow({
   width,
   subagentExpanded = false,
   maxStreamLines = STREAM_MAX_LINES,
+  subagentMaxRows,
 }: {
   item: TranscriptItem;
   width: number;
   subagentExpanded?: boolean;
   maxStreamLines?: number;
+  subagentMaxRows?: number;
 }): ReactNode {
   switch (item.kind) {
     case "user": {
@@ -244,7 +246,14 @@ export function TranscriptRow({
     }
 
     case "subagent":
-      return <Subagent item={item} width={width} expanded={subagentExpanded} />;
+      return (
+        <Subagent
+          item={item}
+          width={width}
+          expanded={subagentExpanded}
+          maxRows={subagentMaxRows ?? Number.POSITIVE_INFINITY}
+        />
+      );
 
     case "handoff":
       // A role handoff (planner→executor→…) — distinct glyph ⇢ from the ↪ substitution receipt below.
@@ -301,12 +310,14 @@ export function Transcript({
   width = 80,
   subagentExpanded = false,
   maxStreamLines = STREAM_MAX_LINES,
+  subagentMaxRows,
 }: {
   items: TranscriptItem[];
   window?: number;
   width?: number;
   subagentExpanded?: boolean;
   maxStreamLines?: number;
+  subagentMaxRows?: number;
 }): ReactNode {
   const shown =
     window !== undefined && items.length > window ? items.slice(items.length - window) : items;
@@ -319,6 +330,7 @@ export function Transcript({
           width={width}
           subagentExpanded={subagentExpanded}
           maxStreamLines={maxStreamLines}
+          subagentMaxRows={subagentMaxRows}
         />
       ))}
     </Box>
