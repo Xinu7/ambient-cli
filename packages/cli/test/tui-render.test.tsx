@@ -180,41 +180,45 @@ describe("tui render", () => {
     unmount();
   });
 
-  it("Composer collapses a LARGE paste to a [pasted N lines] chip; a SHORT trailing line stays readable", () => {
+  it("shows a NAVIGABLE WINDOW of a large paste (the caret's tail) with an 'above' marker, bounded", () => {
+    // A big paste is no longer a dead "[pasted N lines]" chip — it's an editable window around the caret. With
+    // the caret defaulted to the end, the window shows the tail and marks the hidden lines above.
     const value = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n");
     const { lastFrame, unmount } = render(<Composer value={value} running={false} width={80} />);
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("[pasted 30 lines]");
-    expect(frame).toContain("line 30"); // a short trailing line (typed prose) stays visible
+    expect(frame).toContain("line 30"); // the caret's tail row is visible
+    expect(frame).toContain("more lines above"); // …with a marker for the windowed-away head
+    expect(frame).not.toContain("[pasted 30 lines]"); // the old chip is gone — it's editable now
+    const rows = frame.split("\n").filter((l) => l.trim().length > 0);
+    expect(rows.length).toBeLessThanOrEqual(10); // bounded to ~maxRows + border/markers (no strobe)
     unmount();
   });
 
-  it("a LARGE paste of LONG lines shows ONLY the clean chip — no truncated content dump (founder report)", () => {
-    // The founder's case: a big paste whose lines are long code — the old chip dumped a truncated content
-    // line next to it and "looked terrible". It must now render just the chip, bounded, with no code leaking in.
+  it("a large paste of LONG (wrapping) lines stays bounded — no unbounded wall (founder report)", () => {
+    // The founder's case: a big paste whose lines are long code. It must render a bounded window (the caret's
+    // tail), never a wall that overflows the screen.
     const longLine =
       "const PLAN_PREAMBLE = `You are amb, a terminal coding agent running entirely on the Ambient network`;";
     const value = Array.from({ length: 30 }, () => longLine).join("\n");
     const { lastFrame, unmount } = render(<Composer value={value} running={false} width={80} />);
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("[pasted 30 lines]"); // the clean chip
-    expect(frame).not.toContain("PLAN_PREAMBLE"); // NO long content line dumped into the composer
     const rows = frame.split("\n").filter((l) => l.trim().length > 0);
-    expect(rows.length).toBeLessThanOrEqual(6); // bounded — a couple of rows, never a wall (no strobe)
+    expect(rows.length).toBeLessThanOrEqual(10); // bounded — a window, never a wall (no strobe)
+    expect(frame).toContain("more lines above"); // the head is windowed away, marked
     unmount();
   });
 
   it("EXPANDS a large paste into the available height when there's room (founder: 'why can't it expand?')", () => {
-    // A fresh screen has ~20 free rows below; the App raises maxRows so a big paste grows like a normal
-    // terminal input (shows its head + a count) instead of collapsing to a one-line chip.
+    // A fresh screen has ~20 free rows below; the App raises maxRows so the window grows into it (showing the
+    // caret's tail deep into the paste) instead of a one-line chip.
     const value = Array.from({ length: 50 }, (_, i) => `content line ${i + 1}`).join("\n");
     const { lastFrame, unmount } = render(
       <Composer value={value} running={false} width={80} maxRows={20} />,
     );
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("content line 1"); // the head of the paste is shown…
-    expect(frame).toContain("content line 15"); // …deep into it — genuinely expanded, not a one-line chip
-    expect(frame).toContain("[pasted 50 lines"); // …with an honest count of the whole paste
+    expect(frame).toContain("content line 50"); // the caret's tail is shown…
+    expect(frame).toContain("content line 35"); // …many rows of it — genuinely expanded, not a one-line chip
+    expect(frame).toContain("more lines above"); // …with the windowed-away head marked
     const rows = frame.split("\n").filter((l) => l.trim().length > 0);
     expect(rows.length).toBeLessThanOrEqual(24); // still bounded to ~maxRows (+ border/hint) — no strobe
     unmount();

@@ -67,6 +67,21 @@ import { StatusLine } from "./components/StatusLine.js";
 import { Thinking } from "./components/Thinking.js";
 import { Transcript, TranscriptRow } from "./components/Transcript.js";
 import {
+  clampCursor,
+  composerTextWidth,
+  cursorGoalCol,
+  deleteBackAt,
+  deleteForwardAt,
+  insertAt,
+  layoutRows,
+  moveDown,
+  moveEnd,
+  moveHome,
+  moveLeft,
+  moveRight,
+  moveUp,
+} from "./editor.js";
+import {
   type AgentMode,
   EFFORTS,
   type Effort,
@@ -193,6 +208,7 @@ export function App(deps: AppDeps): ReactNode {
     }),
   );
   const [input, setInput] = useState("");
+  const [cursor, setCursor] = useState(0); // caret offset into `input` (composer editing)
   const [pending, setPending] = useState<ApprovalRequest | null>(null);
   // The open questionnaire (backs the `ask_user` tool), or null when none is pending.
   const [question, setQuestion] = useState<QuestionState | null>(null);
@@ -274,6 +290,8 @@ export function App(deps: AppDeps): ReactNode {
   );
   const busyRef = useRef(false);
   const inputRef = useRef("");
+  const cursorRef = useRef(0); // read synchronously by the key handler (mirrors the input-ref pattern)
+  const goalColRef = useRef<number | undefined>(undefined); // sticky column across a run of ↑/↓ moves
   const queueRef = useRef<{ text: string; attachments: ImageAttachment[] }[]>([]);
   // Text messages the user sent WHILE a run is in flight — the running agent pulls these at each turn
   // boundary and injects them (steering). Anything left when the run ends drains as a follow-up turn.
@@ -734,9 +752,14 @@ export function App(deps: AppDeps): ReactNode {
     if (task) void runTask(task);
   }, []);
 
-  const setBuffer = (nextValue: string): void => {
+  // The single write choke-point for the composer buffer + caret. `nextCursor` defaults to the end of the
+  // buffer, so every existing caller (clears, prefills, the failed-attach append) keeps its old behavior; only
+  // the true edit sites pass an explicit caret. Clamps the caret so it can never land mid-surrogate/out of range.
+  const setBuffer = (nextValue: string, nextCursor: number = nextValue.length): void => {
     inputRef.current = nextValue;
+    cursorRef.current = clampCursor(nextValue, nextCursor);
     setInput(nextValue);
+    setCursor(cursorRef.current);
     setSlashSel(0);
   };
 
@@ -1073,6 +1096,43 @@ export function App(deps: AppDeps): ReactNode {
       !questionRef.current &&
       pickerRef.current === null &&
       !inputRef.current.startsWith("/");
+    // Composer caret motion. Left/Right/Home/End always move the caret; Up/Down move it only when the buffer
+    // spans multiple visual rows — otherwise they fall through to the subagent-expand shortcut below (so
+    // watching a wave keeps ↑/↓ = expand/collapse; Ctrl+O toggles it regardless). Precedence:
+    // overlays > multi-row caret > subagent ↑/↓.
+    if (arrowsFree && !key.ctrl && !key.meta) {
+      const w = composerTextWidth(width);
+      if (key.leftArrow) {
+        setBuffer(inputRef.current, moveLeft(inputRef.current, cursorRef.current));
+        goalColRef.current = undefined;
+        return;
+      }
+      if (key.rightArrow) {
+        setBuffer(inputRef.current, moveRight(inputRef.current, cursorRef.current));
+        goalColRef.current = undefined;
+        return;
+      }
+      if (key.home) {
+        setBuffer(inputRef.current, moveHome(inputRef.current, cursorRef.current, w));
+        goalColRef.current = undefined;
+        return;
+      }
+      if (key.end) {
+        setBuffer(inputRef.current, moveEnd(inputRef.current, cursorRef.current, w));
+        goalColRef.current = undefined;
+        return;
+      }
+      if ((key.upArrow || key.downArrow) && layoutRows(inputRef.current, w).length > 1) {
+        if (goalColRef.current === undefined) {
+          goalColRef.current = cursorGoalCol(inputRef.current, cursorRef.current, w);
+        }
+        const next = key.upArrow
+          ? moveUp(inputRef.current, cursorRef.current, w, goalColRef.current)
+          : moveDown(inputRef.current, cursorRef.current, w, goalColRef.current);
+        setBuffer(inputRef.current, next);
+        return;
+      }
+    }
     if (hasRunningSubagent && arrowsFree && (key.downArrow || key.upArrow)) {
       setSubagentExpanded(key.downArrow === true);
       return;
@@ -1294,7 +1354,12 @@ export function App(deps: AppDeps): ReactNode {
         setAttachments(attachmentsRef.current.slice(0, -1));
         return;
       }
-      setBuffer(inputRef.current.slice(0, -1));
+      // Backspace deletes before the caret; Fn+Delete (key.delete) deletes the char AT the caret.
+      const r = key.delete
+        ? deleteForwardAt(inputRef.current, cursorRef.current)
+        : deleteBackAt(inputRef.current, cursorRef.current);
+      setBuffer(r.text, r.cursor);
+      goalColRef.current = undefined;
       return;
     }
     // A MULTI-char burst (a paste / drag-drop). Normalize it FIRST — strip bracketed-paste markers + stray
@@ -1307,12 +1372,18 @@ export function App(deps: AppDeps): ReactNode {
         if (res.ok) addAttachment(res.attachment);
         else {
           dispatch({ t: "notice", level: "info", text: res.reason });
-          setBuffer(inputRef.current + burst); // don't drop the pasted text on a failed attach
+          const ins = insertAt(inputRef.current, cursorRef.current, burst); // don't drop the pasted text
+          setBuffer(ins.text, ins.cursor);
         }
       });
       return;
     }
-    if (burst && !key.ctrl && !key.meta) setBuffer(inputRef.current + burst);
+    if (burst && !key.ctrl && !key.meta) {
+      // Insert typed chars / a paste AT the caret (not always the end), then advance the caret past it.
+      const ins = insertAt(inputRef.current, cursorRef.current, burst);
+      setBuffer(ins.text, ins.cursor);
+      goalColRef.current = undefined;
+    }
   });
 
   function finishApproval(decision: ApprovalDecision): void {
@@ -1546,6 +1617,7 @@ export function App(deps: AppDeps): ReactNode {
                 ) : null}
                 <Composer
                   value={input}
+                  cursor={cursor}
                   running={runActive}
                   width={width}
                   maxRows={composerMaxRows}
