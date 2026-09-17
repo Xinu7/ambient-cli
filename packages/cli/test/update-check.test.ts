@@ -2,7 +2,14 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { checkForUpdate, isNewer, parseSemver, updateHint } from "../src/update-check.js";
+import {
+  checkForUpdate,
+  installKind,
+  isNewer,
+  parseSemver,
+  updateCommand,
+  updateHint,
+} from "../src/update-check.js";
 
 describe("parseSemver / isNewer", () => {
   it("parses clean semvers and rejects the rest", () => {
@@ -108,9 +115,29 @@ describe("checkForUpdate", () => {
     ).toBeNull();
   });
 
-  it("updateHint names the version and the upgrade command", () => {
-    const hint = updateHint({ current: "0.4.0", latest: "0.5.0", updateAvailable: true });
-    expect(hint).toContain("0.5.0");
-    expect(hint).toContain("brew upgrade ambient-code");
+  it("updateHint names the version and the install-appropriate command", () => {
+    const info = { current: "0.4.0", latest: "0.5.0", updateAvailable: true } as const;
+    expect(updateHint(info, "brew")).toContain("0.5.0");
+    expect(updateHint(info, "brew")).toContain("brew upgrade ambient-code");
+    expect(updateHint(info, "source")).toContain("git pull");
+    expect(updateHint(info, "source")).not.toContain("brew upgrade");
+  });
+});
+
+describe("installKind / updateCommand", () => {
+  it("detects a Homebrew install from its Cellar/homebrew path", () => {
+    expect(installKind("/opt/homebrew/Cellar/ambient-code/0.6.0/libexec/bin/ambient")).toBe("brew");
+    expect(installKind("/opt/homebrew/bin/ambient")).toBe("brew");
+    expect(installKind("/home/linuxbrew/.linuxbrew/bin/ambient")).toBe("brew");
+  });
+
+  it("treats a repo/dev build path as a source install", () => {
+    expect(installKind("/Users/z/ambient-cli/packages/cli/dist/amb.js")).toBe("source");
+    expect(installKind("/Users/z/.local/bin/ambient")).toBe("source");
+  });
+
+  it("updateCommand matches the install kind", () => {
+    expect(updateCommand("brew")).toBe("brew upgrade ambient-code");
+    expect(updateCommand("source")).toContain("./scripts/install.sh");
   });
 });

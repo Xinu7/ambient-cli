@@ -32,15 +32,14 @@ export function Banner({
   width: number;
   fleet?: { ready: number };
   version?: string;
-  update?: { latest: string };
+  update?: { latest: string; command: string };
 }): ReactNode {
   const compact = width - 2 < LOCKUP_W; // account for the App's paddingX:1 (≈ width < 63)
   const { count, rest } = readyLine(fleet);
-  // A subtle upgrade nudge, like Claude Code's — the version is always shown; the ▲ line only when behind.
+  // A subtle upgrade nudge, like Claude Code's — the version is always shown; the ▲ line only when behind. The
+  // command matches how this binary was installed (brew vs a from-source/dev build).
   const upgradeLine = update ? (
-    <Text
-      color={AmbientTheme.cyan}
-    >{`▲ ${update.latest} available — brew upgrade ambient-code`}</Text>
+    <Text color={AmbientTheme.cyan}>{`▲ ${update.latest} available — ${update.command}`}</Text>
   ) : null;
   const versionTag = version ? (
     <Text color={AmbientTheme.dim}>{`${count ? "  ·  " : ""}v${version}`}</Text>

@@ -122,7 +122,19 @@ export async function checkForUpdate(deps: UpdateCheckDeps = {}): Promise<Update
   return { current, latest, updateAvailable: isNewer(latest, current) };
 }
 
-/** The one-line upgrade hint shown to the user when an update is available. */
-export function updateHint(info: UpdateInfo): string {
-  return `ambient ${info.latest} is available (you have ${info.current}) — run: brew upgrade ambient-code`;
+/** How this binary was installed, inferred from the running script path — so the upgrade hint gives the RIGHT
+ *  command. A Homebrew install runs from a Cellar/…/homebrew path; anything else is a source / dev build. */
+export type InstallKind = "brew" | "source";
+export function installKind(execPath: string = process.argv[1] ?? ""): InstallKind {
+  return /\/(Cellar|homebrew|linuxbrew)\//.test(execPath) ? "brew" : "source";
+}
+
+/** The command a user runs to update, matched to how they installed (brew vs a from-source/dev build). */
+export function updateCommand(kind: InstallKind = installKind()): string {
+  return kind === "brew" ? "brew upgrade ambient-code" : "git pull && ./scripts/install.sh";
+}
+
+/** The one-line upgrade hint shown when an update is available, with the install-appropriate command. */
+export function updateHint(info: UpdateInfo, kind: InstallKind = installKind()): string {
+  return `ambient ${info.latest} is available (you have ${info.current}) — run: ${updateCommand(kind)}`;
 }

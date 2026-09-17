@@ -118,8 +118,9 @@ export interface AppDeps {
   maxAutoContinues?: number;
   /** The installed CLI version, shown in the splash. */
   version?: string;
-  /** When a newer version is published, its version — drives the "brew upgrade" nudge in the splash. */
-  update?: { latest: string };
+  /** When a newer version is published: its version + the install-appropriate update command — drives the
+   *  upgrade nudge in the splash. */
+  update?: { latest: string; command: string };
   cwd: string;
   workspaceRoot: string;
   fleet?: FleetRow[];

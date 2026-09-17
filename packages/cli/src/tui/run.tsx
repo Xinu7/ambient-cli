@@ -9,7 +9,7 @@ import { makeCapabilityPort } from "../agent/capability-port.js";
 import { type McpConnection, connectMcp } from "../agent/mcp-connect.js";
 import { type FleetRow, formatFleetRows, laneResolver } from "../render/fleet.js";
 import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
-import { checkForUpdate } from "../update-check.js";
+import { checkForUpdate, updateCommand } from "../update-check.js";
 import { CURRENT_VERSION } from "../version.js";
 import { App } from "./App.js";
 import type { AgentMode, Effort, Permission } from "./state.js";
@@ -83,7 +83,9 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     fleetSummary(config),
     checkForUpdate({ enabled: opts.checkUpdates }),
   ]);
-  const update = updateInfo?.updateAvailable ? { latest: updateInfo.latest } : undefined;
+  const update = updateInfo?.updateAvailable
+    ? { latest: updateInfo.latest, command: updateCommand() }
+    : undefined;
   // Skills for the `/skills` summary + interactive browser — a fast fs scan at the edge (the App never
   // touches the filesystem). `onTogglePin` writes the pin list and returns the new pinned state.
   const pinnedNames = new Set(readPinnedSkills(cwd));
