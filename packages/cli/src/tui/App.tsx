@@ -290,10 +290,12 @@ export function App(deps: AppDeps): ReactNode {
   // banner render; the ref lets the synchronous key handler read it without a frame's lag.
   const [planReviewPending, setPlanReviewPending] = useState(false);
   const planReviewPendingRef = useRef(false);
-  const setPlanReview = (v: boolean) => {
+  // Stable (empty deps: closes over only a setState + a ref, both stable) so callbacks that call it — runTask,
+  // the emit consumer — can depend on it without being recreated every render.
+  const setPlanReview = useCallback((v: boolean) => {
     planReviewPendingRef.current = v;
     setPlanReviewPending(v);
-  };
+  }, []);
   // The LIVE conversation carried across messages in this session: the non-system messages the last run
   // returned (full tool bodies + reasoning, already compacted by the runtime if it grew). The next run
   // continues this real array instead of a lossy text reconstruction — so the runtime's own compaction
@@ -686,7 +688,7 @@ export function App(deps: AppDeps): ReactNode {
         }
       }
     },
-    [approve, ask, deps],
+    [approve, ask, deps, setPlanReview],
   );
   runTaskRef.current = runTask;
 
@@ -1374,27 +1376,23 @@ export function App(deps: AppDeps): ReactNode {
     (attachments.length > 0 ? 1 : 0) + // the attachment chip
     9; // status + hint + border + margins + a safety cushion so the whole stack stays under `rows`
   const composerMaxRows = composerCanGrow ? Math.max(6, rows - composerReserve) : 6;
-  // Cap the STREAMING answer's on-screen height so the live region (streaming + panels + footer) can never
-  // exceed the terminal height — Ink 7 STILL writes CSI 2J+3J (erasing native scrollback) on overflow; its
-  // synchronized-output only makes that atomic, not harmless. Reserve the worst-case panel stack + footer;
-  // over-reserving is SAFE — it only trims the streamed PREVIEW (the full answer commits to <Static> the
-  // instant it finalizes). Rows-relative so a short terminal caps tighter.
-  const panelReserve =
-    (state.plan.length > 0 ? 11 : 0) + // Plan panel (rows-capped ~9 + header/margin)
-    (state.showThinking ? 7 : 0) + // reasoning panel (rows-capped ~6 + margin)
-    (queued.length > 0 ? 7 : 0) + // queue panel (rows-capped ~5 + header/margin)
-    2; // activity line + margin
-  const maxStreamLines = Math.max(3, rows - panelReserve - 11); // 11 ≈ composer + status + hint + margins
+  // The live region is bounded STRUCTURALLY (the maxHeight clamp below), so the streamed preview no longer
+  // needs a hand-tuned reserve — this cap is now PURELY a perf bound so a 10k-line answer doesn't make yoga
+  // lay out the whole thing every delta. One screenful is always ≥ what the clamp can show, so it never
+  // trims anything the user could have seen; the full answer commits to <Static> the instant it finalizes.
+  const maxStreamLines = Math.max(8, rows);
 
   return (
-    // NATURAL height (no fixed height): the dynamic (non-<Static>) tree renders at its TRUE size, kept UNDER
-    // the terminal height by the per-panel caps (plan/thinking/queue) + the streaming line-cap. Ink 7 still
-    // writes CSI 2J+3J (which erases native scrollback) when the dynamic frame OVERFLOWS the viewport — its
-    // synchronized-output wrapper only makes that atomic (no visible tearing), it does NOT stop the scrollback
-    // erase — so the invariant is: never let this tree exceed `rows`. That's also why we do NOT add a bottom
-    // spacer to pin the composer low: growing the dynamic region toward full height risks that overflow. The
-    // composer therefore floats after the content (settling at the bottom as the conversation fills the
-    // screen). Settled turns commit to <Static> (real terminal scrollback) so they STAY visible where printed.
+    // Ink 7 STILL writes CSI 2J+3J (which erases native scrollback) whenever the dynamic (non-<Static>) frame
+    // OVERFLOWS the viewport — its synchronized-output only makes that atomic, it does NOT stop the erase. So
+    // the invariant "the dynamic frame never exceeds `rows`" is enforced STRUCTURALLY, not by arithmetic: the
+    // whole dynamic tree lives inside a `maxHeight={rows-1}` + `overflowY:"hidden"` clamp, so Ink measures its
+    // height as the clamped value and the CSI-3J gate (nextOutputHeight > viewportRows) can never trip. Inside
+    // the clamp: a flex-shrink, bottom-anchored scroll region holds the growable content (live transcript +
+    // panels) and clips its OWN top when tall (keeping the most-recent tail); the footer (composer/modal +
+    // status) is flexShrink=0 so it is NEVER clipped. When content is short the clamp shrinks to it, so the
+    // composer still sits right under the answer (no gap). Settled turns commit to <Static> (real terminal
+    // scrollback, NOT counted in the dynamic height) so they STAY visible where printed — scroll up to see them.
     <Box flexDirection="column" width={width} paddingX={1}>
       {/* SETTLED turns print ONCE into the terminal's REAL scrollback via <Static> — scroll up (trackpad/
           wheel) to see history. Never re-rendered, so each turn commits cleanly instead of repainting. */}
@@ -1402,153 +1400,167 @@ export function App(deps: AppDeps): ReactNode {
         {(item) => <TranscriptRow key={item.id} item={item} width={interior} />}
       </Static>
 
-      {/* Idle home: the brand banner (scrolls into history once the conversation starts). */}
-      {onSplash ? (
-        <Banner
-          width={width}
-          fleet={readyCount !== undefined ? { ready: readyCount } : undefined}
-        />
-      ) : null}
+      {/* THE CLAMP — bounds the entire dynamic frame to rows-1 so Ink never full-clears (erasing scrollback). */}
+      <Box flexDirection="column" maxHeight={Math.max(4, rows - 1)} overflowY="hidden">
+        {/* Growable, bottom-anchored: live transcript + panels. Clips its TOP when it can't all fit, so the
+            most-recent output (and the panels below it) stay visible while old streamed lines scroll off. */}
+        <Box flexDirection="column" flexShrink={1} overflowY="hidden" justifyContent="flex-end">
+          {/* Idle home: the brand banner (scrolls into history once the conversation starts). */}
+          {onSplash ? (
+            <Banner
+              width={width}
+              fleet={readyCount !== undefined ? { ready: readyCount } : undefined}
+            />
+          ) : null}
 
-      {/* The LIVE tail — the current turn's in-flight items (a streaming answer is line-capped while live). */}
-      {liveItems.length > 0 ? (
-        <Transcript
-          items={liveItems}
-          width={interior}
-          subagentExpanded={subagentExpanded}
-          maxStreamLines={maxStreamLines}
-        />
-      ) : null}
+          {/* The LIVE tail — the current turn's in-flight items (streamed preview perf-capped in TranscriptRow). */}
+          {liveItems.length > 0 ? (
+            <Transcript
+              items={liveItems}
+              width={interior}
+              subagentExpanded={subagentExpanded}
+              maxStreamLines={maxStreamLines}
+            />
+          ) : null}
 
-      {/* Middle panels: goal, plan, live reasoning, the activity flightline, the queue, and any open picker. */}
-      <Box flexDirection="column">
-        <Goal goal={state.goal} plan={state.plan} running={state.status.running} />
-        {/* Cap the plan SMALL (windowed around the active step) so the live region can't approach the terminal
+          {/* Middle panels: goal, plan, live reasoning, the activity flightline, the queue, and any open picker. */}
+          <Box flexDirection="column">
+            <Goal goal={state.goal} plan={state.plan} running={state.status.running} />
+            {/* Cap the plan SMALL (windowed around the active step) so the live region can't approach the terminal
             height — which would make Ink full-clear every frame (the "strobe" + it erases native scrollback). */}
-        {/* When the plan-review banner shows it adds PLAN_REVIEW_ROWS to the stack — subtract them from the
+            {/* When the plan-review banner shows it adds PLAN_REVIEW_ROWS to the stack — subtract them from the
             plan panel's budget so the idle stack can't reach the terminal height (the CSI-3J strobe). */}
-        <Plan
-          tasks={state.plan}
-          max={Math.min(9, Math.max(3, rows - 14 - (planAwaitingReview ? PLAN_REVIEW_ROWS : 0)))}
-        />
-        <Thinking
-          text={state.thinking}
-          show={state.showThinking}
-          width={width}
-          maxLines={Math.min(6, Math.max(1, rows - 18))}
-        />
-        <ActivityLine
-          activity={state.status.activity}
-          elapsed={elapsed}
-          phaseElapsed={phaseElapsed}
-          frame={tick}
-          width={width}
-          effort={state.status.resolvedEffort}
-        />
-        {/* The queue/steer panel — labelled + count (the user: "I can't even see the queue"). Its visible
+            <Plan
+              tasks={state.plan}
+              max={Math.min(
+                9,
+                Math.max(3, rows - 14 - (planAwaitingReview ? PLAN_REVIEW_ROWS : 0)),
+              )}
+            />
+            <Thinking
+              text={state.thinking}
+              show={state.showThinking}
+              width={width}
+              maxLines={Math.min(6, Math.max(1, rows - 18))}
+            />
+            <ActivityLine
+              activity={state.status.activity}
+              elapsed={elapsed}
+              phaseElapsed={phaseElapsed}
+              frame={tick}
+              width={width}
+              effort={state.status.resolvedEffort}
+            />
+            {/* The queue/steer panel — labelled + count (the user: "I can't even see the queue"). Its visible
             rows are capped to a rows-budget (qMax) so the always-on stack can't grow past the screen. */}
-        {queued.length > 0 ? (
-          <Box flexDirection="column" marginTop={1}>
-            <Text color={AmbientTheme.signal}>
-              {`↳ ${queued.length} queued — the agent picks ${queued.length === 1 ? "it" : "them"} up next`}
-            </Text>
-            {queued.slice(0, qMax).map((q, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: queue order is stable within a render
-              <Text key={i} color={AmbientTheme.dim} wrap="truncate-end">{`   • ${q}`}</Text>
-            ))}
-            {queued.length > qMax ? (
-              <Text color={AmbientTheme.dim}>{`   • … ${queued.length - qMax} more`}</Text>
+            {queued.length > 0 ? (
+              <Box flexDirection="column" marginTop={1}>
+                <Text color={AmbientTheme.signal}>
+                  {`↳ ${queued.length} queued — the agent picks ${queued.length === 1 ? "it" : "them"} up next`}
+                </Text>
+                {queued.slice(0, qMax).map((q, i) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: queue order is stable within a render
+                  <Text key={i} color={AmbientTheme.dim} wrap="truncate-end">{`   • ${q}`}</Text>
+                ))}
+                {queued.length > qMax ? (
+                  <Text color={AmbientTheme.dim}>{`   • … ${queued.length - qMax} more`}</Text>
+                ) : null}
+              </Box>
+            ) : null}
+            {picker === "model" ? (
+              <Box marginTop={1}>
+                <ModelPicker
+                  rows={readyFleet}
+                  selected={pickerSel}
+                  current={state.status.requestedModel}
+                  width={width}
+                />
+              </Box>
+            ) : null}
+            {picker === "effort" ? (
+              <Box marginTop={1}>
+                <EffortPicker
+                  efforts={EFFORTS}
+                  selected={pickerSel}
+                  current={state.status.effort}
+                  width={width}
+                />
+              </Box>
+            ) : null}
+            {picker === "skills" ? (
+              <Box marginTop={1}>
+                <SkillsBrowser
+                  rows={filteredSkills}
+                  selected={Math.min(pickerSel, Math.max(0, filteredSkills.length - 1))}
+                  filter={skillFilter}
+                  total={deps.skills?.length ?? 0}
+                  width={width}
+                  maxRows={Math.max(3, rows - 11)}
+                />
+              </Box>
+            ) : null}
+            {showSlash ? (
+              <Box marginTop={1}>
+                <SlashPalette
+                  commands={slashMatches}
+                  selected={Math.min(slashSel, slashMatches.length - 1)}
+                  width={width}
+                />
+              </Box>
             ) : null}
           </Box>
-        ) : null}
-        {picker === "model" ? (
-          <Box marginTop={1}>
-            <ModelPicker
-              rows={readyFleet}
-              selected={pickerSel}
-              current={state.status.requestedModel}
-              width={width}
-            />
-          </Box>
-        ) : null}
-        {picker === "effort" ? (
-          <Box marginTop={1}>
-            <EffortPicker
-              efforts={EFFORTS}
-              selected={pickerSel}
-              current={state.status.effort}
-              width={width}
-            />
-          </Box>
-        ) : null}
-        {picker === "skills" ? (
-          <Box marginTop={1}>
-            <SkillsBrowser
-              rows={filteredSkills}
-              selected={Math.min(pickerSel, Math.max(0, filteredSkills.length - 1))}
-              filter={skillFilter}
-              total={deps.skills?.length ?? 0}
-              width={width}
-              maxRows={Math.max(3, rows - 11)}
-            />
-          </Box>
-        ) : null}
-        {showSlash ? (
-          <Box marginTop={1}>
-            <SlashPalette
-              commands={slashMatches}
-              selected={Math.min(slashSel, slashMatches.length - 1)}
-              width={width}
-            />
-          </Box>
-        ) : null}
-      </Box>
-      <Box marginTop={1} flexShrink={0}>
-        {question ? (
-          // A pending questionnaire replaces the composer (like the Approval modal) — it owns the keyboard.
-          <Question state={question} width={width} />
-        ) : pending ? (
-          // Cap the preview so the header + all four choices + borders + status stay on-screen on a short
-          // terminal (the choices must never scroll off). 21 rows are the modal's fixed furniture
-          // in the WORST case (risk callout + overflow marker + StatusLine); the preview yields to 0 first, so
-          // at rows=24 → 3 preview lines and 21+3 = 24 exactly.
-          <Approval
-            req={pending}
-            width={width}
-            selected={approvalSel}
-            maxPreview={Math.max(0, Math.min(14, rows - 21))}
-          />
-        ) : (
-          <>
-            {planAwaitingReview ? (
-              <PlanReview
-                steps={state.plan.filter((t) => t.status !== "done").length}
+        </Box>
+
+        {/* FOOTER — composer/modal + status. flexShrink=0 so the clamp never clips the user's input. */}
+        <Box flexDirection="column" flexShrink={0}>
+          <Box marginTop={1} flexShrink={0}>
+            {question ? (
+              // A pending questionnaire replaces the composer (like the Approval modal) — it owns the keyboard.
+              <Question state={question} width={width} />
+            ) : pending ? (
+              // Cap the preview so the header + all four choices + borders + status stay on-screen on a short
+              // terminal (the choices must never scroll off). 21 rows are the modal's fixed furniture
+              // in the WORST case (risk callout + overflow marker + StatusLine); the preview yields to 0 first, so
+              // at rows=24 → 3 preview lines and 21+3 = 24 exactly.
+              <Approval
+                req={pending}
                 width={width}
+                selected={approvalSel}
+                maxPreview={Math.max(0, Math.min(14, rows - 21))}
               />
-            ) : null}
-            <Composer
-              value={input}
-              running={runActive}
+            ) : (
+              <>
+                {planAwaitingReview ? (
+                  <PlanReview
+                    steps={state.plan.filter((t) => t.status !== "done").length}
+                    width={width}
+                  />
+                ) : null}
+                <Composer
+                  value={input}
+                  running={runActive}
+                  width={width}
+                  maxRows={composerMaxRows}
+                  attachments={attachments}
+                  planReview={planAwaitingReview}
+                  planReady={
+                    !runActive &&
+                    state.status.agentMode === "build" &&
+                    state.plan.some((t) => t.status !== "done")
+                  }
+                />
+              </>
+            )}
+          </Box>
+          <Box flexShrink={0}>
+            <StatusLine
+              status={state.status}
               width={width}
-              maxRows={composerMaxRows}
-              attachments={attachments}
-              planReview={planAwaitingReview}
-              planReady={
-                !runActive &&
-                state.status.agentMode === "build" &&
-                state.plan.some((t) => t.status !== "done")
-              }
+              active={runActive}
+              showThinking={state.showThinking}
             />
-          </>
-        )}
-      </Box>
-      <Box flexShrink={0}>
-        <StatusLine
-          status={state.status}
-          width={width}
-          active={runActive}
-          showThinking={state.showThinking}
-        />
+          </Box>
+        </Box>
       </Box>
     </Box>
   );
