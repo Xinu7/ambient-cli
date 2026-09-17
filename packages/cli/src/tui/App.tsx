@@ -1359,11 +1359,17 @@ export function App(deps: AppDeps): ReactNode {
   const composerMaxRows = composerCanGrow ? Math.max(6, rows - composerReserve) : 6;
 
   return (
-    // NATURAL height (no fixed height): the dynamic tree renders at its TRUE size, which stays below the
-    // terminal height — so Ink never takes its over-height branch (which writes CSI 3J and erases the real
-    // scrollback). Overlays (skills/approval) are sized to fit; the one unbounded grower, a STREAMING answer,
-    // is line-capped in TranscriptRow (its full text commits to <Static> when it finalizes).
-    <Box flexDirection="column" width={width} paddingX={1}>
+    // BOTTOM-ANCHORED: `minHeight = rows-1` + the flexGrow spacer below pin the composer to the bottom of the
+    // screen (so it doesn't float after a short transcript) while staying STRICTLY under the terminal height —
+    // verified: at `rows` Ink writes CSI 3J and erases scrollback, at `rows-1` it does not. Settled turns still
+    // commit to <Static> (real scrollback); the one unbounded grower, a STREAMING answer, is line-capped in
+    // TranscriptRow. On the welcome splash we stay natural (no min-height) so the banner sits at the top.
+    <Box
+      flexDirection="column"
+      width={width}
+      paddingX={1}
+      {...(onSplash ? {} : { minHeight: Math.max(1, rows - 1) })}
+    >
       {/* SETTLED turns print ONCE into the terminal's REAL scrollback via <Static> — scroll up (trackpad/
           wheel) to see history. Never re-rendered, so each turn commits cleanly instead of repainting. */}
       <Static items={settledItems}>
@@ -1376,7 +1382,11 @@ export function App(deps: AppDeps): ReactNode {
           width={width}
           fleet={readyCount !== undefined ? { ready: readyCount } : undefined}
         />
-      ) : null}
+      ) : (
+        // The spacer eats the free vertical space so everything below it — live tail, panels, composer,
+        // status — sits at the BOTTOM of the screen, and the composer grows UPWARD as you type/paste.
+        <Box flexGrow={1} flexShrink={1} />
+      )}
 
       {/* The LIVE tail — the current turn's in-flight items (a streaming answer is line-capped while live). */}
       {liveItems.length > 0 ? (

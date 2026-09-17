@@ -156,4 +156,35 @@ describe("TUI session continuity (one session per launch, prior turns remembered
 
     unmount();
   });
+
+  it("BOTTOM-ANCHORS the composer: in a conversation the input is padded toward the bottom, not floating high", async () => {
+    const chat: ChatClient["chat"] = async () => ({ content: "ANSWER", toolCalls: [] });
+    const client = { fetchCatalog: async () => catalog, chat } as unknown as ChatClient;
+    const { lastFrame, stdin, unmount } = render(
+      <App
+        client={client}
+        makeWriter={(id: string) => new SessionWriter(id, () => new Date().toISOString())}
+        agentMode="build"
+        permission="bypass"
+        effort="auto"
+        requestedModel="vendor/m"
+        maxTurns={30}
+        cwd="/w"
+        workspaceRoot="/w"
+      />,
+    );
+    await settle(40);
+    for (const ch of "hi") stdin.write(ch);
+    await settle(30);
+    stdin.write("\r");
+    await waitFor(lastFrame, "ANSWER");
+    const frame = lastFrame() ?? "";
+    // Once the conversation starts (onSplash=false), the bottom-anchor's minHeight (rows-1) pads the tree so
+    // the composer sits near the bottom of the screen. A short natural transcript would be only ~10 lines;
+    // the padded, bottom-anchored tree is close to the full height (ink-testing-library renders the App at
+    // rows=24). This distinguishes "pinned at the bottom" from the old "floating after the content".
+    expect(frame.split("\n").length).toBeGreaterThanOrEqual(18);
+    expect(frame).toContain("Describe a coding task"); // the composer is still there — now at the bottom
+    unmount();
+  });
 });
