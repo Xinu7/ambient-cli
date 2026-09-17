@@ -1384,6 +1384,10 @@ export function App(deps: AppDeps): ReactNode {
   // and once incremental-commit lands (assistant.delta), only the in-progress paragraph is ever live.
   const STREAM_TAIL_ROWS = 8;
   const maxStreamLines = STREAM_TAIL_ROWS;
+  // Rows budget for a live subagent wave so a big fan-out can't become a tall frame (which would make the
+  // layout jump). The tree windows itself to this and shows "… +K more agents"; generous so a normal wave is
+  // never truncated (each collapsed child is one row), tight enough that an expanded wave stays bounded.
+  const subagentMaxRows = Math.max(6, rows - 14);
 
   return (
     // Ink 7 STILL writes CSI 2J+3J (which erases native scrollback) whenever the dynamic (non-<Static>) frame
@@ -1423,6 +1427,7 @@ export function App(deps: AppDeps): ReactNode {
               width={interior}
               subagentExpanded={subagentExpanded}
               maxStreamLines={maxStreamLines}
+              subagentMaxRows={subagentMaxRows}
             />
           ) : null}
 
