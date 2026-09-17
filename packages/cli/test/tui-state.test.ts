@@ -1064,6 +1064,42 @@ describe("isSettled — the Static/live split for scrollback (Phase 3)", () => {
   });
 });
 
+describe("activity clarity — parallel tools name WHAT, not a bare 'N tools'", () => {
+  const proposeStart = (s: ReturnType<typeof init>, id: string, name: string, args: object) => {
+    let n = reduce(s, {
+      kind: "tool.proposed",
+      ...base,
+      toolCallId: id,
+      wireId: id,
+      toolName: name,
+      args,
+      rawArgs: JSON.stringify(args),
+      argsHash: id,
+    } as NewEvent);
+    n = reduce(n, { kind: "tool.started", ...base, toolCallId: id, toolName: name } as NewEvent);
+    return n;
+  };
+
+  it("with 2+ tools still in flight, the activity line lists the distinct verbs", () => {
+    let s = init();
+    s = proposeStart(s, "tc1", "read", { path: "a.ts" });
+    s = proposeStart(s, "tc2", "grep", { pattern: "foo" });
+    s = proposeStart(s, "tc3", "edit", { path: "b.ts" });
+    // one finishes → two remain in flight → the line names them, not "3 tools".
+    s = reduce(s, {
+      kind: "tool.result",
+      ...base,
+      toolCallId: "tc1",
+      ok: true,
+      durationMs: 3,
+    } as NewEvent);
+    expect(s.status.activity?.verb).toBe("Running");
+    expect(s.status.activity?.detail).toContain("2 tools");
+    expect(s.status.activity?.detail).toContain("searching"); // grep
+    expect(s.status.activity?.detail).toContain("editing"); // edit
+  });
+});
+
 describe("splitCommittable — the incremental <Static> commit boundary (pure)", () => {
   it("returns null when there is no completed paragraph yet", () => {
     expect(splitCommittable("")).toBeNull();
