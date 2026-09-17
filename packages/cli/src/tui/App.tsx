@@ -1376,11 +1376,14 @@ export function App(deps: AppDeps): ReactNode {
     (attachments.length > 0 ? 1 : 0) + // the attachment chip
     9; // status + hint + border + margins + a safety cushion so the whole stack stays under `rows`
   const composerMaxRows = composerCanGrow ? Math.max(6, rows - composerReserve) : 6;
-  // The live region is bounded STRUCTURALLY (the maxHeight clamp below), so the streamed preview no longer
-  // needs a hand-tuned reserve — this cap is now PURELY a perf bound so a 10k-line answer doesn't make yoga
-  // lay out the whole thing every delta. One screenful is always ≥ what the clamp can show, so it never
-  // trims anything the user could have seen; the full answer commits to <Static> the instant it finalizes.
-  const maxStreamLines = Math.max(8, rows);
+  // Keep the STREAMING preview a SHORT, CONSTANT tail (not one screenful). A tall streaming frame that then
+  // collapses when it settles into <Static> is what makes the layout "jump" (anchor flips bottom→top) and
+  // leaves a blank band (log-update can't cursor-up over a viewport the tall frame scrolled). A small fixed
+  // window keeps the live frame height stable, so completed answers flow top-down into scrollback without the
+  // frame ever growing tall. Nothing is lost — the full answer commits to <Static> the instant it finalizes;
+  // and once incremental-commit lands (assistant.delta), only the in-progress paragraph is ever live.
+  const STREAM_TAIL_ROWS = 8;
+  const maxStreamLines = STREAM_TAIL_ROWS;
 
   return (
     // Ink 7 STILL writes CSI 2J+3J (which erases native scrollback) whenever the dynamic (non-<Static>) frame
