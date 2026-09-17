@@ -1,7 +1,7 @@
 // Emits the publish-clean package.json for the CLI to stdout.
 //
-// The tsup bundle (packages/cli/dist/amb.js) inlines every @amb/* workspace package + zod, so the published
-// package declares only its real runtime externals (react, ink, undici — all pure-JS, no native build). The
+// The tsup bundle (packages/cli/dist/amb.js) inlines every @amb/* workspace package + zod + string-width, so the
+// published package declares only its real runtime externals (react, ink, undici — all pure-JS, no native build). The
 // package NAME defaults to "ambient-code" (the unscoped "ambient-cli" is already taken on npm); override with
 // $NPM_NAME. The installed command is always `ambient` (and the `amb` alias), independent of the package name.
 import { readFileSync } from "node:fs";
