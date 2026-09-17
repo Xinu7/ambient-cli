@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { relative } from "node:path";
 import type { ToolContext, ToolDefinition } from "@amb/protocol";
@@ -10,6 +11,9 @@ const Input = z.object({
 const Output = z.object({
   path: z.string(),
   entries: z.array(z.object({ name: z.string(), dir: z.boolean() })),
+  /** True when the directory simply doesn't exist — a soft, expected result (the model probing for a path),
+   *  NOT a tool crash. Rendered calm, not as an alarming red error. */
+  notFound: z.boolean().default(false),
 });
 
 const IGNORE = new Set([".git", "node_modules", "dist", ".DS_Store"]);
@@ -29,11 +33,23 @@ export const listTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
   outputSchema: Output,
   async execute(input, ctx: ToolContext) {
     const abs = resolveInWorkspace(ctx.workspaceRoot, input.path);
-    const dirents = await readdir(abs, { withFileTypes: true });
+    const rel = relative(ctx.workspaceRoot, abs) || ".";
+    let dirents: Dirent[];
+    try {
+      dirents = await readdir(abs, { withFileTypes: true });
+    } catch (err) {
+      // A missing / non-directory path is an EXPECTED result when the model probes for a path — return a soft
+      // not-found instead of throwing (which rendered as an alarming red crash). Anything else re-throws.
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") {
+        return { path: rel, entries: [], notFound: true };
+      }
+      throw err;
+    }
     const entries = dirents
       .filter((d) => !IGNORE.has(d.name))
       .map((d) => ({ name: d.name, dir: d.isDirectory() }))
       .sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
-    return { path: relative(ctx.workspaceRoot, abs) || ".", entries };
+    return { path: rel, entries, notFound: false };
   },
 };

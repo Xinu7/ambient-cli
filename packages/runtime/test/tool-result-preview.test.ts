@@ -83,6 +83,13 @@ describe("previewResult — human-readable tool previews (no JSON envelope)", ()
     expect(
       previewResult("glob", { pattern: "*.ts", matches: ["a.ts", "b.ts"], truncated: false }),
     ).toContain("a.ts");
+    // Soft results read calm, not as a crash: a timed-out glob says "partial"; a missing dir says "not found".
+    expect(
+      previewResult("glob", { pattern: "**", matches: ["a.ts"], truncated: true, timedOut: true }),
+    ).toContain("partial");
+    expect(previewResult("list", { path: "x", entries: [], notFound: true })).toContain(
+      "not found",
+    );
     const ws = previewResult("web_search", {
       query: "q",
       provider: "p",
