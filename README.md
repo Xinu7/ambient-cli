@@ -30,8 +30,6 @@ git clone https://github.com/xinu7/ambient-cli && cd ambient-cli
 ./scripts/install.sh   # builds + puts `ambient` on your PATH (~/.local/bin)
 ```
 
-**npm** — `npm install -g ambient-code` (the installed command is still `ambient`/`amb`).
-
 Get a key at [app.ambient.xyz/keys](https://app.ambient.xyz/keys). `ambient login` stores it in your OS
 keychain; or set `AMBIENT_API_KEY` in your environment. Browsing the fleet (`ambient models`) and
 `ambient doctor` need no key. `ambient` is the primary command; `amb` is a shorter alias.
@@ -40,15 +38,13 @@ keychain; or set `AMBIENT_API_KEY` in your environment. Browsing the fleet (`amb
 
 ```bash
 brew upgrade ambient-code          # Homebrew
-npm update -g ambient-code         # npm
 git pull && ./scripts/install.sh   # from source
 ```
 
 ### Uninstall
 
 ```bash
-brew uninstall ambient-code        # Homebrew
-npm uninstall -g ambient-code      # npm
+brew uninstall ambient-code                # Homebrew
 rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
 ```
 
