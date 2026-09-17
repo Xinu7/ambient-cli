@@ -1,7 +1,7 @@
 {
   "name": "ambient-cli-workspace",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A standalone terminal coding agent for the Ambient decentralized-inference network.",
   "license": "MIT",
   "repository": {
