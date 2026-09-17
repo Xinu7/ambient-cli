@@ -1,6 +1,6 @@
 {
   "name": "@amb/cli",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "bin": {
     "ambient": "./dist/amb.js",
