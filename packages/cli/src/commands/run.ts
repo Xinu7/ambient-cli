@@ -277,6 +277,9 @@ export async function runAgent(args: string[]): Promise<void> {
         ...(opts.verify ? { verify: opts.verify } : {}),
       }),
     });
+    // Kick the update check off CONCURRENTLY with the run (which takes far longer than the 2.5s check) so the
+    // end-of-run nudge adds zero exit latency. Never on --jsonl, which must stay machine-clean.
+    const updateCheck = jsonl ? null : checkForUpdate({ enabled: userConfig.checkUpdates });
     const result = await new Agent(client, registry).run(finalTask, opts);
     if (jsonl) {
       process.stdout.write(
@@ -288,9 +291,9 @@ export async function runAgent(args: string[]): Promise<void> {
     // Non-success stop reasons must set a nonzero exit code for scripts/CI.
     if (result.stopReason !== "complete")
       process.exitCode = result.stopReason === "cancelled" ? 130 : 1;
-    // A subtle upgrade nudge after the run (cached + best-effort; never on --jsonl, which must stay machine-clean).
-    if (!jsonl) {
-      const upd = await checkForUpdate({ enabled: userConfig.checkUpdates });
+    // A subtle upgrade nudge after the run (the check was started before the run, so it's already resolved).
+    if (updateCheck) {
+      const upd = await updateCheck;
       if (upd?.updateAvailable) process.stderr.write(dim(`\n▲ ${updateHint(upd)}\n`));
     }
   } catch (err) {

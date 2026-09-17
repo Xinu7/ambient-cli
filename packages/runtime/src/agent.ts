@@ -763,6 +763,10 @@ export class Agent {
         }
       }
 
+      // The forced wrap-up turn advertised NO tools — drop any the model hallucinated anyway so the turn
+      // always takes the no-tool completion path (a report), never runs a tool on the "tool-free" turn.
+      if (finalWrapUp) toolCalls = [];
+
       // TRUNCATION-SAFETY: a response cut at the output cap (finishReason "length") may carry
       // a tool call whose arguments are SILENTLY incomplete — executing it can corrupt the workspace. Reject
       // the whole batch and re-ask for a COMPLETE response (bounded by the turn ceiling) rather than run a half-formed
@@ -807,8 +811,10 @@ export class Agent {
         finalText = displayText;
       }
 
-      // A genuinely empty (or whitespace-only) response with no tool calls is NOT success.
-      if (displayText.trim().length === 0 && toolCalls.length === 0) {
+      // A genuinely empty (or whitespace-only) response with no tool calls is NOT success — EXCEPT on the forced
+      // wrap-up turn, where an empty reply just means the model had nothing left to add: the run is ending
+      // because it hit its turn budget, so fall through to report `max_turns` (below), not `blocked`.
+      if (!finalWrapUp && displayText.trim().length === 0 && toolCalls.length === 0) {
         emit({ schemaVersion: 1, kind: "turn.finished", sessionId, turnId, stopReason: "blocked" });
         return { stopReason: "blocked", turns, finalText, messages };
       }
@@ -1074,7 +1080,7 @@ export class Agent {
             kind: "run.checkpoint",
             sessionId,
             turnId,
-            segment: autoContinues,
+            segment: autoContinues + 1, // the segment that just paused (1-based), not the auto-continue count
             of: maxAutoContinues,
             reason: "paused",
           });

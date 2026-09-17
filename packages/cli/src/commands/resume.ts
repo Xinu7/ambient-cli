@@ -52,6 +52,8 @@ interface ResumeArgs {
   model: string;
   mode: Mode;
   autoAllow: boolean;
+  /** false when `--no-auto-continue` was passed — stop at the turn limit instead of auto-continuing. */
+  autoContinue: boolean;
   list: boolean;
   error?: string;
 }
@@ -61,6 +63,7 @@ function parseArgs(args: string[]): ResumeArgs {
   let model = AUTO_MODEL;
   let mode: Mode = "ask";
   let autoAllow = false;
+  let autoContinue = true;
   let error: string | undefined;
   const positional: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -74,6 +77,7 @@ function parseArgs(args: string[]): ResumeArgs {
       autoAllow = true;
     } else if (a === "--accept-edits") mode = "accept-edits";
     else if (a === "--yes" || a === "-y") autoAllow = true;
+    else if (a === "--no-auto-continue") autoContinue = false;
     else if (a?.startsWith("-")) error = `unknown flag: ${a}`;
     else if (a !== undefined) positional.push(a);
   }
@@ -84,6 +88,7 @@ function parseArgs(args: string[]): ResumeArgs {
     model,
     mode,
     autoAllow,
+    autoContinue,
     list: positional.length === 0,
     error,
   };
@@ -236,7 +241,8 @@ export async function runResume(args: string[]): Promise<void> {
     mode: parsed.mode,
     requestedModel: parsed.model,
     maxTurns: userConfig.maxTurns ?? 120,
-    autoContinue: userConfig.autoContinue ?? true,
+    // `--no-auto-continue` (parsed.autoContinue=false) forces off; otherwise honor the config default.
+    autoContinue: parsed.autoContinue && (userConfig.autoContinue ?? true),
     maxAutoContinues: userConfig.maxAutoContinues ?? 3,
     cwd,
     workspaceRoot: cwd,

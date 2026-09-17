@@ -1,6 +1,7 @@
 import { KEYS_URL, fetchCatalog, resolveConfig } from "@amb/ambient-api";
 import { createBuiltinRegistry } from "@amb/tools-core";
 import { githubStatus, githubSummary } from "../agent/github.js";
+import { loadConfig } from "../config.js";
 import { bold, dim } from "../render/color.js";
 import { resolveApiKey } from "../secrets.js";
 import { checkForUpdate } from "../update-check.js";
@@ -13,7 +14,8 @@ export async function runDoctor(): Promise<void> {
   process.stdout.write(`${bold("ambient doctor")}\n\n`);
 
   // Version + a best-effort "newer available" check (cached, never blocks — offline just shows the version).
-  const upd = await checkForUpdate();
+  // Honor the same opt-out as everywhere else: config `checkUpdates: false` (and env / CI, inside checkForUpdate).
+  const upd = await checkForUpdate({ enabled: loadConfig().checkUpdates });
   if (upd?.updateAvailable)
     warn(`ambient ${CURRENT_VERSION} — ${upd.latest} available: run 'brew upgrade ambient-code'`);
   else ok(`ambient ${CURRENT_VERSION}${upd ? " (up to date)" : ""}`);

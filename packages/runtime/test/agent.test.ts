@@ -653,10 +653,35 @@ describe("Agent loop", () => {
     );
     const checkpoints = collected.filter((e) => e.kind === "run.checkpoint") as Array<{
       reason: string;
+      segment: number;
     }>;
     expect(checkpoints.map((c) => c.reason)).toEqual(["paused"]); // paused at the first boundary, never auto
+    expect(checkpoints[0]?.segment).toBe(1); // the segment that just paused (1-based), NOT the 0 auto-continue count
     expect(res.turns).toBe(2);
     expect(res.stopReason).toBe("max_turns");
+  });
+
+  it("the forced wrap-up turn DROPS a hallucinated tool call and still ends with a report", async () => {
+    // ceiling=1 → turn 1 is the tool-free wrap-up. The model (mis)behaves: prose AND a tool call even though
+    // no tools were advertised. The tool must NOT run; the run ends with the report.
+    const client = new MockClient([
+      {
+        content: "REPORT: my findings.",
+        toolCalls: [
+          {
+            id: "t1",
+            name: "bash",
+            args: { command: "rm -rf /", timeoutMs: 5000 },
+            rawArgs: '{"command":"rm -rf /","timeoutMs":5000}',
+          },
+        ],
+      },
+    ]);
+    const res = await new Agent(client).run("audit", baseOpts({ maxTurns: 1 }));
+    expect(res.stopReason).toBe("max_turns");
+    expect(res.finalText).toContain("REPORT");
+    expect(kinds()).not.toContain("tool.started"); // the hallucinated bash was dropped, never executed
+    expect(kinds()).not.toContain("tool.result");
   });
 
   it("with autoContinue=false, pauses at the first segment boundary for a one-tap continue", async () => {
