@@ -10,8 +10,8 @@ import stringWidth from "string-width";
  * uses `string-width` (the exact measurer Ink 7 wraps with) so our layout agrees with Ink's rendering.
  */
 
-/** Extra columns the composer draws before the text (the "▸ "/"  " gutter) — shared so App + Composer agree. */
-export const EDITOR_GUTTER = 2;
+/** Extra columns the composer draws before the text (the "▸ "/"  " gutter). */
+const EDITOR_GUTTER = 2;
 
 /** The usable text width inside the composer box, mirroring Composer.tsx's boxW math. The single source of
  *  truth for BOTH the key handler (caret motion) and the render, so their wrapping can never drift. */
@@ -21,11 +21,6 @@ export function composerTextWidth(width: number): number {
   // truncates the ▋ off the right edge. Floor at 1 (NOT a larger constant) so the caret reserve holds even on
   // a pathologically narrow pane — a fixed floor of 8 would exceed the text area at boxW<13 and clip the caret.
   return Math.max(1, boxW - 2 - EDITOR_GUTTER - 1);
-}
-
-/** Visual width of a string (wide CJK = 2, most emoji = 2, control/zero-width = 0). */
-export function textWidth(s: string): number {
-  return stringWidth(s);
 }
 
 export function clampCursor(text: string, cursor: number): number {

@@ -1,14 +1,9 @@
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
+import { mmss } from "../format.js";
 import { globeFrame } from "../logo.js";
 import type { WaveState } from "../state.js";
 import { AmbientTheme } from "../theme.js";
-
-/** m:ss for the wave clock. */
-function fmtElapsed(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
 
 function oneLine(s: string, max: number): string {
   const flat = s.replace(/\s+/g, " ").trim();
@@ -38,7 +33,7 @@ export function WaveSummary({
   width: number;
 }): ReactNode {
   const running = Math.max(0, wave.total - wave.done);
-  const header = `${running}/${wave.total} ${wave.roleWord} running · ${fmtElapsed(elapsed)}${
+  const header = `${running}/${wave.total} ${wave.roleWord} running · ${mmss(elapsed)}${
     expanded ? " · ↑ collapse" : " · ↓ / ctrl+o to view"
   }`;
   // Collapsed: only the most-recent action. Expanded: the whole bounded ring (already ≤ MAX_WAVE_ACTIONS).

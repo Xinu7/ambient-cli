@@ -1,14 +1,9 @@
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
+import { mmss } from "../format.js";
 import { THINKING_GLOBE } from "../globe.js";
 import type { Activity } from "../state.js";
 import { AmbientTheme } from "../theme.js";
-
-/** Format seconds as m:ss (Codex-style elapsed). */
-function elapsedLabel(sec: number): string {
-  const s = Math.max(0, Math.floor(sec));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
 
 /**
  * The one live line, shown ONLY while a run is active: the Ambient globe SPINNING (a real rotating braille
@@ -51,9 +46,7 @@ export function ActivityLine({
     effort && activity.verb === "Thinking" ? `${activity.verb} · ${effort}` : activity.verb;
   // Bound the verb STRING (when there's no shrinkable detail) to what's left after the clock, so a long verb
   // like "Fixing failed verification" can't clip the priority phase clock on a narrow row.
-  const clockW =
-    `  ·  ${elapsedLabel(phase)}`.length +
-    (showRun ? `  (run ${elapsedLabel(elapsed)})`.length : 0);
+  const clockW = `  ·  ${mmss(phase)}`.length + (showRun ? `  (run ${mmss(elapsed)})`.length : 0);
   const verbBudget = activity.detail ? undefined : Math.max(3, textW - clockW);
   const verb =
     verbBudget !== undefined && verbText.length > verbBudget
@@ -76,10 +69,8 @@ export function ActivityLine({
         </Box>
       ) : null}
       <Box flexShrink={0}>
-        <Text color={AmbientTheme.dim}>{`  ·  ${elapsedLabel(phase)}`}</Text>
-        {showRun ? (
-          <Text color={AmbientTheme.dim}>{`  (run ${elapsedLabel(elapsed)})`}</Text>
-        ) : null}
+        <Text color={AmbientTheme.dim}>{`  ·  ${mmss(phase)}`}</Text>
+        {showRun ? <Text color={AmbientTheme.dim}>{`  (run ${mmss(elapsed)})`}</Text> : null}
       </Box>
     </Box>
   );

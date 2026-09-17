@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Grant, Mode } from "@amb/protocol";
-import type { EffortSetting } from "@amb/runtime";
 import { z } from "zod";
 
 /**
@@ -79,9 +78,4 @@ export function tuiAxesFromMode(mode: Mode): {
 /** Seed session-scoped grants from the config allowlist (the user's explicit auto-allow choice). */
 export function grantsFromConfig(config: AmbConfig): Grant[] {
   return (config.allow ?? []).map((toolName) => ({ scope: "session" as const, toolName }));
-}
-
-/** Narrow the config effort to the runtime's EffortSetting (identical union; this documents the intent). */
-export function configEffort(config: AmbConfig): EffortSetting | undefined {
-  return config.effort;
 }
