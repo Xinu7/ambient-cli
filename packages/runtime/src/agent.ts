@@ -976,14 +976,21 @@ export class Agent {
         // Prompt-injection defense: scan the (capped) tool output the model will actually
         // see; if it contains instruction-like text, wrap it in a DATA boundary + neutralize forged action
         // fences so an indirect injection can't hijack the loop. A deterministic scan can't itself be injected.
-        // Successful results ALWAYS carry external content. An ERROR string is normally our own (trusted) text,
-        // EXCEPT for an MCP tool: a hostile server's JSON-RPC error `message` is attacker-controlled and would
-        // otherwise reach the model unguarded — so guard external-tool failures too.
-        const externalFailure = !o.ok && o.toolName.startsWith("mcp__");
-        const guarded =
-          o.ok || externalFailure
-            ? guardUntrustedResult(capped)
-            : { text: capped, scan: { flagged: false, patterns: [] as string[] } };
+        // Gate on PROVENANCE, not on success: only content that can carry attacker-controlled bytes is
+        // untrusted — network-sourced tools (web_fetch/web_search, effect `network`), MCP tools (server-
+        // controlled), and bash (a `curl`/`cat downloaded-file` carries external bytes yet stays tagged
+        // process/read/write). A pure local read/grep/glob/list is TRUSTED workspace content; scanning it wraps
+        // the agent's own source (which legitimately contains phrases like "ignore previous instructions" or
+        // "bypass permissions") as untrusted data — a false positive that adds noise and a degrade-the-model
+        // "treat as DATA" framing. For a FAILURE, an ERROR string is normally our own (trusted) text, EXCEPT an
+        // MCP tool whose JSON-RPC error `message` is attacker-controlled — so guard MCP failures too.
+        const effects = this.registry.get(o.toolName)?.manifest.effects ?? [];
+        const guard = o.ok
+          ? effects.includes("network") || o.toolName.startsWith("mcp__") || o.toolName === "bash"
+          : o.toolName.startsWith("mcp__");
+        const guarded = guard
+          ? guardUntrustedResult(capped)
+          : { text: capped, scan: { flagged: false, patterns: [] as string[] } };
         if (guarded.scan.flagged) {
           emit({
             schemaVersion: 1,
