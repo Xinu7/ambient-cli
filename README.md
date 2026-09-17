@@ -36,6 +36,22 @@ Get a key at [app.ambient.xyz/keys](https://app.ambient.xyz/keys). `ambient logi
 keychain; or set `AMBIENT_API_KEY` in your environment. Browsing the fleet (`ambient models`) and
 `ambient doctor` need no key. `ambient` is the primary command; `amb` is a shorter alias.
 
+### Update
+
+```bash
+brew upgrade ambient-code          # Homebrew
+npm update -g ambient-code         # npm
+git pull && ./scripts/install.sh   # from source
+```
+
+### Uninstall
+
+```bash
+brew uninstall ambient-code        # Homebrew
+npm uninstall -g ambient-code      # npm
+rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
+```
+
 ## What makes it different
 
 - **Live model fleet.** Every run shows which Ambient model is serving it (requested → served), its readiness,
