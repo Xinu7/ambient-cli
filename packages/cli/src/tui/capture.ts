@@ -22,9 +22,12 @@ const EXT_MEDIA: Record<string, ImageAttachment["mediaType"]> = {
 
 /**
  * Clean a burst arriving on stdin (a paste, or a drag-dropped path): drop bracketed-paste markers
- * (`\x1b[200~`/`\x1b[201~`) and any other ANSI CSI escape, normalize CRLF/CR → LF, and strip stray C0
- * control characters — without touching the visible text (keeps \n and \t). This keeps marker/control
+ * (`\x1b[200~`/`\x1b[201~`) and any other ANSI CSI escape, normalize CRLF/CR → LF, expand TABs to spaces, and
+ * strip stray C0 control characters — keeping the visible text (and newlines). This keeps marker/control
  * garbage out of the composer buffer and lets a dropped path still be recognized once its markers are gone.
+ * Tabs become spaces because the terminal expands a raw \t to the next 8-col stop while our width math (and
+ * Ink's) measures it as zero — that mismatch desynced the caret/wrap on tab-indented pastes; spaces are width-1
+ * so display + caret math stay exact (a prompt doesn't need tab fidelity).
  */
 export function normalizePastedText(raw: string): string {
   return (
@@ -37,7 +40,8 @@ export function normalizePastedText(raw: string): string {
       // biome-ignore lint/suspicious/noControlCharactersInRegex: matching real terminal control sequences
       .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
       .replace(/\r\n?/g, "\n") // CRLF / CR -> LF
-      // other C0 controls + DEL (keep \n and \t), incl. any lone ESC left after CSI stripping
+      .replace(/\t/g, "  ") // expand tabs to spaces so width math == what the terminal shows
+      // other C0 controls + DEL (keep \n), incl. any lone ESC left after CSI stripping
       // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping stray terminal control bytes
       .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
   );
