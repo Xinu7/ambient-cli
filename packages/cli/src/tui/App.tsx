@@ -65,6 +65,7 @@ import {
 import { StatusLine } from "./components/StatusLine.js";
 import { Thinking } from "./components/Thinking.js";
 import { Transcript, TranscriptRow } from "./components/Transcript.js";
+import { WaveSummary } from "./components/WaveSummary.js";
 import {
   clampCursor,
   composerTextWidth,
@@ -252,6 +253,7 @@ export function App(deps: AppDeps): ReactNode {
   const [, setResizeTick] = useState(0);
   const runStartRef = useRef(0);
   const phaseStartRef = useRef(0);
+  const waveStartRef = useRef(0); // stamped when a subagent wave first appears (for its elapsed clock)
 
   // Skills browser (/skills): filter text + a LIVE pinned set (toggled with Tab, written at the edge). The
   // filtered+sorted rows are held in a ref too, so the key handler can navigate them synchronously.
@@ -742,6 +744,13 @@ export function App(deps: AppDeps): ReactNode {
     phaseStartRef.current = Date.now();
   }, [state.status.activity?.verb]);
 
+  // Stamp the wave's start when its id first appears; clear it when the wave ends. Keeps the elapsed clock in
+  // the view (a ref), so the reducer stays pure. Keyed on the wave ID by design (re-stamp only on begin/end/swap).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — keyed on state.wave?.id, not the object
+  useEffect(() => {
+    waveStartRef.current = state.wave ? Date.now() : 0;
+  }, [state.wave?.id]);
+
   // On unmount (quit), abort any in-flight run so nothing keeps executing after the UI is gone.
   useEffect(() => () => controllerRef.current?.abort(), []);
 
@@ -1081,9 +1090,7 @@ export function App(deps: AppDeps): ReactNode {
 
     // Expand/collapse the LIVE subagent wave so you can SEE what the children are doing (the user's ask):
     // Ctrl+O toggles anytime; ↓ expands / ↑ collapses when no overlay owns the arrows. View-only, safe mid-run.
-    const hasRunningSubagent = state.transcript.some(
-      (t) => t.kind === "subagent" && t.status === "running",
-    );
+    const hasRunningSubagent = state.wave !== undefined;
     if (hasRunningSubagent && key.ctrl && ch === "o") {
       setSubagentExpanded((v) => !v);
       return;
@@ -1454,10 +1461,9 @@ export function App(deps: AppDeps): ReactNode {
   // and once incremental-commit lands (assistant.delta), only the in-progress paragraph is ever live.
   const STREAM_TAIL_ROWS = 8;
   const maxStreamLines = STREAM_TAIL_ROWS;
-  // Rows budget for a live subagent wave so a big fan-out can't become a tall frame (which would make the
-  // layout jump). The tree windows itself to this and shows "… +K more agents"; generous so a normal wave is
-  // never truncated (each collapsed child is one row), tight enough that an expanded wave stays bounded.
-  const subagentMaxRows = Math.max(6, rows - 14);
+  // Seconds since the live wave began — from a ref stamped when the wave id first appears (keeps `reduce` pure).
+  const waveElapsed =
+    state.wave && waveStartRef.current ? (Date.now() - waveStartRef.current) / 1000 : 0;
 
   return (
     // Ink 7 STILL writes CSI 2J+3J (which erases native scrollback) whenever the dynamic (non-<Static>) frame
@@ -1492,13 +1498,7 @@ export function App(deps: AppDeps): ReactNode {
 
           {/* The LIVE tail — the current turn's in-flight items (streamed preview perf-capped in TranscriptRow). */}
           {liveItems.length > 0 ? (
-            <Transcript
-              items={liveItems}
-              width={interior}
-              subagentExpanded={subagentExpanded}
-              maxStreamLines={maxStreamLines}
-              subagentMaxRows={subagentMaxRows}
-            />
+            <Transcript items={liveItems} width={interior} maxStreamLines={maxStreamLines} />
           ) : null}
 
           {/* Middle panels: goal, plan, live reasoning, the activity flightline, the queue, and any open picker. */}
@@ -1521,6 +1521,18 @@ export function App(deps: AppDeps): ReactNode {
               width={width}
               effort={state.status.resolvedEffort}
             />
+            {/* The LIVE subagent wave — a small, fixed-height panel (never a tall re-rendering tree), so the
+                dynamic frame stays under the viewport and can't scroll-strand/strobe. Each scout's result is a
+                settled `subagent-line` in scrollback — scroll up to read it. */}
+            {state.wave ? (
+              <WaveSummary
+                wave={state.wave}
+                frame={tick}
+                elapsed={waveElapsed}
+                expanded={subagentExpanded}
+                width={interior}
+              />
+            ) : null}
             {/* The queue/steer panel — labelled + count (the user: "I can't even see the queue"). Its visible
             rows are capped to a rows-budget (qMax) so the always-on stack can't grow past the screen. */}
             {queued.length > 0 ? (

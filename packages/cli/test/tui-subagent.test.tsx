@@ -1,62 +1,54 @@
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
-import { Subagent } from "../src/tui/components/Subagent.js";
-import type { SubagentChild, TranscriptItem } from "../src/tui/state.js";
+import { WaveSummary } from "../src/tui/components/WaveSummary.js";
+import type { WaveAction, WaveState } from "../src/tui/state.js";
 
-type SubagentItem = Extract<TranscriptItem, { kind: "subagent" }>;
-
-function child(i: number, over: Partial<SubagentChild> = {}): SubagentChild {
-  return {
-    childSessionId: `c${i}`,
-    label: `scout-${i}`,
-    role: "scout",
-    model: "glm-5.2",
-    status: "running",
-    activity: { verb: "Reading", detail: `src/file-${i}.ts` },
-    tools: [],
-    ...over,
-  };
+function action(i: number): WaveAction {
+  return { childSessionId: `c${i}`, label: `scout-${i}`, text: `Reading src/file-${i}.ts` };
 }
-
-function wave(n: number): SubagentItem {
+function wave(total: number, actions: number): WaveState {
   return {
-    kind: "subagent",
     id: "w1",
-    children: Array.from({ length: n }, (_, i) => child(i + 1)),
-    status: "running",
-    collapsed: false,
-    spin: 0,
+    roleWord: "scouts",
+    total,
+    done: 0,
+    actions: Array.from({ length: actions }, (_, i) => action(i + 1)),
+    labels: {},
+    okCount: 0,
   };
 }
 
-describe("Subagent tree is bounded to a rows budget (a big wave can't become a tall frame)", () => {
-  it("windows a large wave to maxRows and shows a '… +K more agents' marker", () => {
-    const { lastFrame, unmount } = render(<Subagent item={wave(12)} width={80} maxRows={6} />);
+describe("WaveSummary — the live wave is a small, FIXED-HEIGHT panel (never a tall re-rendering tree)", () => {
+  it("collapsed: header + at most ONE action line, regardless of how many run", () => {
+    const { lastFrame, unmount } = render(
+      <WaveSummary wave={wave(8, 4)} frame={0} elapsed={42} width={80} />,
+    );
     const frame = lastFrame() ?? "";
     const lines = frame.split("\n").filter((l) => l.trim().length > 0);
-    // header (1) + a handful of children + the "more" marker — never the full 12.
-    expect(lines.length).toBeLessThanOrEqual(6);
-    expect(frame).toContain("more agents");
-    expect(frame).toContain("subagent"); // the header survives
-    expect(frame).toContain("scout-1"); // the first children are the ones kept
-    expect(frame).not.toContain("scout-12"); // the tail is windowed away
+    expect(lines.length).toBeLessThanOrEqual(2); // header + one action — a big wave can't grow the panel
+    expect(frame).toContain("8/8 scouts running"); // running/total from the wave
+    expect(frame).toContain("0:42"); // elapsed clock
+    expect(frame).toContain("view"); // the expand affordance
     unmount();
   });
 
-  it("renders every child when the budget is ample (no marker)", () => {
-    const { lastFrame, unmount } = render(<Subagent item={wave(4)} width={80} maxRows={40} />);
+  it("expanded: one line per running action, bounded (never a wall)", () => {
+    const { lastFrame, unmount } = render(
+      <WaveSummary wave={wave(8, 4)} frame={0} elapsed={5} expanded width={80} />,
+    );
     const frame = lastFrame() ?? "";
-    expect(frame).not.toContain("more agents");
+    const lines = frame.split("\n").filter((l) => l.trim().length > 0);
+    expect(lines.length).toBeLessThanOrEqual(5); // header + ≤4 action lines (the MAX_WAVE_ACTIONS ring)
     expect(frame).toContain("scout-1");
-    expect(frame).toContain("scout-4");
+    expect(frame).toContain("collapse");
     unmount();
   });
 
-  it("defaults to unbounded when no budget is passed (back-compat)", () => {
-    const { lastFrame, unmount } = render(<Subagent item={wave(10)} width={80} />);
-    const frame = lastFrame() ?? "";
-    expect(frame).not.toContain("more agents");
-    expect(frame).toContain("scout-10");
+  it("shows the done count in the header as children finish", () => {
+    const { lastFrame, unmount } = render(
+      <WaveSummary wave={{ ...wave(4, 2), done: 2 }} frame={0} elapsed={10} width={80} />,
+    );
+    expect(lastFrame() ?? "").toContain("2/4 scouts running"); // 4 total, 2 still running
     unmount();
   });
 });

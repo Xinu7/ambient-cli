@@ -219,9 +219,20 @@ describe("tui reducer", () => {
     expect(s.transcript.at(-1)).toMatchObject({ kind: "notice", level: "info" });
   });
 
-  it("subagent lifecycle: started creates a group, tool events fill it, finished collapses w/ summary", () => {
+  it("subagent lifecycle: wave→started→tool feed the LIVE panel; finished commits a scrollback line", () => {
     let s = init();
     const sb = { ...base, toolCallId: "tc_p", childSessionId: "ses_c1" };
+    // The one-shot wave event fixes the exact size up front.
+    s = reduce(s, {
+      kind: "subagent.wave",
+      ...base,
+      toolCallId: "tc_p",
+      count: 1,
+      role: "scout",
+    } as NewEvent);
+    expect(s.wave).toMatchObject({ id: "tc_p", total: 1, done: 0, roleWord: "scouts" });
+    expect(s.transcript.some((t) => t.kind === "subagent-line")).toBe(false); // nothing in scrollback yet
+
     s = reduce(s, {
       kind: "subagent.started",
       ...sb,
@@ -231,18 +242,8 @@ describe("tui reducer", () => {
       readOnly: true,
       prompt: "find auth",
     } as NewEvent);
-    let item = s.transcript.find((t) => t.kind === "subagent") as {
-      kind: "subagent";
-      children: { label: string; model: string; tools: unknown[]; status: string }[];
-      status: string;
-      collapsed: boolean;
-    };
-    expect(item.children).toHaveLength(1);
-    expect(item.children[0]).toMatchObject({
-      label: "find-auth",
-      model: "glm-5.2",
-      status: "running",
-    });
+    expect(s.wave?.total).toBe(1); // exact-total wave doesn't double-count on started
+    expect(s.wave?.labels.ses_c1).toBe("find-auth");
 
     s = reduce(s, {
       kind: "subagent.tool",
@@ -252,16 +253,9 @@ describe("tui reducer", () => {
       status: "running",
       preview: "/auth/",
     } as NewEvent);
-    s = reduce(s, {
-      kind: "subagent.tool",
-      ...sb,
-      childToolCallId: "tc_c1",
-      toolName: "grep",
-      status: "ok",
-    } as NewEvent);
-    item = s.transcript.find((t) => t.kind === "subagent") as typeof item;
-    expect(item.children[0]?.tools).toHaveLength(1); // running row settled in place, not duplicated
-    expect((item.children[0]?.tools[0] as { status: string }).status).toBe("ok");
+    // The live action ring reflects what the child is doing right now (no tall tool-row list).
+    expect(s.wave?.actions).toHaveLength(1);
+    expect(s.wave?.actions[0]?.text).toContain("/auth/");
 
     s = reduce(s, {
       kind: "subagent.finished",
@@ -272,24 +266,87 @@ describe("tui reducer", () => {
       summary: "auth is in middleware/limit.ts",
       durationMs: 12000,
     } as NewEvent);
-    item = s.transcript.find((t) => t.kind === "subagent") as typeof item;
-    expect(item.status).toBe("ok");
-    expect(item.collapsed).toBe(true);
-    expect((item.children[0] as { summary?: string }).summary).toContain("middleware/limit.ts");
+    // The wave is done → the live panel is gone, and a durable child line + a done line are in scrollback.
+    expect(s.wave).toBeUndefined();
+    const lines = s.transcript.filter(
+      (t): t is Extract<TranscriptItem, { kind: "subagent-line" }> => t.kind === "subagent-line",
+    );
+    const child = lines.find((l) => l.variant === "child");
+    expect(child).toMatchObject({ label: "find-auth", childStatus: "ok", turns: 3 });
+    expect(child?.summary).toContain("middleware/limit.ts");
+    expect(lines.find((l) => l.variant === "done")).toMatchObject({
+      count: 1,
+      okCount: 1,
+      failCount: 0,
+    });
   });
 
-  it("subagent event with an unknown parent id is a no-op (default passthrough intact)", () => {
-    const s0 = init();
-    const s1 = reduce(s0, {
+  it("first scout's line commits to scrollback WHILE a sibling still runs (append-only, settle-at-bottom)", () => {
+    let s = init();
+    s = reduce(s, {
+      kind: "subagent.wave",
+      ...base,
+      toolCallId: "tc_p",
+      count: 2,
+      role: "scout",
+    } as NewEvent);
+    for (const c of ["ses_a", "ses_b"]) {
+      s = reduce(s, {
+        kind: "subagent.started",
+        ...base,
+        toolCallId: "tc_p",
+        childSessionId: c,
+        role: "scout",
+        label: c,
+        model: "m",
+        readOnly: true,
+        prompt: "x",
+      } as NewEvent);
+    }
+    s = reduce(s, {
+      kind: "subagent.finished",
+      ...base,
+      toolCallId: "tc_p",
+      childSessionId: "ses_a",
+      stopReason: "complete",
+      turns: 1,
+      toolCount: 0,
+      summary: "done a",
+      durationMs: 100,
+    } as NewEvent);
+    // ses_a's line is already settled + committed while the wave (ses_b) is still live.
+    expect(s.wave?.done).toBe(1);
+    const firstLive = s.transcript.findIndex((it) => !isSettled(it));
+    const aLine = s.transcript.findIndex(
+      (t) => t.kind === "subagent-line" && t.variant === "child" && t.label === "ses_a",
+    );
+    expect(aLine).toBeGreaterThanOrEqual(0);
+    expect(firstLive === -1 || aLine < firstLive).toBe(true); // it's in the settled (scrollback) prefix
+  });
+
+  it("subagent.delta is a no-op for the view; unknown-parent tool is a no-op", () => {
+    let s = init();
+    s = reduce(s, { kind: "subagent.wave", ...base, toolCallId: "tc_p", count: 1 } as NewEvent);
+    const before = s;
+    s = reduce(s, {
+      kind: "subagent.delta",
+      ...base,
+      toolCallId: "tc_p",
+      text: "thinking…",
+    } as NewEvent);
+    expect(s.transcript).toEqual(before.transcript);
+    expect(s.wave).toEqual(before.wave);
+    // A tool event for a different (unknown) wave id changes nothing.
+    const s2 = reduce(s, {
       kind: "subagent.tool",
       ...base,
-      toolCallId: "tc_missing",
+      toolCallId: "tc_other",
       childSessionId: "ses_x",
       childToolCallId: "tc_y",
       toolName: "read",
       status: "running",
     } as NewEvent);
-    expect(s1.transcript).toEqual(s0.transcript);
+    expect(s2.wave).toEqual(s.wave);
   });
 
   it("a whitespace-only delta does NOT open a spinning streaming item", () => {
@@ -954,9 +1011,9 @@ describe("tui reducer — subagent visibility (Phase 6)", () => {
     expect(s.status.activity?.detail).toBe("working"); // settled → neutral, NOT "searching 12 hits"
   });
 
-  it("subagent.delta accumulates a bounded live-prose tail on the group (you SEE what it's thinking)", () => {
-    let s = startGroup(init());
-    s = reduce(s, {
+  it("subagent.delta is a no-op for the view (per-token prose no longer drives a tall re-rendering panel)", () => {
+    const s0 = startGroup(init());
+    const s1 = reduce(s0, {
       kind: "subagent.delta",
       schemaVersion: 1,
       sessionId: "ses_a",
@@ -965,10 +1022,8 @@ describe("tui reducer — subagent visibility (Phase 6)", () => {
       toolCallId: "tc_p",
       text: "looking at the login handler",
     } as NewEvent);
-    const group = s.transcript.find((t) => t.kind === "subagent");
-    expect(group?.kind === "subagent" ? group.liveText : "").toContain(
-      "looking at the login handler",
-    );
+    expect(s1.transcript).toEqual(s0.transcript);
+    expect(s1.wave).toEqual(s0.wave);
   });
 });
 
@@ -1021,16 +1076,16 @@ describe("isSettled — the Static/live split for scrollback (Phase 3)", () => {
     expect(
       isSettled({ kind: "tool", id: "t", name: "bash", preview: "$ x", status: "running" }),
     ).toBe(false);
+    // A subagent-line is a durable scrollback record — ALWAYS settled (it never mutates after it's pushed).
     expect(
       isSettled({
-        kind: "subagent",
+        kind: "subagent-line",
         id: "s",
-        children: [],
-        status: "running",
-        collapsed: false,
-        spin: 0,
+        variant: "child",
+        roleWord: "scouts",
+        label: "x",
       }),
-    ).toBe(false);
+    ).toBe(true);
     // settled — a user item is ALWAYS settled, even an optimistic echo: its text never changes, and treating
     // it as live would freeze the split forever if a run aborts before turn.started clears the flag.
     expect(isSettled({ kind: "user", id: "u", text: "hi", optimistic: true })).toBe(true);

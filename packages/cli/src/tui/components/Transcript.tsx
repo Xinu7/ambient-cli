@@ -3,7 +3,13 @@ import type { ReactNode } from "react";
 import { globeFrame } from "../logo.js";
 import type { TranscriptItem } from "../state.js";
 import { AmbientTheme } from "../theme.js";
-import { Subagent } from "./Subagent.js";
+
+/** m:ss for a subagent-line's duration. */
+function fmtMs(ms?: number): string {
+  if (ms == null) return "";
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
 
 /** Flatten newlines + truncate one line to `max` cols so nothing wraps the borderless column (Approval bar). */
 function clip(text: string, max: number): string {
@@ -106,15 +112,11 @@ function Output({ text, width }: { text: string; width: number }): ReactNode {
 export function TranscriptRow({
   item,
   width,
-  subagentExpanded = false,
   maxStreamLines = STREAM_MAX_LINES,
-  subagentMaxRows,
 }: {
   item: TranscriptItem;
   width: number;
-  subagentExpanded?: boolean;
   maxStreamLines?: number;
-  subagentMaxRows?: number;
 }): ReactNode {
   switch (item.kind) {
     case "user": {
@@ -245,15 +247,45 @@ export function TranscriptRow({
       );
     }
 
-    case "subagent":
+    case "subagent-line": {
+      // The DURABLE scrollback record of a subagent wave — scroll up to read what each scout did.
+      if (item.variant === "done") {
+        const ok = item.okCount ?? 0;
+        const fail = item.failCount ?? 0;
+        return (
+          <Box>
+            <Text color={AmbientTheme.dim} wrap="truncate">
+              {`◆ ${item.count ?? 0} ${item.roleWord} finished${
+                fail > 0 ? ` (${ok} ok · ${fail} failed)` : ""
+              }`}
+            </Text>
+          </Box>
+        );
+      }
+      const okMark = item.childStatus !== "fail";
+      const meta = `${item.turns ?? 0} turn${item.turns === 1 ? "" : "s"}${
+        item.durationMs != null ? ` · ${fmtMs(item.durationMs)}` : ""
+      }`;
+      const summary = item.summary
+        ? capLines(hardWrap(item.summary, Math.max(8, width - 4)), 6)
+        : "";
       return (
-        <Subagent
-          item={item}
-          width={width}
-          expanded={subagentExpanded}
-          maxRows={subagentMaxRows ?? Number.POSITIVE_INFINITY}
-        />
+        <Box flexDirection="column" marginTop={1}>
+          <Box>
+            <Text color={okMark ? AmbientTheme.add : AmbientTheme.bad}>{okMark ? "✓ " : "✗ "}</Text>
+            <Text color={AmbientTheme.fg}>{`${item.label ?? ""}  `}</Text>
+            <Text color={AmbientTheme.dim}>{meta}</Text>
+          </Box>
+          {summary ? (
+            <Box>
+              <Text color={AmbientTheme.dim} wrap="wrap">
+                {`  ${summary}`}
+              </Text>
+            </Box>
+          ) : null}
+        </Box>
       );
+    }
 
     case "handoff":
       // A role handoff (planner→executor→…) — distinct glyph ⇢ from the ↪ substitution receipt below.
@@ -308,30 +340,19 @@ export function Transcript({
   items,
   window,
   width = 80,
-  subagentExpanded = false,
   maxStreamLines = STREAM_MAX_LINES,
-  subagentMaxRows,
 }: {
   items: TranscriptItem[];
   window?: number;
   width?: number;
-  subagentExpanded?: boolean;
   maxStreamLines?: number;
-  subagentMaxRows?: number;
 }): ReactNode {
   const shown =
     window !== undefined && items.length > window ? items.slice(items.length - window) : items;
   return (
     <Box flexDirection="column">
       {shown.map((item) => (
-        <TranscriptRow
-          key={item.id}
-          item={item}
-          width={width}
-          subagentExpanded={subagentExpanded}
-          maxStreamLines={maxStreamLines}
-          subagentMaxRows={subagentMaxRows}
-        />
+        <TranscriptRow key={item.id} item={item} width={width} maxStreamLines={maxStreamLines} />
       ))}
     </Box>
   );

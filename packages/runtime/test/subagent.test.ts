@@ -96,6 +96,14 @@ describe("runSubagents", () => {
     );
     const started = emitted.filter((e) => e.kind === "subagent.started");
     const finished = emitted.filter((e) => e.kind === "subagent.finished");
+    // A single `subagent.wave` is announced up front (before any child starts) with the EXACT wave size, so
+    // the UI knows N immediately and the closing line fires exactly once even for waves > concurrency.
+    const waves = emitted.filter((e) => e.kind === "subagent.wave");
+    expect(waves).toHaveLength(1);
+    expect((waves[0] as { count: number }).count).toBe(2);
+    expect(emitted.indexOf(waves[0] as NewEvent)).toBeLessThan(
+      emitted.indexOf(started[0] as NewEvent),
+    );
     expect(started).toHaveLength(2);
     expect(finished).toHaveLength(2);
     // every subagent event is correlated to the parent tool call
