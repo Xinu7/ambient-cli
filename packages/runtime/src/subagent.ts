@@ -137,6 +137,22 @@ export async function runSubagents(
   };
   const childDeps: SubagentDeps = { ...deps, approve: gatedApprove };
 
+  // Announce the wave up front (one-shot) so the UI knows the EXACT size immediately — the header reads N from
+  // frame one and the "wave finished" line fires exactly once even for waves larger than the concurrency limit.
+  const sameRole =
+    specs.length > 0 && specs.every((s) => s.role === (specs[0] as SubagentSpec).role);
+  ctx.emit({
+    schemaVersion: 1,
+    sessionId: ctx.scope.sessionId,
+    turnId: ctx.scope.turnId,
+    attemptId: ctx.scope.attemptId,
+    toolCallId: ctx.toolCallId,
+    kind: "subagent.wave",
+    count: specs.length,
+    ...(sameRole ? { role: (specs[0] as SubagentSpec).role } : {}),
+    labels: specs.map((s) => s.label),
+  });
+
   let next = 0;
   const worker = async (): Promise<void> => {
     while (true) {
@@ -210,9 +226,11 @@ function runOneChild(
         status: ev.ok ? "ok" : "fail",
         ...(ev.preview ? { preview: ev.preview } : {}),
       });
-    } else if (ev.kind === "assistant.delta") {
-      ctx.emit({ ...base, kind: "subagent.delta", text: ev.text });
     }
+    // NOTE: we deliberately no longer re-tag the child's per-token `assistant.delta` onto the parent stream.
+    // Streaming a child's prose live drove the tall, constantly-repainting wave panel (the strobe); the child's
+    // substance now lands in its `subagent.finished` summary, which commits to the parent's scrollback. The
+    // child's own durable log still captures every delta via `durableSink(ev)` above.
   };
 
   ctx.emit({

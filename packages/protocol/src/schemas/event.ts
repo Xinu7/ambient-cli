@@ -211,6 +211,15 @@ export const EventSchema = z.discriminatedUnion("kind", [
 
   // ── subagents (nested delegation; each child runs in its OWN session — these events correlate its live
   //    activity onto the PARENT stream, keyed by the parent tool-call + the child session) ────────────────
+  // Emitted ONCE, up front, before any child starts — so the UI knows the exact wave size immediately (the
+  // header reads N from frame one, and the "wave finished" line fires exactly once even for waves larger than
+  // the concurrency limit). Additive/optional; older logs without it fall back to counting `subagent.started`.
+  aev("subagent.wave", {
+    toolCallId: idStr("tc"),
+    count: z.number().int().positive(),
+    role: z.enum(["scout", "oracle", "builder"]).optional(),
+    labels: z.array(z.string()).optional(),
+  }),
   aev("subagent.started", {
     toolCallId: idStr("tc"), // the parent `subagent` tool call
     childSessionId: idStr("ses"), // the child's own durable, resumable session

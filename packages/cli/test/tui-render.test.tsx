@@ -300,81 +300,38 @@ describe("tui render", () => {
     unmount();
   });
 
-  it("Transcript renders the nested subagent tree (running) and its collapsed summaries", () => {
-    const running: TranscriptItem[] = [
+  it("Transcript renders a subagent-line (the durable scrollback record you scroll up to read)", () => {
+    const items: TranscriptItem[] = [
       {
-        kind: "subagent",
-        id: "tc_p",
-        status: "running",
-        collapsed: false,
-        spin: 3,
-        children: [
-          {
-            childSessionId: "ses_a",
-            label: "http-rate-limit",
-            role: "scout",
-            model: "qwen3-coder",
-            status: "running",
-            activity: { verb: "Searching", detail: "/rateLimit/" },
-            tools: [{ id: "tc_1", name: "grep", status: "ok", preview: "12 hits" }],
-          },
-        ],
+        kind: "subagent-line",
+        id: "l1",
+        variant: "child",
+        roleWord: "scouts",
+        label: "ws-path",
+        childStatus: "ok",
+        turns: 6,
+        durationMs: 38000,
+        summary: "ws upgrade bypasses the limiter",
+      },
+      {
+        kind: "subagent-line",
+        id: "l2",
+        variant: "done",
+        roleWord: "scouts",
+        count: 2,
+        okCount: 1,
+        failCount: 1,
       },
     ];
-    // COLLAPSED by default (N): the header shows the running status + how to expand, each child's summary
-    // shows its current action — but the per-tool rows are HIDDEN so a big wave can't fill the screen.
-    const r1 = render(<Transcript items={running} />);
-    const f1 = r1.lastFrame() ?? "";
-    expect(f1).toContain("◆"); // subagent header mark (no emoji)
-    expect(f1).toContain("subagent");
-    expect(f1).toContain("running"); // live status ("1/1 scout running")
-    expect(f1).toContain("expand"); // the expand affordance (↓ / ctrl+o)
-    expect(f1).toContain("SCOUT"); // role
-    expect(f1).toContain("http-rate-limit"); // label
-    expect(f1).toContain("Searching"); // the child's current action (summary line)
-    expect(f1).not.toContain("grep"); // …but the per-tool row is collapsed away by default
-    r1.unmount();
-
-    // EXPANDED (↓ / ctrl+o): the per-tool rows + the streamed-prose tail become visible.
-    const withProse: TranscriptItem[] = [
-      {
-        ...(running[0] as Extract<TranscriptItem, { kind: "subagent" }>),
-        liveText: "tracing the ws upgrade path",
-      },
-    ];
-    const rp = render(<Transcript items={withProse} width={80} subagentExpanded={true} />);
-    const fp = rp.lastFrame() ?? "";
-    expect(fp).toContain("grep"); // the live tool row is visible when expanded — you SEE it working
-    expect(fp).toContain("tracing the ws upgrade path"); // …and what the child is thinking
-    rp.unmount();
-
-    const done: TranscriptItem[] = [
-      {
-        kind: "subagent",
-        id: "tc_p",
-        status: "ok",
-        collapsed: true,
-        spin: 9,
-        children: [
-          {
-            childSessionId: "ses_a",
-            label: "ws-path",
-            role: "scout",
-            model: "glm-4.6",
-            status: "ok",
-            tools: [],
-            turns: 6,
-            durationMs: 38000,
-            summary: "ws upgrade bypasses the limiter",
-          },
-        ],
-      },
-    ];
-    const r2 = render(<Transcript items={done} />);
-    const f2 = r2.lastFrame() ?? "";
-    expect(f2).toContain("↳ ws upgrade bypasses the limiter"); // collapsed one-line summary
-    expect(f2).toContain("✓"); // settled child glyph
-    r2.unmount();
+    const { lastFrame, unmount } = render(<Transcript items={items} width={80} />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("✓"); // finished-ok glyph
+    expect(frame).toContain("ws-path"); // the scout's label
+    expect(frame).toContain("6 turns");
+    expect(frame).toContain("ws upgrade bypasses the limiter"); // its summary is readable in scrollback
+    expect(frame).toContain("2 scouts finished");
+    expect(frame).toContain("1 failed"); // the closing tally
+    unmount();
   });
 
   it("flightline: mode, the served model (with ← when substituted), lane, a context gauge, and state", () => {

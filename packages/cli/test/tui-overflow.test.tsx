@@ -1,6 +1,8 @@
 import { Box, Text, render } from "ink";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { WaveSummary } from "../src/tui/components/WaveSummary.js";
+import type { WaveState } from "../src/tui/state.js";
 
 // The interactive overflow path CANNOT be exercised by ink-testing-library — it renders Ink in debug mode,
 // which bypasses the real terminal writer. So this suite drives Ink's REAL `render` against a fake TTY stdout
@@ -169,6 +171,58 @@ describe("interactive overflow (real Ink render, fake TTY) — the clamp never e
     expect(frame).not.toContain(CLEAR_SCROLLBACK);
     expect(frame).toContain("line-1"); // short content: the head is NOT clipped
     expect(frame).toContain("line-3");
+    expect(frame).toContain("COMPOSER");
+  });
+
+  it("a BIG live subagent wave stays a small panel — the frame never nears fullscreen, no erase", async () => {
+    // The strobe (13 stacked "subagent running" lines) came from a near-fullscreen wave frame that scrolled
+    // and stranded its top line. WaveSummary is fixed-height, so even a 50-scout wave keeps the frame small.
+    const wave: WaveState = {
+      id: "w1",
+      roleWord: "scouts",
+      total: 50,
+      done: 3,
+      actions: Array.from({ length: 4 }, (_, i) => ({
+        childSessionId: `c${i}`,
+        label: `scout-${i}`,
+        text: `Reading src/very/deep/path/file-${i}.ts`,
+      })),
+      labels: {},
+      okCount: 0,
+    };
+    const { writes, stdout, stdin } = fakeTty();
+    const Tree = (): ReactNode => (
+      <Box flexDirection="column" maxHeight={ROWS - 1} overflowY="hidden">
+        <Box flexDirection="column" flexShrink={1} overflowY="hidden" justifyContent="flex-end">
+          <WaveSummary wave={wave} frame={0} elapsed={12} expanded width={COLS} />
+        </Box>
+        <Box flexDirection="column" flexShrink={0}>
+          <Text>COMPOSER</Text>
+          <Text>STATUS</Text>
+        </Box>
+      </Box>
+    );
+    const { rerender, unmount } = render(<Tree />, {
+      // biome-ignore lint/suspicious/noExplicitAny: minimal fake TTY streams
+      stdout: stdout as any,
+      // biome-ignore lint/suspicious/noExplicitAny: minimal fake TTY streams
+      stdin: stdin as any,
+      patchConsole: false,
+      exitOnCtrlC: false,
+    });
+    rerender(<Tree />);
+    await settle(50);
+    const frame = writes.join("");
+    unmount();
+    expect(frame).not.toContain(CLEAR_SCROLLBACK); // a big wave never triggers the scrollback erase
+    // The whole dynamic frame is a handful of lines (wave panel ≤5 + footer 2), nowhere near ROWS.
+    const visible = frame
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes to count visible lines
+      .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
+      .split("\n")
+      .filter((l) => l.trim().length > 0);
+    expect(visible.length).toBeLessThan(ROWS - 5);
+    expect(frame).toContain("50 scouts running");
     expect(frame).toContain("COMPOSER");
   });
 });

@@ -77,19 +77,25 @@ export type TranscriptItem =
   | { kind: "handoff"; id: string; from: string; to: string; role: string; reason?: string }
   | { kind: "receipt"; id: string; text: string }
   | { kind: "notice"; id: string; level: "info" | "warn" | "error"; text: string }
+  // The DURABLE scrollback record of a subagent wave — one settled line per finished child (+ a closing line),
+  // pushed append-only as scouts finish so it commits to <Static> and you scroll up to read what each did (like
+  // Claude's Task output). The LIVE, animated wave is NOT a transcript item — it's `ViewState.wave` (a bounded
+  // panel), so a running wave can never be a tall re-rendering item that strobes the frame.
   | {
-      kind: "subagent";
-      /** id === the parent `subagent` tool-call id (globally unique). */
+      kind: "subagent-line";
       id: string;
-      children: SubagentChild[];
-      status: "running" | "ok" | "fail";
-      /** Collapsed to summaries once all children settle. */
-      collapsed: boolean;
-      /** Monotonic spin counter driving the child globes. */
-      spin: number;
-      /** A bounded live tail of the children's streamed prose (subagent.delta) — so you can SEE what they're
-       *  thinking, not just which tool they ran. Transient; cleared when the group settles. */
-      liveText?: string;
+      variant: "child" | "done";
+      roleWord: string; // "scouts" | "oracles" | "agents"
+      // variant "child" — one finished child:
+      label?: string;
+      childStatus?: "ok" | "fail";
+      turns?: number;
+      durationMs?: number;
+      summary?: string;
+      // variant "done" — the wave's closing line:
+      count?: number;
+      okCount?: number;
+      failCount?: number;
     };
 
 /**
@@ -102,7 +108,6 @@ export function isSettled(item: TranscriptItem): boolean {
     case "assistant":
       return !item.streaming;
     case "tool":
-    case "subagent":
       return item.status !== "running";
     // A `user` item is ALWAYS settled — even an optimistic echo. Its text is the user's own input and never
     // changes (turn.started later just drops the `optimistic` flag with identical text). Treating it as live
@@ -114,26 +119,38 @@ export function isSettled(item: TranscriptItem): boolean {
   }
 }
 
-/** One nested subagent's live state within a `subagent` transcript item. */
-export interface SubagentChild {
+/** The LIVE state of a running subagent wave — a small, bounded panel (NOT a transcript item), so it can never
+ *  become a tall re-rendering frame. Holds no spin/liveText/timestamp (the globe animates off the steady view
+ *  tick; elapsed is computed in the view; both keep `reduce` pure). */
+export interface WaveState {
+  /** id === the parent `subagent` tool-call id. */
+  id: string;
+  roleWord: string; // "scouts" | "oracles" | "agents"
+  total: number; // children in the wave (exact from `subagent.wave`, else counted up from `subagent.started`)
+  done: number; // children finished so far
+  /** Each running child's current action, bounded — the expanded-panel lines. */
+  actions: WaveAction[];
+  /** True when `total` came from a `subagent.wave` event (authoritative) — so `subagent.started` doesn't
+   *  double-count. Absent/false ⇒ we're counting children up from `subagent.started` (old-log fallback). */
+  exactTotal?: boolean;
+  /** childSessionId → label, from `subagent.started` — the later tool/finished events carry only the id. */
+  labels: Record<string, string>;
+  /** Running tally of children that finished ok (for THIS wave's closing line). */
+  okCount: number;
+}
+export interface WaveAction {
   childSessionId: string;
   label: string;
-  role: "scout" | "oracle" | "builder";
-  model: string;
-  status: "running" | "ok" | "fail";
-  activity?: Activity;
-  /** A bounded window (~6) of the child's recent tool calls. */
-  tools: { id: string; name: string; status: "running" | "ok" | "fail"; preview?: string }[];
-  turns?: number;
-  durationMs?: number;
-  exploredTokens?: number;
-  summaryTokens?: number;
-  summary?: string;
+  text: string; // e.g. "Reading src/App.tsx" or "working"
 }
+/** Cap on the live action lines — ≥ the default subagent concurrency (4), so it can never exceed what runs. */
+const MAX_WAVE_ACTIONS = 4;
 
-const MAX_CHILD_TOOL_ROWS = 6;
-/** Bound for a subagent group's live-prose tail — a couple of lines, never an unbounded transcript. */
-const SUBAGENT_LIVETEXT_CHARS = 240;
+/** Pluralize a child role for the wave header/record ("scout" → "scouts"; mixed/unknown → "agents"). */
+function pluralizeRole(role: string | undefined, mixed = false): string {
+  if (mixed || !role) return "agents";
+  return `${role}s`;
+}
 
 /**
  * The FLIGHTLINE's state — deliberately minimal (user: "all I care about is what model I'm running
@@ -193,6 +210,10 @@ export interface ViewState {
   showThinking: boolean;
   /** Immutable monotonic counter for reducer-created item ids (keeps `reduce` pure). */
   seq: number;
+  /** The LIVE subagent wave, if one is running — a small bounded panel (NOT a transcript item), so a wave can
+   *  never be a tall re-rendering frame. Undefined when no wave is in flight; its durable record is the
+   *  `subagent-line` items in the transcript. */
+  wave?: WaveState;
 }
 
 /** Cap on the retained reasoning buffer — a rolling tail, so a verbose model can't grow the view unbounded. */
@@ -351,51 +372,11 @@ function terminalizeInFlight(items: TranscriptItem[], cancelled: boolean): Trans
         error: it.error ?? (cancelled ? "cancelled" : "interrupted"),
       };
     }
-    if (it.kind === "subagent" && it.status === "running") {
-      changed = true;
-      // A cancelled/interrupted run must never leave a subagent (or its children) blinking forever.
-      return {
-        ...it,
-        status: "fail" as const,
-        collapsed: true,
-        children: it.children.map((c) =>
-          c.status === "running" ? { ...c, status: "fail" as const, activity: undefined } : c,
-        ),
-      };
-    }
+    // A running subagent wave is not a transcript item — it lives in `ViewState.wave` and is cleared by
+    // `withStop` on cancel/interrupt, so nothing here needs to terminalize it.
     return it;
   });
   return changed ? next : items;
-}
-
-/** Immutable helper: find the subagent item by parent toolCallId (last match) and apply `fn` to it. */
-function updateSubagent(
-  s: ViewState,
-  toolCallId: string,
-  fn: (
-    item: Extract<TranscriptItem, { kind: "subagent" }>,
-  ) => Extract<TranscriptItem, { kind: "subagent" }>,
-): ViewState {
-  let idx = -1;
-  for (let i = s.transcript.length - 1; i >= 0; i--) {
-    const it = s.transcript[i];
-    if (it?.kind === "subagent" && it.id === toolCallId) {
-      idx = i;
-      break;
-    }
-  }
-  if (idx === -1) return s;
-  const item = s.transcript[idx] as Extract<TranscriptItem, { kind: "subagent" }>;
-  return { ...s, transcript: replaceAt(s.transcript, idx, fn(item)) };
-}
-
-/** Settle a subagent group once all its children have finished: overall status + collapse. */
-function settleSubagent(
-  item: Extract<TranscriptItem, { kind: "subagent" }>,
-): Extract<TranscriptItem, { kind: "subagent" }> {
-  if (item.children.some((c) => c.status === "running")) return item;
-  const anyFail = item.children.some((c) => c.status === "fail");
-  return { ...item, status: anyFail ? "fail" : "ok", collapsed: true, liveText: undefined };
 }
 
 /** The fields that describe ONE run — reset per session so a second task never shows a stale model/gauge. */
@@ -803,121 +784,126 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
         }),
       );
 
-    case "subagent.started": {
-      const child: SubagentChild = {
-        childSessionId: ev.childSessionId,
-        label: ev.label,
-        role: ev.role,
-        model: shortName(ev.model),
-        status: "running",
-        tools: [],
+    case "subagent.wave": {
+      // One-shot, up front: initialize the LIVE wave panel with the EXACT child count, so the header reads
+      // right from frame one and the closing line fires exactly once even for waves larger than concurrency.
+      return {
+        ...state,
+        wave: {
+          id: ev.toolCallId,
+          roleWord: pluralizeRole(ev.role),
+          total: ev.count,
+          done: 0,
+          actions: [],
+          exactTotal: true,
+          labels: {},
+          okCount: 0,
+        },
+        status: { ...state.status, activity: { verb: "Delegating" } },
       };
+    }
+
+    case "subagent.started": {
       const status: Status = {
         ...state.status,
         activity: { verb: "Delegating", detail: ev.label },
       };
-      // Find-or-create the subagent group keyed by the parent toolCallId; append this child.
-      const exists = state.transcript.some(
-        (it) => it.kind === "subagent" && it.id === ev.toolCallId,
-      );
-      if (exists) {
-        return updateSubagent({ ...state, status }, ev.toolCallId, (it) => ({
-          ...it,
-          children: [...it.children, child],
-        }));
+      if (state.wave && state.wave.id === ev.toolCallId) {
+        // Record the label; grow `total` only when it wasn't already fixed by a `subagent.wave` event.
+        return {
+          ...state,
+          status,
+          wave: {
+            ...state.wave,
+            total: state.wave.exactTotal ? state.wave.total : state.wave.total + 1,
+            labels: { ...state.wave.labels, [ev.childSessionId]: ev.label },
+          },
+        };
       }
-      return push(
-        { ...state, status },
-        {
-          kind: "subagent",
+      // No wave event seen (old log / safety) — start the counting-up fallback from this child.
+      return {
+        ...state,
+        status,
+        wave: {
           id: ev.toolCallId,
-          children: [child],
-          status: "running",
-          collapsed: false,
-          spin: 0,
+          roleWord: pluralizeRole(ev.role),
+          total: 1,
+          done: 0,
+          actions: [],
+          labels: { [ev.childSessionId]: ev.label },
+          okCount: 0,
         },
-      );
+      };
     }
 
-    case "subagent.delta": {
-      // A child's streamed prose (re-tagged to the parent group) — a bounded live tail so you can SEE what
-      // the subagents are thinking, not just which tool ran. Transient; never persisted, cleared on settle.
-      const text = typeof ev.text === "string" ? ev.text : "";
-      if (!text) return state;
-      return updateSubagent(state, ev.toolCallId, (it) => ({
-        ...it,
-        liveText: `${it.liveText ?? ""}${text}`.slice(-SUBAGENT_LIVETEXT_CHARS),
-      }));
-    }
+    case "subagent.delta":
+      // The child's streamed prose is no longer surfaced live (it drove the tall re-rendering panel + strobe);
+      // its substance lands in the finish summary that commits to scrollback. No-op for the view.
+      return state;
 
     case "subagent.tool": {
-      // Reflect the child's CURRENT tool in the always-on activity line — before, it froze at "Delegating"
-      // for the whole (multi-minute) wave and never said what a child was actually doing.
-      let liveLabel = "";
-      let liveDetail = "";
-      const next = updateSubagent(state, ev.toolCallId, (it) => ({
-        ...it,
-        spin: it.spin + 1,
-        children: it.children.map((c) => {
-          if (c.childSessionId !== ev.childSessionId) return c;
-          const act = toolActivity(ev.toolName, {});
-          const activity: Activity = {
-            ...act,
-            ...(ev.preview ? { detail: ev.preview } : {}),
-          };
-          if (ev.status === "running") {
-            liveLabel = c.label;
-            liveDetail = `${act.verb.toLowerCase()}${ev.preview ? ` ${ev.preview}` : ""}`;
-            const tools = [
-              ...c.tools,
-              {
-                id: ev.childToolCallId,
-                name: ev.toolName,
-                status: "running" as const,
-                ...(ev.preview ? { preview: ev.preview } : {}),
-              },
-            ].slice(-MAX_CHILD_TOOL_ROWS);
-            return { ...c, activity, tools };
-          }
-          // The child just FINISHED a tool and is between tools — don't leave the always-on line showing the
-          // completed action as if still in progress; show a neutral "working" for this child instead.
-          liveLabel = c.label;
-          liveDetail = "working";
-          // settle the matching running tool row
-          const tools = c.tools.map((t) =>
-            t.id === ev.childToolCallId
-              ? { ...t, status: ev.status, ...(ev.preview ? { preview: ev.preview } : {}) }
-              : t,
-          );
-          return { ...c, activity, tools };
-        }),
-      }));
-      const liveActivity: Activity = liveLabel
-        ? { verb: `↳ ${liveLabel}`, detail: liveDetail }
-        : (next.status.activity ?? { verb: "Delegating" });
-      return { ...next, status: { ...next.status, activity: liveActivity } };
+      if (!state.wave || state.wave.id !== ev.toolCallId) return state; // unknown parent → no-op
+      const label = state.wave.labels[ev.childSessionId] ?? "";
+      const verb = toolActivity(ev.toolName, {}).verb;
+      // running → the current action ("Reading src/App.tsx"); settled → neutral "working" between tools.
+      const text =
+        ev.status === "running" ? `${verb}${ev.preview ? ` ${ev.preview}` : ""}` : "working";
+      // Upsert this child's action into the bounded ring (most-recent kept, capped so height is stable).
+      const others = state.wave.actions.filter((a) => a.childSessionId !== ev.childSessionId);
+      const actions = [...others, { childSessionId: ev.childSessionId, label, text }].slice(
+        -MAX_WAVE_ACTIONS,
+      );
+      const detail = ev.status === "running" ? ev.preview : "working";
+      return {
+        ...state,
+        wave: { ...state.wave, actions },
+        status: {
+          ...state.status,
+          activity: label
+            ? { verb: `↳ ${label}`, ...(detail ? { detail } : {}) }
+            : (state.status.activity ?? { verb: "Delegating" }),
+        },
+      };
     }
 
-    case "subagent.finished":
-      return updateSubagent(state, ev.toolCallId, (it) =>
-        settleSubagent({
-          ...it,
-          children: it.children.map((c) =>
-            c.childSessionId === ev.childSessionId
-              ? {
-                  ...c,
-                  status: ev.stopReason === "complete" ? "ok" : "fail",
-                  activity: undefined,
-                  turns: ev.turns,
-                  durationMs: ev.durationMs,
-                  summary: ev.summary,
-                  ...(ev.exploredTokens !== undefined ? { exploredTokens: ev.exploredTokens } : {}),
-                  ...(ev.summaryTokens !== undefined ? { summaryTokens: ev.summaryTokens } : {}),
-                }
-              : c,
-          ),
-        }),
+    case "subagent.finished": {
+      if (!state.wave || state.wave.id !== ev.toolCallId) return state; // unknown parent → no-op
+      const label = state.wave.labels[ev.childSessionId] ?? "";
+      const roleWord = state.wave.roleWord;
+      const childStatus: "ok" | "fail" = ev.stopReason === "complete" ? "ok" : "fail";
+      // 1) Append the durable per-child scrollback line (settled → commits to <Static> immediately).
+      let next = pushItem(state, (id) => ({
+        kind: "subagent-line",
+        id,
+        variant: "child",
+        roleWord,
+        label,
+        childStatus,
+        turns: ev.turns,
+        durationMs: ev.durationMs,
+        ...(ev.summary ? { summary: ev.summary } : {}),
+      }));
+      const done = state.wave.done + 1;
+      const okCount = state.wave.okCount + (childStatus === "ok" ? 1 : 0);
+      const remainingActions = state.wave.actions.filter(
+        (a) => a.childSessionId !== ev.childSessionId,
       );
+      if (done >= state.wave.total) {
+        // 2) Wave complete → append the closing line and drop the live panel (record is now all in scrollback).
+        const count = state.wave.total;
+        next = pushItem(next, (id) => ({
+          kind: "subagent-line",
+          id,
+          variant: "done",
+          roleWord,
+          count,
+          okCount,
+          failCount: count - okCount,
+        }));
+        return { ...next, wave: undefined };
+      }
+      return { ...next, wave: { ...state.wave, done, okCount, actions: remainingActions } };
+    }
 
     case "turn.finished":
       return {
@@ -944,6 +930,7 @@ export function withStop(state: ViewState, stopReason: string): ViewState {
     pending: {},
     active: {},
     thinking: "", // a stopped run (incl. reasoning-only blocked/cancelled) must not leave a stale thinking tail
+    wave: undefined, // a cancelled/interrupted run must never leave a spinning wave panel
     status: { ...state.status, running: false, stopReason, activity: undefined },
   };
 }
