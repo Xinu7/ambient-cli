@@ -1,5 +1,3 @@
-// Build-time-injected package version (tsup `define`); falls back to "dev" un-bundled.
-declare const __AMB_VERSION__: string;
 import { runChat } from "./commands/chat.js";
 import { runConfig } from "./commands/config-show.js";
 import { runDoctor } from "./commands/doctor.js";
@@ -15,6 +13,7 @@ import { runAgent } from "./commands/run.js";
 import { runSessions } from "./commands/sessions.js";
 import { runSkills } from "./commands/skills.js";
 import { runTuiCommand } from "./commands/tui.js";
+import { CURRENT_VERSION } from "./version.js";
 
 const HELP = `ambient — Ambient CLI (a terminal coding agent for the Ambient network)
 
@@ -115,10 +114,7 @@ async function main(): Promise<void> {
     case "--version":
     case "-v":
     case "version":
-      // Injected at build time by tsup (define); "dev" when run un-bundled (tsc/vitest).
-      process.stdout.write(
-        `ambient ${typeof __AMB_VERSION__ === "string" ? __AMB_VERSION__ : "dev"}\n`,
-      );
+      process.stdout.write(`ambient ${CURRENT_VERSION}\n`);
       break;
     case undefined:
       // Bare `amb` in a terminal launches the interactive TUI; otherwise show help (pipes/CI).

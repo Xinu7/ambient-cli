@@ -23,9 +23,28 @@ function readyLine(fleet?: { ready: number }): { count: string; rest: string } {
  * (braille art) + the block "AMBIENT" wordmark (Oswald-condensed spirit) + a terse, anti-hype tagline.
  * Degrades to a compact single-line lockup on narrow terminals (the responsive rule).
  */
-export function Banner({ width, fleet }: { width: number; fleet?: { ready: number } }): ReactNode {
+export function Banner({
+  width,
+  fleet,
+  version,
+  update,
+}: {
+  width: number;
+  fleet?: { ready: number };
+  version?: string;
+  update?: { latest: string };
+}): ReactNode {
   const compact = width - 2 < LOCKUP_W; // account for the App's paddingX:1 (≈ width < 63)
   const { count, rest } = readyLine(fleet);
+  // A subtle upgrade nudge, like Claude Code's — the version is always shown; the ▲ line only when behind.
+  const upgradeLine = update ? (
+    <Text
+      color={AmbientTheme.cyan}
+    >{`▲ ${update.latest} available — brew upgrade ambient-code`}</Text>
+  ) : null;
+  const versionTag = version ? (
+    <Text color={AmbientTheme.dim}>{`${count ? "  ·  " : ""}v${version}`}</Text>
+  ) : null;
 
   if (compact) {
     return (
@@ -39,7 +58,9 @@ export function Banner({ width, fleet }: { width: number; fleet?: { ready: numbe
         <Text>
           {count ? <Text color={AmbientTheme.cyan}>{count}</Text> : null}
           <Text color={AmbientTheme.dim}>{rest}</Text>
+          {versionTag}
         </Text>
+        {upgradeLine}
       </Box>
     );
   }
@@ -73,7 +94,9 @@ export function Banner({ width, fleet }: { width: number; fleet?: { ready: numbe
             </Text>
           ) : null}
           <Text color={AmbientTheme.dim}>{rest}</Text>
+          {versionTag}
         </Box>
+        {upgradeLine ? <Box>{upgradeLine}</Box> : null}
         <Box marginTop={1}>
           {/* dim rule — thin-line depth without spending more cyan; the wordmark keeps the accent concentrated */}
           <Rule width={Math.min(width - 2, 60)} />

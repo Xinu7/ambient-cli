@@ -41,6 +41,10 @@ brew upgrade ambient-code          # Homebrew
 git pull && ./scripts/install.sh   # from source
 ```
 
+`ambient` checks for a newer release on launch (and in `ambient doctor`) and shows a one-line `brew upgrade`
+hint when one is available — cached, best-effort, and never blocking. Turn it off with `AMBIENT_NO_UPDATE_CHECK=1`
+or `"checkUpdates": false` in `~/.config/amb/config.json`.
+
 ### Uninstall
 
 ```bash

@@ -116,6 +116,10 @@ export interface AppDeps {
   maxTurns: number;
   autoContinue?: boolean;
   maxAutoContinues?: number;
+  /** The installed CLI version, shown in the splash. */
+  version?: string;
+  /** When a newer version is published, its version — drives the "brew upgrade" nudge in the splash. */
+  update?: { latest: string };
   cwd: string;
   workspaceRoot: string;
   fleet?: FleetRow[];
@@ -1492,6 +1496,8 @@ export function App(deps: AppDeps): ReactNode {
             <Banner
               width={width}
               fleet={readyCount !== undefined ? { ready: readyCount } : undefined}
+              version={deps.version}
+              {...(deps.update ? { update: deps.update } : {})}
             />
           ) : null}
 

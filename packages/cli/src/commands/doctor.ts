@@ -3,12 +3,20 @@ import { createBuiltinRegistry } from "@amb/tools-core";
 import { githubStatus, githubSummary } from "../agent/github.js";
 import { bold, dim } from "../render/color.js";
 import { resolveApiKey } from "../secrets.js";
+import { checkForUpdate } from "../update-check.js";
+import { CURRENT_VERSION } from "../version.js";
 
 /** `ambient doctor` — self-diagnostic: node version, config, key presence, live catalog reachability. */
 export async function runDoctor(): Promise<void> {
   const ok = (s: string) => process.stdout.write(`  ✓ ${s}\n`);
   const warn = (s: string) => process.stdout.write(`  ! ${s}\n`);
   process.stdout.write(`${bold("ambient doctor")}\n\n`);
+
+  // Version + a best-effort "newer available" check (cached, never blocks — offline just shows the version).
+  const upd = await checkForUpdate();
+  if (upd?.updateAvailable)
+    warn(`ambient ${CURRENT_VERSION} — ${upd.latest} available: run 'brew upgrade ambient-code'`);
+  else ok(`ambient ${CURRENT_VERSION}${upd ? " (up to date)" : ""}`);
 
   ok(`node ${process.version}`);
 

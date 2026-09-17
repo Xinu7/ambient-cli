@@ -25,6 +25,7 @@ import { type AmbConfig, grantsFromConfig, loadConfig } from "../config.js";
 import { bold, dim } from "../render/color.js";
 import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
 import { attachImageFile, downscaleForWindow } from "../tui/capture.js";
+import { checkForUpdate, updateHint } from "../update-check.js";
 import { isParseError, parseEffort, parseMaxTurns } from "./args.js";
 import { mergeStdin, readPipedStdin } from "./stdin.js";
 
@@ -287,6 +288,11 @@ export async function runAgent(args: string[]): Promise<void> {
     // Non-success stop reasons must set a nonzero exit code for scripts/CI.
     if (result.stopReason !== "complete")
       process.exitCode = result.stopReason === "cancelled" ? 130 : 1;
+    // A subtle upgrade nudge after the run (cached + best-effort; never on --jsonl, which must stay machine-clean).
+    if (!jsonl) {
+      const upd = await checkForUpdate({ enabled: userConfig.checkUpdates });
+      if (upd?.updateAvailable) process.stderr.write(dim(`\n▲ ${updateHint(upd)}\n`));
+    }
   } catch (err) {
     const message = err instanceof AmbError ? err.message : (err as Error).message;
     if (jsonl)

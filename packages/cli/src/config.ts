@@ -27,6 +27,9 @@ export const AmbConfigSchema = z
     maxAutoContinues: z.number().int().min(0).max(20).optional(),
     /** Skip connecting MCP servers by default (same as --no-mcp). */
     noMcp: z.boolean().optional(),
+    /** Check for a newer published version on startup and show an upgrade hint. Default true; set false (or
+     *  env AMBIENT_NO_UPDATE_CHECK) to disable the network check. */
+    checkUpdates: z.boolean().optional(),
     /** Tool names to AUTO-ALLOW without prompting (a persistent allowlist). Powerful — listing "bash" here
      *  lets the agent run ANY shell command unprompted. Your file, your choice; empty/omitted ⇒ prompt as
      *  usual. Seeded as session-scoped grants at run start. */

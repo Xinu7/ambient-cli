@@ -12,6 +12,7 @@ interface TuiArgs {
   maxTurns: number;
   autoContinue: boolean;
   maxAutoContinues: number;
+  checkUpdates: boolean;
   initialTask?: string;
   goal?: string;
   noMcp: boolean;
@@ -28,6 +29,7 @@ export function parseArgs(args: string[], config: AmbConfig = {}): TuiArgs {
   let maxTurns = config.maxTurns ?? 120;
   let autoContinue = config.autoContinue ?? true;
   const maxAutoContinues = config.maxAutoContinues ?? 3;
+  const checkUpdates = config.checkUpdates ?? true;
   let noMcp = config.noMcp ?? false;
   let goal: string | undefined;
   let error: string | undefined;
@@ -66,6 +68,7 @@ export function parseArgs(args: string[], config: AmbConfig = {}): TuiArgs {
     maxTurns,
     autoContinue,
     maxAutoContinues,
+    checkUpdates,
     initialTask,
     noMcp,
     ...(goal ? { goal } : {}),
@@ -84,6 +87,7 @@ export async function runTuiCommand(args: string[]): Promise<void> {
     maxTurns,
     autoContinue,
     maxAutoContinues,
+    checkUpdates,
     initialTask,
     noMcp,
     goal,
@@ -102,6 +106,7 @@ export async function runTuiCommand(args: string[]): Promise<void> {
     maxTurns,
     autoContinue,
     maxAutoContinues,
+    checkUpdates,
     initialTask,
     noMcp,
     ...(goal ? { initialGoal: goal } : {}),

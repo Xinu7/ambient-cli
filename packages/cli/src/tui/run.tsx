@@ -9,6 +9,8 @@ import { makeCapabilityPort } from "../agent/capability-port.js";
 import { type McpConnection, connectMcp } from "../agent/mcp-connect.js";
 import { type FleetRow, formatFleetRows, laneResolver } from "../render/fleet.js";
 import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
+import { checkForUpdate } from "../update-check.js";
+import { CURRENT_VERSION } from "../version.js";
 import { App } from "./App.js";
 import type { AgentMode, Effort, Permission } from "./state.js";
 
@@ -38,6 +40,8 @@ export interface TuiOptions {
   initialGrants?: Grant[];
   /** A north-star goal to start the session with (`--goal`) — shown pinned + threaded into every run. */
   initialGoal?: string;
+  /** Check for a newer published version and show an upgrade hint in the splash (config `checkUpdates`). */
+  checkUpdates?: boolean;
 }
 
 /** Fetch the live fleet (sorted rows) for the splash count + the model picker — best-effort, never blocks long. */
@@ -73,7 +77,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const config: AmbientConfig = { baseUrl: resolveConfig().baseUrl, apiKey };
   const client = new AmbientChatClient(config);
   const cwd = process.cwd();
-  const fleet = await fleetSummary(config);
+  // Fetch the fleet and the update check together so neither adds latency to the splash. The update check is
+  // cached (at most one network call per 6h) and fully best-effort — it never blocks or fails the launch.
+  const [fleet, updateInfo] = await Promise.all([
+    fleetSummary(config),
+    checkForUpdate({ enabled: opts.checkUpdates }),
+  ]);
+  const update = updateInfo?.updateAvailable ? { latest: updateInfo.latest } : undefined;
   // Skills for the `/skills` summary + interactive browser — a fast fs scan at the edge (the App never
   // touches the filesystem). `onTogglePin` writes the pin list and returns the new pinned state.
   const pinnedNames = new Set(readPinnedSkills(cwd));
@@ -138,6 +148,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       maxTurns: opts.maxTurns,
       autoContinue: opts.autoContinue ?? true,
       maxAutoContinues: opts.maxAutoContinues ?? 3,
+      version: CURRENT_VERSION,
+      ...(update ? { update } : {}),
       cwd,
       workspaceRoot: cwd,
       fleet,
