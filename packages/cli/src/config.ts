@@ -18,8 +18,13 @@ export const AmbConfigSchema = z
     effort: z.enum(["off", "auto", "low", "medium", "high"]).optional(),
     /** Default permission mode (same as --plan/--accept-edits/--bypass). Drives BOTH UIs. */
     mode: z.enum(["plan", "ask", "accept-edits", "bypass"]).optional(),
-    /** Default agent-loop cap (same as --max-turns). */
+    /** Default turns per segment before a budget checkpoint (same as --max-turns). */
     maxTurns: z.number().int().min(1).max(1000).optional(),
+    /** Auto-continue past the turn limit (compact + keep going, no keypress) while making progress. Default
+     *  true (the CLI just works). Set false for a one-tap manual continue at each checkpoint. */
+    autoContinue: z.boolean().optional(),
+    /** How many extra segments auto-continue may add before the hard ceiling. Default 3. */
+    maxAutoContinues: z.number().int().min(0).max(20).optional(),
     /** Skip connecting MCP servers by default (same as --no-mcp). */
     noMcp: z.boolean().optional(),
     /** Tool names to AUTO-ALLOW without prompting (a persistent allowlist). Powerful — listing "bash" here

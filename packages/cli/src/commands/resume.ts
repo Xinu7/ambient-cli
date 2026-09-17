@@ -34,6 +34,7 @@ import { resolveSessionId } from "../agent/session-select.js";
 import { makeSubagentTool } from "../agent/subagent-tool.js";
 import { makeVerifyPort } from "../agent/verify-port.js";
 import { makeWorkspaceContextPort } from "../agent/workspace-context-port.js";
+import { loadConfig } from "../config.js";
 import { bold, dim } from "../render/color.js";
 import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
 
@@ -198,6 +199,7 @@ export async function runResume(args: string[]): Promise<void> {
 
   const config = { baseUrl: resolveConfig().baseUrl, apiKey };
   const client = new AmbientChatClient(config);
+  const userConfig = loadConfig();
   const cwd = process.cwd();
   const sessionId = newSessionId(); // a NEW session — never mutate the prior log
   const writer = new SessionWriter(sessionId, () => new Date().toISOString());
@@ -233,7 +235,9 @@ export async function runResume(args: string[]): Promise<void> {
     sessionId,
     mode: parsed.mode,
     requestedModel: parsed.model,
-    maxTurns: 120,
+    maxTurns: userConfig.maxTurns ?? 120,
+    autoContinue: userConfig.autoContinue ?? true,
+    maxAutoContinues: userConfig.maxAutoContinues ?? 3,
     cwd,
     workspaceRoot: cwd,
     signal: controller.signal,

@@ -49,6 +49,39 @@ export function withGoalReminder(messages: Msg[], goal: string | undefined): Msg
 }
 
 /**
+ * Turn-budget self-pacing (recency slot, like the goal reminder): a transient system line appended to the
+ * OUTBOUND messages that tells the model where it is in its turn budget so it converges instead of getting cut
+ * off mid-investigation. Silent until the last ~20% of the budget (so it doesn't churn the prompt cache early);
+ * on the FINAL allowed turn it becomes a hard, tool-free wrap-up so the run always ends with a consolidated
+ * report + an updated plan. Transient — built per attempt, never persisted. Returns a NEW array.
+ */
+export function withTurnBudget(
+  messages: Msg[],
+  info: { turn: number; ceiling: number; finalWrapUp: boolean },
+): Msg[] {
+  const { turn, ceiling, finalWrapUp } = info;
+  if (finalWrapUp) {
+    return [
+      ...messages,
+      {
+        role: "system",
+        content:
+          "<turn_budget>This is your FINAL turn — you have no tools available now. Do NOT wait for more work. Write your COMPLETE findings/answer as your reply and make sure the plan reflects what is done and what remains. This is your last message on this task.</turn_budget>",
+      },
+    ];
+  }
+  if (ceiling <= 0 || turn / ceiling < 0.8) return messages;
+  const remaining = Math.max(0, ceiling - turn);
+  return [
+    ...messages,
+    {
+      role: "system",
+      content: `<turn_budget>You are near your turn budget (turn ${turn} of ${ceiling}; about ${remaining} left). Stop starting new lines of investigation — consolidate what you already have, finish the step in flight, and produce your findings/answer and an updated plan before you run out.</turn_budget>`,
+    },
+  ];
+}
+
+/**
  * Make a carried-forward conversation SAFE to continue. The wire contract requires every assistant
  * `tool_calls` message to be answered by matching `tool` results before the next user turn. A prior run can
  * stop with a DANGLING native tool-call turn — the doom-loop guard breaks after recording the assistant call

@@ -35,6 +35,8 @@ interface RunArgs {
   effort: EffortSetting;
   autoAllow: boolean;
   maxTurns: number;
+  autoContinue: boolean;
+  maxAutoContinues: number;
   jsonl: boolean;
   noMcp: boolean;
   images: string[];
@@ -53,6 +55,8 @@ function parseArgs(args: string[], config: AmbConfig = {}): RunArgs {
   let effort: EffortSetting = config.effort ?? "auto";
   let autoAllow = false;
   let maxTurns = config.maxTurns ?? 120;
+  let autoContinue = config.autoContinue ?? true;
+  const maxAutoContinues = config.maxAutoContinues ?? 3;
   let jsonl = false;
   let noMcp = config.noMcp ?? false;
   let help = false;
@@ -75,6 +79,7 @@ function parseArgs(args: string[], config: AmbConfig = {}): RunArgs {
     else if (a === "--yes" || a === "-y") autoAllow = true;
     else if (a === "--jsonl") jsonl = true;
     else if (a === "--no-mcp") noMcp = true;
+    else if (a === "--no-auto-continue") autoContinue = false;
     else if (a === "--help" || a === "-h") help = true;
     else if (a === "--effort") {
       const r = parseEffort(args[++i]);
@@ -98,6 +103,8 @@ function parseArgs(args: string[], config: AmbConfig = {}): RunArgs {
     effort,
     autoAllow,
     maxTurns,
+    autoContinue,
+    maxAutoContinues,
     jsonl,
     noMcp,
     images,
@@ -117,6 +124,8 @@ export async function runAgent(args: string[]): Promise<void> {
     effort,
     autoAllow,
     maxTurns,
+    autoContinue,
+    maxAutoContinues,
     jsonl,
     noMcp,
     images,
@@ -216,6 +225,8 @@ export async function runAgent(args: string[]): Promise<void> {
     mode,
     requestedModel: model,
     maxTurns,
+    autoContinue,
+    maxAutoContinues,
     cwd,
     workspaceRoot: cwd,
     signal: controller.signal,

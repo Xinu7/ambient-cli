@@ -600,6 +600,104 @@ describe("Agent loop", () => {
     expect(kinds()).toContain("error"); // an injection-flagged notice was emitted
   });
 
+  // ── turn budget: segments, auto-continue, self-pacing, forced wrap-up ──────────────────────────────────
+  const bashCall = (id: string, cmd: string) => ({
+    content: "",
+    toolCalls: [
+      {
+        id,
+        name: "bash",
+        args: { command: cmd, timeoutMs: 5000 },
+        rawArgs: `{"command":"${cmd}","timeoutMs":5000}`,
+      },
+    ],
+  });
+
+  it("auto-continues past a segment boundary while making progress, then forces a wrap-up at the ceiling", async () => {
+    // segment=2, +1 auto-continue → ceiling=4. Boundaries: turn 2 (auto-continue) and turn 4 (forced wrap-up).
+    const client = new MockClient([
+      bashCall("t1", "echo a"),
+      bashCall("t2", "echo b"), // turn 2 = segment boundary, progress made → auto_continue
+      bashCall("t3", "echo c"),
+      { content: "FINAL REPORT: here is everything I found.", toolCalls: [] }, // turn 4 = forced wrap-up
+    ]);
+    const res = await new Agent(client).run(
+      "audit",
+      baseOpts({ maxTurns: 2, maxAutoContinues: 1 }),
+    );
+    const checkpoints = collected.filter((e) => e.kind === "run.checkpoint") as Array<{
+      reason: string;
+    }>;
+    expect(checkpoints.map((c) => c.reason)).toContain("auto_continue");
+    expect(res.turns).toBe(4); // ran all the way to the ceiling
+    expect(res.stopReason).toBe("max_turns"); // budget-bounded, but WITH a report
+    expect(res.finalText).toContain("FINAL REPORT");
+    // The final (wrap-up) request advertised NO tools, and carried the wrap-up instruction.
+    const last = client.calls[client.calls.length - 1];
+    expect(last?.tools ?? []).toHaveLength(0);
+    expect(
+      last?.messages.some((m) => typeof m.content === "string" && m.content.includes("FINAL turn")),
+    ).toBe(true);
+  });
+
+  it("does NOT auto-continue a segment that made no progress (cost gate) — stops paused", async () => {
+    // Every tool call FAILS (reads a missing file) → segmentProgress stays 0 → no auto-continue at the boundary.
+    const readMissing = (id: string) => ({
+      content: "",
+      toolCalls: [{ id, name: "read", args: { path: "nope.txt" }, rawArgs: '{"path":"nope.txt"}' }],
+    });
+    const client = new MockClient([readMissing("t1"), readMissing("t2"), readMissing("t3")]);
+    const res = await new Agent(client).run(
+      "audit",
+      baseOpts({ maxTurns: 2, maxAutoContinues: 3 }),
+    );
+    const checkpoints = collected.filter((e) => e.kind === "run.checkpoint") as Array<{
+      reason: string;
+    }>;
+    expect(checkpoints.map((c) => c.reason)).toEqual(["paused"]); // paused at the first boundary, never auto
+    expect(res.turns).toBe(2);
+    expect(res.stopReason).toBe("max_turns");
+  });
+
+  it("with autoContinue=false, pauses at the first segment boundary for a one-tap continue", async () => {
+    const client = new MockClient([bashCall("t1", "echo a"), bashCall("t2", "echo b")]);
+    const res = await new Agent(client).run(
+      "task",
+      baseOpts({ maxTurns: 2, maxAutoContinues: 3, autoContinue: false }),
+    );
+    const checkpoints = collected.filter((e) => e.kind === "run.checkpoint") as Array<{
+      reason: string;
+    }>;
+    expect(checkpoints.map((c) => c.reason)).toEqual(["paused"]);
+    expect(res.turns).toBe(2); // stopped at the boundary despite a high ceiling
+    expect(res.stopReason).toBe("max_turns");
+  });
+
+  it("injects a self-pacing nudge in the last ~20% of the budget", async () => {
+    // ceiling=5 (no auto-continue). The nudge fires from turn 4 (4/5 = 0.8).
+    const client = new MockClient([
+      bashCall("t1", "echo a"),
+      bashCall("t2", "echo b"),
+      bashCall("t3", "echo c"),
+      bashCall("t4", "echo d"), // turn 4 ≥ 0.8·ceiling → nudge present
+      { content: "done", toolCalls: [] },
+    ]);
+    await new Agent(client).run("task", baseOpts({ maxTurns: 5 }));
+    const turn4 = client.calls[3];
+    expect(
+      turn4?.messages.some(
+        (m) => typeof m.content === "string" && m.content.includes("near your turn budget"),
+      ),
+    ).toBe(true);
+    // ...and an earlier turn (turn 1) does NOT carry it (silent early to keep the prompt cache stable).
+    const turn1 = client.calls[0];
+    expect(
+      turn1?.messages.some(
+        (m) => typeof m.content === "string" && m.content.includes("near your turn budget"),
+      ),
+    ).toBe(false);
+  });
+
   it("does NOT execute a tool call from a TRUNCATED response — re-asks for complete args (D-T2.7)", async () => {
     const client = new MockClient([
       {

@@ -27,6 +27,10 @@ export interface TuiOptions {
   effort: Effort;
   requestedModel: string;
   maxTurns: number;
+  /** Auto-continue past the turn limit (compact + keep going, no keypress). Default true. */
+  autoContinue?: boolean;
+  /** How many extra segments auto-continue may add before the hard ceiling. */
+  maxAutoContinues?: number;
   initialTask?: string;
   /** Skip connecting the user's MCP servers entirely (lean, instant start with only the built-in tools). */
   noMcp?: boolean;
@@ -132,6 +136,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       effort: opts.effort,
       requestedModel: opts.requestedModel,
       maxTurns: opts.maxTurns,
+      autoContinue: opts.autoContinue ?? true,
+      maxAutoContinues: opts.maxAutoContinues ?? 3,
       cwd,
       workspaceRoot: cwd,
       fleet,

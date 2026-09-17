@@ -153,7 +153,15 @@ export interface RunOptions {
   sessionId: string;
   mode: Mode;
   requestedModel: string;
+  /** Turns per SEGMENT before a budget checkpoint. Not a hard cap on its own — `maxAutoContinues` extends the
+   *  run in further segments up to `maxTurns * (1 + maxAutoContinues)`. */
   maxTurns: number;
+  /** Auto-continue past a segment boundary (compact + keep going, no user action) while the task is making
+   *  progress. Default true. Set false for a one-tap manual continue at each checkpoint. */
+  autoContinue?: boolean;
+  /** How many extra segments auto-continue may add before the hard ceiling. Absent/0 ⇒ no auto-continue (the
+   *  run stops at `maxTurns`, the pre-existing behavior — subagents pass nothing, so they are unaffected). */
+  maxAutoContinues?: number;
   cwd: string;
   workspaceRoot: string;
   signal: AbortSignal;

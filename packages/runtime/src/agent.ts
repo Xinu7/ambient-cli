@@ -48,6 +48,7 @@ import {
   sanitizeContinuation,
   stringifyResult,
   withGoalReminder,
+  withTurnBudget,
 } from "./agent-support.js";
 import { assistedProtocol, parseAssistedResponse, stripActionBlock } from "./assisted.js";
 import { type ContentPart, buildUserContent, toDataUri } from "./attachments.js";
@@ -389,7 +390,20 @@ export class Agent {
     let lastBatchSig = "";
     let batchRepeat = 0;
 
-    while (turns < opts.maxTurns) {
+    // ── Turn budget ──────────────────────────────────────────────────────────────────────────────────────
+    // `maxTurns` is a SEGMENT, not a hard cap. When a segment fills while the task is still progressing,
+    // auto-continue (the default) compacts and keeps going — no user action — up to a hard ceiling of
+    // `maxTurns * (1 + maxAutoContinues)`. The FINAL allowed turn is a forced, tool-free wrap-up so the run
+    // always ends with a consolidated report instead of a truncated cut-off. With `maxAutoContinues` absent/0
+    // (subagents, and any caller that doesn't opt in) the ceiling equals `maxTurns` — the pre-existing behavior.
+    const segment = Math.max(1, opts.maxTurns);
+    const autoContinue = opts.autoContinue !== false;
+    const maxAutoContinues = Math.max(0, Math.floor(opts.maxAutoContinues ?? 0));
+    const ceiling = segment * (1 + maxAutoContinues);
+    let autoContinues = 0;
+    let segmentProgress = 0; // successful tool calls since the last checkpoint — the auto-continue cost gate
+
+    while (turns < ceiling) {
       if (opts.signal.aborted) {
         emit({ schemaVersion: 1, kind: "operation.cancelled", sessionId, turnId, scope: "turn" });
         emit({
@@ -402,6 +416,8 @@ export class Agent {
         return { stopReason: "cancelled", turns, finalText, messages };
       }
       turns += 1;
+      // The final allowed turn is a forced, tool-free WRAP-UP (no more investigation — report now).
+      const finalWrapUp = turns >= ceiling;
       let compactions = 0;
 
       // ── mid-run STEER: inject any user messages the human sent while this run was in flight, so the model
@@ -531,15 +547,21 @@ export class Agent {
 
         // Lane decides the transport: `direct` sends native `tools`; `assisted` sends NO tools and
         // instead describes them as text in the system prompt (the model replies with a fenced action).
-        const assisted = this.laneOf(target, liveCatalog, opts.capabilities) === "assisted";
+        // On the forced wrap-up turn we send NO tools and skip the assisted-protocol scaffolding, so the model
+        // can only reply with prose → the natural no-tool-calls completion path. Parse it as a plain turn.
+        const assisted =
+          !finalWrapUp && this.laneOf(target, liveCatalog, opts.capabilities) === "assisted";
         turnAssisted = assisted; // remember how THIS request was built, for consistent parsing
-        // Primacy (system anchor) + recency (this trailing reminder) = the goal "sandwich" so even a weak
-        // model keeps the north-star in view right before it generates. Transient; never persisted.
-        const reqMessages = withGoalReminder(
-          assisted ? this.withAssistedProtocol(messages, opts.mode) : messages,
-          opts.goal,
+        // Primacy (system anchor) + recency (these trailing reminders) so even a weak model keeps the
+        // north-star + its turn budget in view right before it generates. Transient; never persisted.
+        const reqMessages = withTurnBudget(
+          withGoalReminder(
+            assisted ? this.withAssistedProtocol(messages, opts.mode) : messages,
+            opts.goal,
+          ),
+          { turn: turns, ceiling, finalWrapUp },
         );
-        const reqTools = assisted ? [] : tools;
+        const reqTools = assisted || finalWrapUp ? [] : tools;
 
         // runChatWithFailover owns the per-attempt budget (its own preflight + escalation per model) and
         // emits the inference.request/response + streamed deltas for every ACTUAL request, including failovers.
@@ -709,7 +731,7 @@ export class Agent {
         const parsed = parseAssistedResponse(completion.content);
         if (parsed.kind === "error") {
           // Malformed action envelope → feed the raw reply back with a repair instruction and re-ask
-          // (bounded by maxTurns). This is the "controller" nudging a weak model onto the protocol.
+          // (bounded by the turn ceiling). This is the "controller" nudging a weak model onto the protocol.
           // Only the REASONING text (broken fence stripped) is user-facing — never surface the raw
           // protocol scaffolding as a finished answer (it would flicker "answer then keeps going").
           const clean = stripActionBlock(completion.content).trim();
@@ -724,7 +746,7 @@ export class Agent {
             });
           messages.push({ role: "assistant", content: completion.content });
           messages.push({ role: "user", content: parsed.message });
-          if (turns >= opts.maxTurns) {
+          if (turns >= ceiling) {
             stopReason = "max_turns";
             break;
           }
@@ -743,7 +765,7 @@ export class Agent {
 
       // TRUNCATION-SAFETY: a response cut at the output cap (finishReason "length") may carry
       // a tool call whose arguments are SILENTLY incomplete — executing it can corrupt the workspace. Reject
-      // the whole batch and re-ask for a COMPLETE response (bounded by maxTurns) rather than run a half-formed
+      // the whole batch and re-ask for a COMPLETE response (bounded by the turn ceiling) rather than run a half-formed
       // call. Weak open models hit output caps constantly, so this is the #1 silent-corruption mode for them.
       if (completion.finishReason === "length" && toolCalls.length > 0) {
         emit({
@@ -766,7 +788,7 @@ export class Agent {
           content:
             "Your previous response was cut off at the output limit before the tool call(s) were complete, so I did NOT run them (the arguments may be truncated). Re-issue the tool call(s) with COMPLETE arguments — and if the work is large, split it into smaller steps so each response fits.",
         });
-        if (turns >= opts.maxTurns) {
+        if (turns >= ceiling) {
           stopReason = "max_turns";
           break;
         }
@@ -846,8 +868,10 @@ export class Agent {
           messages.push({ role: "assistant", content: displayText });
         }
         // Honest stop: if the LAST verification failed and we're no longer re-asking (attempts exhausted, or
-        // the model gave up without fixing), the run did NOT verify — never report a clean `complete`.
-        stopReason = verifyPassed === false ? "verify_failed" : "complete";
+        // the model gave up without fixing), the run did NOT verify — never report a clean `complete`. A
+        // forced wrap-up that completed is still budget-bounded, so report `max_turns` (the report IS finalText).
+        stopReason =
+          verifyPassed === false ? "verify_failed" : finalWrapUp ? "max_turns" : "complete";
         break;
       }
 
@@ -889,6 +913,9 @@ export class Agent {
         grants,
         autoApproval,
       );
+      // Auto-continue cost gate: a segment must land at least one successful tool call to earn another one —
+      // a whole segment with nothing succeeding is a stuck run, not progress, so we stop rather than extend.
+      segmentProgress += outcomes.filter((o) => o.ok).length;
       // Doom-loop guard: a batch of the SAME tool calls (same names + args) repeated with no change is the
       // model going in circles. After MAX_IDENTICAL_TOOL_BATCHES identical batches, stop honestly.
       const batchSig = toolCalls
@@ -1017,7 +1044,44 @@ export class Agent {
           });
         }
       }
-      if (turns >= opts.maxTurns) stopReason = "max_turns";
+      // ── segment boundary: auto-continue (default) or pause, bounded by the hard ceiling ──
+      if (turns >= ceiling) {
+        // Defensive: the ceiling turn is normally the tool-free wrap-up (handled on the completion path), so
+        // reaching here at the ceiling means the model kept calling tools — stop as budget-exhausted.
+        stopReason = "max_turns";
+      } else if (turns % segment === 0) {
+        if (autoContinue && segmentProgress > 0 && !opts.signal.aborted) {
+          // The task is still progressing and we're under the ceiling → keep going with no user action. The
+          // top-of-loop compaction keeps context lean across segments (the plan + goal live in the uncompacted
+          // anchor), so continuing stays powerful without hallucinating away what was found.
+          autoContinues += 1;
+          emit({
+            schemaVersion: 1,
+            kind: "run.checkpoint",
+            sessionId,
+            turnId,
+            segment: autoContinues,
+            of: maxAutoContinues,
+            reason: "auto_continue",
+          });
+          segmentProgress = 0;
+        } else {
+          // Manual mode (auto-continue off) → pause for a one-tap continue; or a whole segment made no
+          // progress → stop instead of burning another segment on a stuck run. Either way the plan + findings
+          // are preserved for a resume.
+          emit({
+            schemaVersion: 1,
+            kind: "run.checkpoint",
+            sessionId,
+            turnId,
+            segment: autoContinues,
+            of: maxAutoContinues,
+            reason: "paused",
+          });
+          stopReason = "max_turns";
+          break;
+        }
+      }
     }
 
     // No fail-open at the boundary: if the loop expired (max_turns) or fell through with a FAILED last

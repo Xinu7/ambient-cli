@@ -114,6 +114,8 @@ export interface AppDeps {
   effort: Effort;
   requestedModel: string;
   maxTurns: number;
+  autoContinue?: boolean;
+  maxAutoContinues?: number;
   cwd: string;
   workspaceRoot: string;
   fleet?: FleetRow[];
@@ -587,6 +589,8 @@ export function App(deps: AppDeps): ReactNode {
           mode: runtimeMode,
           requestedModel: modelRef.current,
           maxTurns: deps.maxTurns,
+          autoContinue: deps.autoContinue ?? true,
+          maxAutoContinues: deps.maxAutoContinues ?? 3,
           cwd: deps.cwd,
           workspaceRoot: deps.workspaceRoot,
           signal: controller.signal,

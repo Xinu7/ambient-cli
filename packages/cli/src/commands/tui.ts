@@ -10,6 +10,8 @@ interface TuiArgs {
   permission: Permission;
   effort: Effort;
   maxTurns: number;
+  autoContinue: boolean;
+  maxAutoContinues: number;
   initialTask?: string;
   goal?: string;
   noMcp: boolean;
@@ -24,6 +26,8 @@ export function parseArgs(args: string[], config: AmbConfig = {}): TuiArgs {
   let permission: Permission = axes.permission;
   let effort: Effort = config.effort ?? "auto";
   let maxTurns = config.maxTurns ?? 120;
+  let autoContinue = config.autoContinue ?? true;
+  const maxAutoContinues = config.maxAutoContinues ?? 3;
   let noMcp = config.noMcp ?? false;
   let goal: string | undefined;
   let error: string | undefined;
@@ -39,6 +43,7 @@ export function parseArgs(args: string[], config: AmbConfig = {}): TuiArgs {
     else if (a === "--accept-edits") permission = "accept-edits";
     else if (a === "--bypass" || a === "--yolo") permission = "bypass";
     else if (a === "--no-mcp") noMcp = true;
+    else if (a === "--no-auto-continue") autoContinue = false;
     else if (a === "--effort") {
       const r = parseEffort(args[++i]);
       if (isParseError(r)) error = r.error;
@@ -59,6 +64,8 @@ export function parseArgs(args: string[], config: AmbConfig = {}): TuiArgs {
     permission,
     effort,
     maxTurns,
+    autoContinue,
+    maxAutoContinues,
     initialTask,
     noMcp,
     ...(goal ? { goal } : {}),
@@ -69,8 +76,19 @@ export function parseArgs(args: string[], config: AmbConfig = {}): TuiArgs {
 /** `ambient tui [--plan|--build|--accept-edits|--bypass|--effort|--model|--max-turns|--no-mcp] ["<task>"]` — the interactive TUI. */
 export async function runTuiCommand(args: string[]): Promise<void> {
   const config = loadConfig();
-  const { model, agentMode, permission, effort, maxTurns, initialTask, noMcp, goal, error } =
-    parseArgs(args, config);
+  const {
+    model,
+    agentMode,
+    permission,
+    effort,
+    maxTurns,
+    autoContinue,
+    maxAutoContinues,
+    initialTask,
+    noMcp,
+    goal,
+    error,
+  } = parseArgs(args, config);
   if (error) {
     process.stderr.write(`ambient: ${error}\n`);
     process.exitCode = 1;
@@ -82,6 +100,8 @@ export async function runTuiCommand(args: string[]): Promise<void> {
     effort,
     requestedModel: model,
     maxTurns,
+    autoContinue,
+    maxAutoContinues,
     initialTask,
     noMcp,
     ...(goal ? { initialGoal: goal } : {}),

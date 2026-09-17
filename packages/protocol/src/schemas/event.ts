@@ -90,6 +90,15 @@ export const EventSchema = z.discriminatedUnion("kind", [
     attachments: z.array(AttachmentRefSchema).optional(),
   }),
   tev("turn.finished", { stopReason: StopReasonSchema }),
+  // A turn-budget CHECKPOINT: a segment (maxTurns turns) finished with the task still going. `auto_continue`
+  // = the run compacted and kept going with no user action (default); `paused` = it stopped at the segment
+  // boundary for a one-tap continue (manual mode) or because the segment made no progress. Drives the UI's
+  // "compacted, continuing" marker / "reached the turn limit" notice so a long run never looks frozen.
+  tev("run.checkpoint", {
+    segment: z.number().int().nonnegative(),
+    of: z.number().int().nonnegative(),
+    reason: z.enum(["auto_continue", "paused"]),
+  }),
   // A mid-run STEER: a user message injected into the RUNNING conversation (the user redirected the agent
   // without cancelling). Durable so a resumed session reconstructs the full conversation.
   tev("steer", { text: z.string() }),
