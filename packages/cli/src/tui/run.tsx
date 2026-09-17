@@ -14,7 +14,7 @@ import type { AgentMode, Effort, Permission } from "./state.js";
 
 // We DON'T use the alternate screen buffer: settled turns are committed to the terminal's real scrollback
 // (via Ink's <Static>) so the user can scroll back through history with the trackpad/wheel like a normal
-// terminal log (the user: "I can't even scroll and see the history"). The alt-screen has no scrollback.
+// terminal log, so history stays scrollable. The alt-screen has no scrollback.
 // Bracketed paste: the terminal wraps a paste in \x1b[200~ … \x1b[201~ so it arrives as ONE coherent burst
 // (an embedded newline can't submit early, and a large paste can't be split into a stray Enter). The App
 // strips the wrapping markers via normalizePastedText, so they never reach the buffer.

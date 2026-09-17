@@ -106,7 +106,7 @@ describe("plan review — a prominent approve/revise prompt when a plan is ready
     await settle(30);
     stdin.write("\r");
 
-    // ONE clear prompt on the composer (not two overlapping banners — the founder's "rendered terribly").
+    // ONE clear prompt on the composer (not two overlapping banners).
     const banner = await waitFor(lastFrame, "Plan ready");
     expect(banner).toContain("approve & build");
     expect(banner).toContain("revise");

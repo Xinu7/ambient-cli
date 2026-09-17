@@ -16,7 +16,7 @@ function status(over: Partial<Status> = {}): Status {
   } as Status;
 }
 
-// The founder wanted PLAN/BUILD to be unmistakable. It shows in TWO places now: a bold reverse-video pill in
+// PLAN/BUILD must be unmistakable. It shows in TWO places: a bold reverse-video pill in
 // the status line, and a mode label + tinted border on the composer where you type.
 
 describe("mode indicator — PLAN vs BUILD is clear in the status line and on the composer", () => {

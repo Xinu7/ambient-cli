@@ -155,7 +155,7 @@ export function catalogHash(catalog: CatalogModel[]): string {
 
 /**
  * Deterministic structured summary (no model call). Preserves the operational state that a naive
- * count-and-filenames summary drops (new-audit #1): recent user requests, files touched, tool
+ * count-and-filenames summary drops: recent user requests, files touched, tool
  * successes/failures, and the last error — so the model won't repeat a done action or claim false success.
  */
 export const SUMMARY_MARKER = "## Summary of earlier conversation";

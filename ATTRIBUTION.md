@@ -19,9 +19,9 @@ logic or borrow patterns, we do so cleanly (re-implemented in TypeScript) and re
 ## Patterns borrowed (ideas, not code)
 
 - **prime-agent** (PrimeIntellect, MIT) — provider-as-config, compaction retention rules, autonomous budgets + shell gates. Attribute in NOTICE if any snippet is ported.
-- **pi** (`@mariozechner`/`@earendil-works`, MIT) — the loop/tool patterns our desktop app builds on. We do **not** depend on pi (DD-4).
+- **pi** (`@mariozechner`/`@earendil-works`, MIT) — the loop/tool patterns our desktop app builds on. We do **not** depend on pi.
 - OSS coding agents (aider Apache-2.0, opencode MIT, Codex Apache-2.0, etc.) — architecture *patterns* only (repo-map, edit-formats, event-core, runtime model discovery). No code copied.
-- **Karpathy LLM-Wiki** concept (Karpathy, public gist) + `nanzhipro/Karpathy-llm-wiki-bootstrap-skill` (**no license → all-rights-reserved**) — **pattern-only**, no code copied, for the Phase-4 memory subsystem.
+- **Karpathy LLM-Wiki** concept (Karpathy, public gist) + `nanzhipro/Karpathy-llm-wiki-bootstrap-skill` (**no license → all-rights-reserved**) — **pattern-only**, no code copied, for the memory subsystem.
 
 ## Rule
 

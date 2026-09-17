@@ -55,7 +55,7 @@ function resolveChecked(rootReal: string, target: string, depth: number): string
   return cur;
   // NOTE: residual check/use TOCTOU remains (another process could swap a component to a symlink between
   // this resolution and the fs op). The local single-user CLI threat model accepts this; full closure
-  // needs O_NOFOLLOW at open time (Phase 5).
+  // needs O_NOFOLLOW at open time.
 }
 
 /** Segments of `target` relative to `root` (target must be lexically inside root). */

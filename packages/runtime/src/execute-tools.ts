@@ -84,7 +84,7 @@ async function runOne(
     };
   }
 
-  // 2. permission (DD-1) — honors existing session/project grants
+  // 2. permission — honors existing session/project grants
   // A read-only bash command (git status / log / diff, ls, cat, grep …) is downgraded to a `read` effect so
   // it auto-allows and works in plan mode, instead of prompting like an arbitrary shell call. The classifier
   // is deliberately strict — any redirection / substitution / mutating form keeps the full process effects.
@@ -191,8 +191,8 @@ async function runOne(
   try {
     const result = await runBounded(tool, parsed.data, makeToolCtx(toolCallId), opts.signal);
     // Validate the tool's OWN output for shape. A mismatch is OUR bug, not the model's — the side
-    // effect ALREADY happened, so we must NOT report ok:false (that would invite a duplicate mutation,
-    // new-audit #4). We keep ok:true, surface the raw result, and note the mismatch.
+    // effect ALREADY happened, so we must NOT report ok:false (that would invite a duplicate mutation).
+    // We keep ok:true, surface the raw result, and note the mismatch.
     const outParsed = tool.outputSchema.safeParse(result);
     if (!outParsed.success) {
       return {

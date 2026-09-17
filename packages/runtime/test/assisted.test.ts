@@ -72,12 +72,12 @@ describe("parseAssistedResponse", () => {
     expect(r.kind).toBe("error");
   });
 
-  it("returns an error (repair) when the model MENTIONS amb-action but the fence is unterminated — audit #4", () => {
+  it("returns an error (repair) when the model MENTIONS amb-action but the fence is unterminated", () => {
     const r = parseAssistedResponse('I\'ll act now.\n```amb-action\n{"tool":"read","args":{}}');
     expect(r.kind).toBe("error");
   });
 
-  it("returns an error when args is a non-object (string/array) — audit #5", () => {
+  it("returns an error when args is a non-object (string/array)", () => {
     expect(parseAssistedResponse('```amb-action\n{"tool":"read","args":"a.ts"}\n```').kind).toBe(
       "error",
     );

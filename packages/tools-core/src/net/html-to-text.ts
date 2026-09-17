@@ -87,7 +87,7 @@ function isNameChar(c: string): boolean {
 
 /**
  * Convert an HTML document to readable plain text with a SINGLE LINEAR pass (no backtracking regex — a
- * hostile page of unbalanced `<` used to make this O(n²), audit #25). It never re-scans: every index only
+ * hostile page of unbalanced `<` used to make this O(n²)). It never re-scans: every index only
  * moves forward, so total work is O(n).
  */
 export function htmlToText(html: string): string {

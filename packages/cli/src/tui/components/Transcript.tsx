@@ -173,7 +173,7 @@ export function TranscriptRow({
     }
 
     case "tool": {
-      // Skills get a FRIENDLY, prominent treatment (user: "how do I know it used the skill correctly?"):
+      // Skills get a FRIENDLY, prominent treatment so it's clear a skill was used:
       // a clear "using skill: X" / "searched skills: X" line with the brand ◆ (the same mark the /skills
       // browser puts on a pinned skill) — no raw JSON dump. This is the visible proof a skill was loaded.
       if (item.name === "skill" || item.name === "search_skills") {

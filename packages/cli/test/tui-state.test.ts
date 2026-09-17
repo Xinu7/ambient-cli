@@ -952,7 +952,7 @@ describe("tui reducer", () => {
   });
 });
 
-describe("tui reducer — subagent visibility (Phase 6)", () => {
+describe("tui reducer — subagent visibility", () => {
   const startGroup = (s: ReturnType<typeof init>) =>
     reduce(s, {
       kind: "subagent.started",
@@ -1027,7 +1027,7 @@ describe("tui reducer — subagent visibility (Phase 6)", () => {
   });
 });
 
-describe("tui reducer — steer (Phase 5)", () => {
+describe("tui reducer — steer", () => {
   it("a steer event shows the injected message as a user turn in the transcript", () => {
     const s = reduce(init(), {
       kind: "steer",
@@ -1042,7 +1042,7 @@ describe("tui reducer — steer (Phase 5)", () => {
   });
 });
 
-describe("tui reducer — run telemetry (effort / round / tokens, Phase 4)", () => {
+describe("tui reducer — run telemetry (effort / round / tokens)", () => {
   const started = () =>
     ({ kind: "session.started", schemaVersion: 1, sessionId: "ses_a" }) as NewEvent;
   const inf = (over: Record<string, unknown>) =>
@@ -1067,7 +1067,7 @@ describe("tui reducer — run telemetry (effort / round / tokens, Phase 4)", () 
   });
 });
 
-describe("isSettled — the Static/live split for scrollback (Phase 3)", () => {
+describe("isSettled — the Static/live split for scrollback", () => {
   it("in-flight items are LIVE (re-rendered), finalized items are SETTLED (committed to scrollback)", () => {
     // live
     expect(isSettled({ kind: "assistant", id: "a", text: "…", streaming: true, spin: 0 })).toBe(

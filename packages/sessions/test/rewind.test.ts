@@ -80,7 +80,7 @@ describe("planRewind", () => {
     expect(plan.restores[0]).toMatchObject({ action: "restore", hashKey: contentHash("v1\n") });
   });
 
-  it("collapses path aliases (`./a.ts` and `a.ts`) to ONE canonical file (audit #4)", () => {
+  it("collapses path aliases (`./a.ts` and `a.ts`) to ONE canonical file", () => {
     const events: Event[] = [
       mut("trn_2", 9, "a.ts", "modify", contentHash("boundary\n")),
       mut("trn_3", 12, "./a.ts", "modify", contentHash("later\n")),
@@ -91,7 +91,7 @@ describe("planRewind", () => {
     expect(plan.restores[0]).toMatchObject({ path: "a.ts", hashKey: contentHash("boundary\n") });
   });
 
-  it("a modify/delete with NO checkpointed preimage is UNRESTORABLE, never deleted (audit #7)", () => {
+  it("a modify/delete with NO checkpointed preimage is UNRESTORABLE, never deleted", () => {
     const events: Event[] = [mut("trn_1", 5, "x.ts", "modify")]; // no preimageHash
     expect(planRewind(events, 1).restores[0]).toMatchObject({
       path: "x.ts",

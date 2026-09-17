@@ -141,8 +141,8 @@ export function StatusLine({
   const rowW = Math.max(0, Math.min(width - 2, 120));
 
   const head: Seg[] = [
-    // Mode is a bold REVERSE-VIDEO pill so PLAN/BUILD reads big + unmistakable (founder: "make it more clear
-    // what mode I'm in"). Colour still carries the calm(PLAN)/active(BUILD) distinction.
+    // Mode is a bold REVERSE-VIDEO pill so PLAN/BUILD reads big + unmistakable at a glance. Colour still
+    // carries the calm(PLAN)/active(BUILD) distinction.
     { t: ` ${mode.label} `, color: mode.color, inverse: true, bold: true },
     { t: "  ", color: dim },
     { t: perm.label, color: perm.color },
@@ -160,7 +160,7 @@ export function StatusLine({
   if (status.tokensUsed && status.tokensUsed > 0)
     head.push({ t: "  ", color: dim }, { t: `${shortTokens(status.tokensUsed)} tok`, color: dim });
 
-  // ctx% + run state are the PRIORITY TAIL (user: "what model + how much context"): both are pinned and
+  // ctx% + run state are the PRIORITY TAIL (which model + how much context): both are pinned and
   // survive clipping, so the effort/lane/model in the head clip FIRST on a narrow terminal — never the ctx %.
   const ctxSegs: Seg[] = status.contextWindow
     ? [

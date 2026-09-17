@@ -49,7 +49,7 @@ function previewFor(args: unknown): string[] {
 }
 
 /**
- * Interactive approver for Ask mode (DD-1). Shows the tool + a diff/command preview and asks the user
+ * Interactive approver for Ask mode. Shows the tool + a diff/command preview and asks the user
  * to allow/deny. Non-interactive (no TTY): deny by default (safe).
  *
  * `--yes` (autoAllow) auto-approves file edits/reads, but NOT shell/network — those are unbounded and
@@ -63,7 +63,7 @@ export function makeInteractiveApprover(opts: { autoAllow: boolean }): Approver 
 
     process.stderr.write(`\n${bold(`Approve ${req.toolName}?`)}\n`);
     // Surface WHY this call was escalated (risk annotation / checkpoint) before the choices — a human must
-    // see "writes a sensitive file" / "CRITICAL risk" to decide meaningfully (audit #14).
+    // see "writes a sensitive file" / "CRITICAL risk" to decide meaningfully.
     if (/risk:|checkpoint/i.test(req.decision.reason)) {
       process.stderr.write(`${bad(`  ⚠ ${req.decision.reason}`)}\n`);
     }

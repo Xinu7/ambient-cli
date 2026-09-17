@@ -184,7 +184,7 @@ async function runWebSearch(
 }
 
 /**
- * Build the `web_search` tool. Like `web_fetch` it is `effects:["network"]` (DD-1 gated: deny in plan, ask in
+ * Build the `web_search` tool. Like `web_fetch` it is `effects:["network"]` (permission-gated: deny in plan, ask in
  * ask/accept-edits, allow in bypass or via a grant), SSRF-guarded, and returns UNTRUSTED data (the runtime
  * wraps it with the injection guard). It returns result LINKS + snippets — the model then `web_fetch`es the
  * pages it wants. Provider: a configured SearXNG JSON instance (AMBIENT_SEARCH_URL) or a keyless DuckDuckGo

@@ -169,7 +169,7 @@ describe("write / edit (conflict-safe)", () => {
     expect(saved).toEqual(["v1\n", "v2\n"]);
   });
 
-  it("does NOT mislabel an unreadable existing path as a create (audit #6)", async () => {
+  it("does NOT mislabel an unreadable existing path as a create", async () => {
     // A directory at the target path: readFile → EISDIR (not ENOENT). write must NOT record operation:create
     // (which would let `amb rewind` delete it) — it throws instead.
     await mkdir(join(ws, "adir"), { recursive: true });

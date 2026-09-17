@@ -66,7 +66,7 @@ describe("makeWebSearchTool", () => {
       lookup: publicLookup,
       env: { AMBIENT_SEARCH_URL: "https://searx.local" },
     });
-    expect(tool.manifest.effects).toEqual(["network"]); // DD-1 gated like web_fetch
+    expect(tool.manifest.effects).toEqual(["network"]); // permission-gated like web_fetch
     const out = (await tool.execute({ query: "zod" }, ctx)) as {
       results: unknown[];
       provider: string;

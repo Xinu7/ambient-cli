@@ -60,7 +60,7 @@ describe("isBlockedIp — blocks the SSRF-dangerous ranges", () => {
     "::ffff:10.0.0.1", // IPv4-mapped private
     "::ffff:7f00:1", // IPv4-mapped loopback in HEX groups (not dotted)
     "::7f00:1", // IPv4-COMPAT loopback (::127.0.0.1 normalizes here)
-    "64:ff9b::a9fe:a9fe", // NAT64 well-known prefix embedding 169.254.169.254 (audit #25 finding)
+    "64:ff9b::a9fe:a9fe", // NAT64 well-known prefix embedding 169.254.169.254
     "64:ff9b::7f00:1", // NAT64 embedding 127.0.0.1
     "64:ff9b:1::a00:1", // NAT64 local-use (RFC 8215) embedding 10.0.0.1
     "fec0::1", // deprecated site-local

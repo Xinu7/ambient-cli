@@ -6,7 +6,7 @@ import { baseName, parseShellCommands } from "./shell-tokens.js";
  * permissive mode would otherwise auto-approve (e.g. accept-edits silently writing to ~/.ssh), and enriches
  * every approval prompt with a plain-English reason the human can act on.
  *
- * Design line (honors DD-1): risk NEVER overrides `bypass` or an explicit grant. It only turns an otherwise-
+ * Design line (honors the permission model): risk NEVER overrides `bypass` or an explicit grant. It only turns an otherwise-
  * automatic `allow` into an `ask`, and annotates `ask`s. Bash is matched on TOKENS (linear, quote-aware) so a
  * hostile long line can't cause quadratic work and quoted text (`printf 'sudo'`) is never mistaken for a
  * command. Heuristic first line, not a sandbox — curated to avoid crying wolf on ordinary dev commands.

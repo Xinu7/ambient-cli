@@ -5,7 +5,7 @@ import { add, bad, cyan, dim } from "../render/color.js";
 /**
  * Render runtime events to the terminal as they stream. Assistant text streams inline; tool calls
  * show a one-line status; diffs (from write/edit) preview before-and-after; the model receipt and
- * substitution are surfaced. This is the line-UI (source of truth); a richer TUI comes in Phase 3.
+ * substitution are surfaced. This is the line-UI (source of truth) that the richer TUI builds on.
  */
 export class EventRenderer {
   private streaming = false;

@@ -14,7 +14,7 @@ describe("classifyToolRisk — bash", () => {
     expect(bash("mkfs.ext4 /dev/nvme0n1").level).toBe("critical");
   });
 
-  it("flags long-flag rm forms (audit #17 false-negative)", () => {
+  it("flags long-flag rm forms (false-negative)", () => {
     expect(bash("rm --recursive --force ~").level).toBe("critical");
     expect(bash('rm --force -r "$HOME"').level).toBe("critical");
   });
@@ -25,14 +25,14 @@ describe("classifyToolRisk — bash", () => {
     expect(bash("sudo -u root rm -rf ~").level).toBe("critical");
   });
 
-  it("does NOT over-flag: non-recursive rm and QUOTED text (audit #8 false-positives)", () => {
+  it("does NOT over-flag: non-recursive rm and QUOTED text (false-positives)", () => {
     expect(bash("rm --force /").level).toBe("none"); // no recursive flag → rm refuses it anyway
     expect(bash("rm -f /etc/hosts").level).toBe("none"); // not recursive
     expect(bash(`printf '%s' 'sudo rm -rf /'`).level).toBe("none"); // all in quotes = data
     expect(bash(`echo "rm --recursive /"`).level).toBe("none");
   });
 
-  it("classifies a hostile long command in LINEAR time (audit #7 quadratic-DoS)", () => {
+  it("classifies a hostile long command in LINEAR time (quadratic-DoS)", () => {
     const hostile = `rm ${"a ".repeat(150_000)}`; // ~300KB of rm tokens
     const t = process.hrtime.bigint();
     bash(hostile);
@@ -86,7 +86,7 @@ describe("classifyToolRisk — writes to sensitive files", () => {
     expect(classifyToolRisk("edit", { path: "packages/cli/src/app.tsx" }).level).toBe("none");
   });
 
-  it("normalizes Windows separators + case before matching (audit #15)", () => {
+  it("normalizes Windows separators + case before matching", () => {
     expect(classifyToolRisk("write", { path: ".ssh\\authorized_keys" }).level).toBe("elevated");
     expect(classifyToolRisk("write", { path: ".github\\workflows\\ci.yml" }).level).toBe(
       "elevated",
@@ -95,7 +95,7 @@ describe("classifyToolRisk — writes to sensitive files", () => {
   });
 });
 
-// ---- risk overlay in decide() (DD-1 respecting) ----
+// ---- risk overlay in decide() (permission-model respecting) ----
 const input = (
   mode: Mode,
   effects: Effect[],
@@ -125,7 +125,7 @@ describe("decide — risk overlay", () => {
     expect(d.reason).toMatch(/sensitive file/);
   });
 
-  it("does NOT escalate in bypass (DD-1: the user trusts the run)", () => {
+  it("does NOT escalate in bypass (the user trusts the run)", () => {
     const d = decide(
       input("bypass", ["process"], {
         toolName: "bash",
@@ -188,7 +188,7 @@ describe("decide — autonomy brake (consecutive auto-approve cap)", () => {
     expect(d.reason).toMatch(/checkpoint/);
   });
 
-  it("never checkpoints in bypass (DD-1: bypass = no prompts)", () => {
+  it("never checkpoints in bypass (bypass = no prompts)", () => {
     const d = decide(
       input("bypass", ["read", "write"], {
         toolName: "write",
@@ -209,7 +209,7 @@ describe("decide — autonomy brake (consecutive auto-approve cap)", () => {
     expect(d.effect).toBe("allow");
   });
 
-  it("does NOT checkpoint at the cap when an explicit grant covers the tool (DD-1, audit #13)", () => {
+  it("does NOT checkpoint at the cap when an explicit grant covers the tool", () => {
     const d = decide(
       input("accept-edits", ["read", "write"], {
         toolName: "write",

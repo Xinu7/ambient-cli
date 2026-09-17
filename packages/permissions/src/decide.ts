@@ -2,7 +2,7 @@ import type { Effect, Grant, Mode, PermissionDecision, PermissionInput } from "@
 import { classifyToolRisk } from "./risk.js";
 
 /**
- * The DD-1 permission engine. Evaluated deny-first, then the mode ladder, then a local risk overlay.
+ * The permission engine. Evaluated deny-first, then the mode ladder, then a local risk overlay.
  *
  * Order:
  *   1. Read-only effects are always allowed (reads never mutate).
@@ -11,7 +11,7 @@ import { classifyToolRisk } from "./risk.js";
  *   4. A matching prior grant allows.
  *   5. The mode decides: plan = deny (read-only), ask = ask, accept-edits = auto file edits / ask shell.
  *   6. Risk overlay: a call the classifier flags turns an otherwise-automatic allow into an ask, and
- *      annotates asks — but NEVER overrides bypass or an explicit grant (DD-1).
+ *      annotates asks — but NEVER overrides bypass or an explicit grant.
  *
  * The model can never grant itself authority — grants come only from a human decision or config.
  */
@@ -85,7 +85,7 @@ function baseDecide(input: PermissionInput): PermissionDecision {
 
 /**
  * A brake on runaway autonomy: after this many consecutive auto-approved mutations in accept-edits, the
- * next one becomes a human checkpoint. Does NOT apply to bypass (DD-1: bypass = no prompts).
+ * next one becomes a human checkpoint. Does NOT apply to bypass (bypass = no prompts).
  */
 export const MAX_CONSECUTIVE_AUTO_APPROVALS = 25;
 
@@ -94,7 +94,7 @@ function applyRisk(base: PermissionDecision, input: PermissionInput): Permission
   if (risk.level === "none") return base;
   const note = `${risk.level === "critical" ? "CRITICAL risk" : "elevated risk"}: ${risk.reasons.join("; ")}`;
   if (base.effect === "allow") {
-    // DD-1: bypass + explicit grants + pure reads are honored as-is (no prompt, no downgrade).
+    // bypass + explicit grants + pure reads are honored as-is (no prompt, no downgrade).
     if (input.mode === "bypass" || matchingGrant(input) || isReadOnly(input.effects)) return base;
     // An accept-edits auto-approval of a risky write must get a human look.
     return ask(`${base.reason}; ${note}`);
@@ -116,13 +116,13 @@ export function capMode(parentMode: Mode, role: "scout" | "oracle" | "builder"):
 export function decide(input: PermissionInput): PermissionDecision {
   const afterRisk = applyRisk(baseDecide(input), input);
   // Autonomy brake: a long unbroken run of auto-approved edits gets a periodic human checkpoint. Only in
-  // accept-edits (bypass is untouched per DD-1) and only for mutations (reads are free and never counted).
+  // accept-edits (bypass is untouched) and only for mutations (reads are free and never counted).
   const cap = input.autoApprovalCap ?? MAX_CONSECUTIVE_AUTO_APPROVALS;
   if (
     afterRisk.effect === "allow" &&
     input.mode === "accept-edits" &&
     !isReadOnly(input.effects) &&
-    !matchingGrant(input) && // DD-1: an explicit grant is never re-prompted, even at the cap (audit #13)
+    !matchingGrant(input) && // an explicit grant is never re-prompted, even at the cap
     (input.autoApprovalStreak ?? 0) >= cap
   ) {
     return ask(`periodic review checkpoint after ${cap} auto-approved edits`);

@@ -111,7 +111,7 @@ describe("web_fetch tool", () => {
     );
   });
 
-  it("cancels the redirect response body before following (no leaked connection — audit #25)", async () => {
+  it("cancels the redirect response body before following (no leaked connection)", async () => {
     let redirectBodyCancelled = false;
     const tool = makeWebFetchTool({
       lookup: publicLookup,

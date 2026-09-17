@@ -1,4 +1,4 @@
-# Eval harness — the private, repo-specific ship gate
+# Eval harness — the project-local ship gate
 
 > "Evals over vibes." (Karpathy A5) A vibe-check tells you an answer *felt* right once. An eval tells you a
 > real task still passes after you switched from Kimi to GLM, edited a prompt, or bumped a dependency — as a

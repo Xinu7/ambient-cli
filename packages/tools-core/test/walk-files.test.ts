@@ -66,7 +66,7 @@ describe("walkFiles — .gitignore + secret skipping", () => {
     write("locked/secret.ts");
     write("src/b.ts");
     const locked = join(ws, "locked");
-    chmodSync(locked, 0o000); // the owner can no longer readdir it → EACCES, exactly like the founder's crash_dumps
+    chmodSync(locked, 0o000); // the owner can no longer readdir it → EACCES, like a locked directory hit during a walk
     try {
       const files = await collect(); // must NOT throw
       expect(files).toContain("src/a.ts");
