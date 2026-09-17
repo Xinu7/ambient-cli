@@ -1341,6 +1341,22 @@ export function App(deps: AppDeps): ReactNode {
     planReviewPending &&
     state.status.agentMode === "plan" &&
     state.plan.some((t) => t.status !== "done");
+  // The composer EXPANDS into free vertical space when nothing else competes for it (a fresh screen / idle
+  // compose) — so a big paste grows like a normal terminal input instead of collapsing to a chip. It stays at
+  // the floor while a run is active or panels are up, so the live region never reaches `rows` (the strobe).
+  const composerCanGrow =
+    !runActive &&
+    !planAwaitingReview &&
+    !showSlash &&
+    picker === null &&
+    queued.length === 0 &&
+    state.plan.length === 0;
+  const composerReserve =
+    (onSplash ? 14 : 0) + // the splash banner (idle home only, ~14 rows of wordmark + tagline + divider)
+    (state.goal ? 1 : 0) + // the pinned goal line
+    (attachments.length > 0 ? 1 : 0) + // the attachment chip
+    9; // status + hint + border + margins + a safety cushion so the whole stack stays under `rows`
+  const composerMaxRows = composerCanGrow ? Math.max(6, rows - composerReserve) : 6;
 
   return (
     // NATURAL height (no fixed height): the dynamic tree renders at its TRUE size, which stays below the
@@ -1477,6 +1493,7 @@ export function App(deps: AppDeps): ReactNode {
               value={input}
               running={runActive}
               width={width}
+              maxRows={composerMaxRows}
               attachments={attachments}
               planReview={planAwaitingReview}
               planReady={

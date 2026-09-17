@@ -14,50 +14,84 @@ function kb(bytes: number): string {
     : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
-/** How many lines of a multi-line buffer are shown before it collapses to a "[pasted N lines]" chip. */
-const MAX_VISIBLE_LINES = 8;
-/** Cap the composer's own height (rows) — a long wrapped single line must never grow the box past the
- *  terminal (which reintroduces the CSI-3J strobe + scrollback erase). */
-const MAX_INPUT_ROWS = 6;
+/** The FLOOR for the composer's height (rows). The App passes a larger `maxRows` when there's free vertical
+ *  space (a fresh screen), so a big paste can expand into it; it stays here while a run is active or on a
+ *  short terminal, so the live region never reaches the terminal height (the CSI-3J strobe + scrollback erase). */
+const MIN_INPUT_ROWS = 6;
 
 /**
- * Bound a long single-line value to at most MAX_INPUT_ROWS wrapped rows by showing its TAIL (where the caret
- * is — what you're currently typing) prefixed with "…". A normal message fits whole (fully readable); only a
- * pathological one-liner (a long pasted URL/JSON) collapses — which keeps the composer legible AND bounded.
+ * Bound a long single-line value to at most `maxRows` wrapped rows by showing its TAIL (where the caret is —
+ * what you're currently typing) prefixed with "…". A normal message fits whole; only a pathological one-liner
+ * (a long pasted URL/JSON with no newlines) collapses — which keeps the composer legible AND bounded.
  */
-function boundInput(value: string, boxW: number): string {
+function boundInput(value: string, boxW: number, maxRows: number): string {
   const usable = Math.max(8, boxW - 4); // "▸ " + caret + interior padding
-  const maxChars = MAX_INPUT_ROWS * usable;
+  const maxChars = maxRows * usable;
   return value.length > maxChars ? `…${value.slice(-(maxChars - 1))}` : value;
 }
 
+function Line({
+  text,
+  first,
+  caret,
+}: { text: string; first?: boolean; caret?: boolean }): ReactNode {
+  return (
+    <Text wrap="truncate-end">
+      <Text color={AmbientTheme.dim}>{first ? "▸ " : "  "}</Text>
+      <Text color={AmbientTheme.fg}>{text}</Text>
+      {caret ? <Text color={AmbientTheme.signal}>▋</Text> : null}
+    </Text>
+  );
+}
+
 /**
- * Render a MULTI-LINE buffer (a paste, or text with newlines). Up to MAX_VISIBLE_LINES render as a growing
- * block so a small paste is fully readable; a LARGE paste collapses to a single clean "[pasted N lines]" chip
- * — never a wall of truncated content, which looked broken. If the buffer's last line is SHORT (a message the
- * user typed alongside the paste), it's shown cleanly below the chip so they can still read what they're
- * adding; a long trailing line (more pasted code) is left to the chip. The full buffer is always what's sent.
+ * Render a MULTI-LINE buffer (a paste, or text with newlines). It EXPANDS to use the height it's given:
+ * - fits within `maxRows` → show the whole buffer (the box grows into the free space, like a normal input);
+ * - taller but there's ROOM (maxRows grew past the floor) → show the HEAD of the paste + a "[pasted N lines]"
+ *   count + the last line (where the caret is), filling the budget so you can actually SEE what you pasted;
+ * - taller and space is TIGHT (a run is active / a short terminal) → a single clean "[pasted N lines]" chip
+ *   plus a short trailing line, so it can never overflow. The full buffer is always what gets sent.
  */
-function MultilineValue({ value, boxW }: { value: string; boxW: number }): ReactNode {
+function MultilineValue({
+  value,
+  boxW,
+  maxRows,
+}: {
+  value: string;
+  boxW: number;
+  maxRows: number;
+}): ReactNode {
   const lines = value.replace(/\n+$/, "").split("\n"); // ignore trailing blank lines in the count/preview
-  if (lines.length <= MAX_VISIBLE_LINES) {
+  if (lines.length <= maxRows) {
     return (
       <Box flexDirection="column">
         {lines.map((ln, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: line list within one render never reorders
-          <Text key={i} wrap="truncate-end">
-            <Text color={AmbientTheme.dim}>{i === 0 ? "▸ " : "  "}</Text>
-            <Text color={AmbientTheme.fg}>{ln}</Text>
-            {i === lines.length - 1 ? <Text color={AmbientTheme.signal}>▋</Text> : null}
-          </Text>
+          <Line key={i} text={ln} first={i === 0} caret={i === lines.length - 1} />
         ))}
       </Box>
     );
   }
-  // Only surface a trailing line when it's short enough to fit ON ONE ROW (i.e. typed prose, not more code) —
-  // so the composer can never render a truncated/overflowing content line for a big paste.
-  const tail = (lines[lines.length - 1] ?? "").trim();
-  const showTail = tail.length > 0 && tail.length <= Math.max(8, boxW - 6);
+  const tail = lines[lines.length - 1] ?? "";
+  // ROOM to expand → show the head of the paste + a count + the caret line (fills the free space).
+  if (maxRows > MIN_INPUT_ROWS) {
+    const headCount = Math.max(1, maxRows - 2);
+    return (
+      <Box flexDirection="column">
+        {lines.slice(0, headCount).map((ln, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: line list within one render never reorders
+          <Line key={i} text={ln} first={i === 0} />
+        ))}
+        <Text wrap="truncate-end" color={AmbientTheme.cyan}>
+          {`  … [pasted ${lines.length} lines — showing first ${headCount}]`}
+        </Text>
+        <Line text={tail} caret />
+      </Box>
+    );
+  }
+  // TIGHT → a single clean chip; a SHORT trailing line (typed prose) still shows so it can never overflow.
+  const shortTail = tail.trim();
+  const showTail = shortTail.length > 0 && shortTail.length <= Math.max(8, boxW - 6);
   return (
     <Box flexDirection="column">
       <Text wrap="truncate-end">
@@ -65,13 +99,7 @@ function MultilineValue({ value, boxW }: { value: string; boxW: number }): React
         <Text color={AmbientTheme.cyan}>{`[pasted ${lines.length} lines]`}</Text>
         {showTail ? null : <Text color={AmbientTheme.signal}>{" ▋"}</Text>}
       </Text>
-      {showTail ? (
-        <Text wrap="truncate-end">
-          <Text color={AmbientTheme.dim}>{"  "}</Text>
-          <Text color={AmbientTheme.fg}>{tail}</Text>
-          <Text color={AmbientTheme.signal}>{" ▋"}</Text>
-        </Text>
-      ) : null}
+      {showTail ? <Line text={shortTail} caret /> : null}
     </Box>
   );
 }
@@ -80,6 +108,7 @@ export function Composer({
   value,
   running,
   width,
+  maxRows = MIN_INPUT_ROWS,
   planReady = false,
   planReview = false,
   attachments = [],
@@ -87,6 +116,9 @@ export function Composer({
   value: string;
   running: boolean;
   width: number;
+  /** How many rows of content the composer may show — the App raises this when there's free vertical space
+   *  (a fresh screen) so a big paste expands; it stays at the floor while running / on a short terminal. */
+  maxRows?: number;
   /** BUILD mode with a saved plan and idle → Enter on an empty line executes the plan. */
   planReady?: boolean;
   /** PLAN mode just produced a plan and is waiting for the user → Enter approves & builds; typing revises. */
@@ -95,6 +127,7 @@ export function Composer({
   attachments?: { bytes: number }[];
 }): ReactNode {
   const boxW = Math.max(0, Math.min(width - 2, 120));
+  const rows = Math.max(MIN_INPUT_ROWS, maxRows);
   const placeholder = running
     ? "Steer the agent — type to redirect it, it picks it up next turn…"
     : planReview
@@ -122,8 +155,8 @@ export function Composer({
       ) : null}
       <Box borderStyle="round" borderColor={AmbientTheme.dim} paddingX={1} width={boxW}>
         {/* the prompt ▸ is dim chrome; the signal ▋ caret is the one live mark. When empty the caret leads the
-            placeholder; while typing the input WRAPS (grows down) so you can READ the whole message you're
-            sending — never truncated off the right edge (the user: "I can't read what I am sending"). */}
+            placeholder; while typing the input WRAPS (grows down, up to `rows`) so you can READ the whole
+            message you're sending — never truncated off the right edge ("I can't read what I am sending"). */}
         {value.length === 0 ? (
           <Text wrap="truncate-end">
             <Text color={AmbientTheme.dim}>▸ </Text>
@@ -132,11 +165,11 @@ export function Composer({
           </Text>
         ) : value.includes("\n") ? (
           // A paste / multi-line buffer — show it so it's never "lost off the right edge".
-          <MultilineValue value={value} boxW={boxW} />
+          <MultilineValue value={value} boxW={boxW} maxRows={rows} />
         ) : (
           <Text wrap="wrap">
             <Text color={AmbientTheme.dim}>▸ </Text>
-            <Text color={AmbientTheme.fg}>{boundInput(value, boxW)}</Text>
+            <Text color={AmbientTheme.fg}>{boundInput(value, boxW, rows)}</Text>
             <Text color={AmbientTheme.signal}>▋</Text>
           </Text>
         )}

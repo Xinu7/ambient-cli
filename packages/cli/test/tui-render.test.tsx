@@ -183,6 +183,34 @@ describe("tui render", () => {
     unmount();
   });
 
+  it("EXPANDS a large paste into the available height when there's room (founder: 'why can't it expand?')", () => {
+    // A fresh screen has ~20 free rows below; the App raises maxRows so a big paste grows like a normal
+    // terminal input (shows its head + a count) instead of collapsing to a one-line chip.
+    const value = Array.from({ length: 50 }, (_, i) => `content line ${i + 1}`).join("\n");
+    const { lastFrame, unmount } = render(
+      <Composer value={value} running={false} width={80} maxRows={20} />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("content line 1"); // the head of the paste is shown…
+    expect(frame).toContain("content line 15"); // …deep into it — genuinely expanded, not a one-line chip
+    expect(frame).toContain("[pasted 50 lines"); // …with an honest count of the whole paste
+    const rows = frame.split("\n").filter((l) => l.trim().length > 0);
+    expect(rows.length).toBeLessThanOrEqual(24); // still bounded to ~maxRows (+ border/hint) — no strobe
+    unmount();
+  });
+
+  it("a multi-line paste that FITS the budget shows in FULL — the box just grows, no chip", () => {
+    const value = Array.from({ length: 12 }, (_, i) => `row ${i + 1}`).join("\n");
+    const { lastFrame, unmount } = render(
+      <Composer value={value} running={false} width={80} maxRows={20} />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("row 1");
+    expect(frame).toContain("row 12"); // all 12 lines visible…
+    expect(frame).not.toContain("[pasted"); // …and no chip/marker at all when it fits
+    unmount();
+  });
+
   it("caps a STREAMING answer to its recent lines but shows a SETTLED one in full (Phase-3 review #2)", () => {
     const text = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join("\n");
     const streaming = render(
