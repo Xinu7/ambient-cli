@@ -165,7 +165,7 @@ export function Composer({
   const placeholder = running
     ? "Steer the agent — type to redirect it, it picks it up next turn…"
     : planReview
-      ? "↵ approve the plan · or describe what to change to revise it…"
+      ? "type to revise · ↵ approves"
       : planReady
         ? "Enter to build the plan · or describe a task · type / for commands"
         : "Describe a coding task · type / for commands";
@@ -188,18 +188,30 @@ export function Composer({
         </Box>
       ) : null}
       {/* The label on the input frame + its border colour. In plan-review it's the SINGLE approve/revise
-          prompt (a signal "◆ PLAN READY" header + signal border — no second overlapping banner); otherwise a
-          bold reverse-video mode pill so PLAN vs BUILD is unmistakable where you type. */}
+          prompt — an ENUMERATED choice (one action per line, key-labelled) so it reads unmistakably as a
+          decision, not a run-on status line; signal-coloured, one element (no second banner). Otherwise a bold
+          reverse-video mode pill so PLAN vs BUILD is unmistakable where you type. */}
       {planReview ? (
-        <Box paddingX={1} width={boxW}>
+        <Box flexDirection="column" paddingX={1} width={boxW}>
           <Text wrap="truncate-end">
-            <Text
-              color={AmbientTheme.signal}
-              bold
-            >{`◆ PLAN READY (${planReviewSteps} step${planReviewSteps === 1 ? "" : "s"})`}</Text>
-            <Text color={AmbientTheme.dim}>{"  ·  "}</Text>
-            <Text color={AmbientTheme.fg}>↵ approve & build</Text>
-            <Text color={AmbientTheme.dim}>{"  ·  type to revise  ·  tab keeps planning"}</Text>
+            <Text color={AmbientTheme.signal} bold>
+              ◆ Plan ready
+            </Text>
+            <Text color={AmbientTheme.dim}>{` · ${planReviewSteps} step${
+              planReviewSteps === 1 ? "" : "s"
+            }`}</Text>
+          </Text>
+          <Text wrap="truncate-end">
+            <Text color={AmbientTheme.signal}>{"  ↵           "}</Text>
+            <Text color={AmbientTheme.fg}>approve &amp; build</Text>
+          </Text>
+          <Text wrap="truncate-end">
+            <Text color={AmbientTheme.signal}>{"  type a note "}</Text>
+            <Text color={AmbientTheme.dim}>revise the plan</Text>
+          </Text>
+          <Text wrap="truncate-end">
+            <Text color={AmbientTheme.signal}>{"  ⇥ Tab       "}</Text>
+            <Text color={AmbientTheme.dim}>keep planning</Text>
           </Text>
         </Box>
       ) : (

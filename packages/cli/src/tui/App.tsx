@@ -681,15 +681,10 @@ export function App(deps: AppDeps): ReactNode {
         }
         setQuestion(null);
         cancellingRef.current = false;
-        // A PLAN-mode run that produced a plan: arm the review state so the composer shows the approve prompt
-        // (the main "it's done, your move" signal); this scrollback notice records the same two choices.
+        // A PLAN-mode run that produced a plan: arm the review state. The composer then shows the SINGLE clear
+        // enumerated approve/revise/keep-planning prompt (no duplicate scrollback notice — one affordance).
         if (agentModeRef.current === "plan" && planRef.current.some((t) => t.status !== "done")) {
           setPlanReview(true);
-          dispatch({
-            t: "notice",
-            level: "info",
-            text: "Plan ready — press Enter to approve & build it, or type what to change to revise it.",
-          });
         }
         // Steer messages the agent didn't consume (it finished before the next turn boundary) run as a
         // follow-up turn; otherwise drain the next queued (attachment) message. Either way nothing is lost.

@@ -50,9 +50,10 @@ describe("mode indicator — PLAN vs BUILD is clear in the status line and on th
       />,
     );
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("PLAN READY (3 steps)");
+    expect(frame).toContain("Plan ready · 3 steps");
     expect(frame).toContain("approve & build");
-    expect(frame).toContain("revise");
+    expect(frame).toContain("revise the plan");
+    expect(frame).toContain("keep planning");
     unmount();
   });
 });
