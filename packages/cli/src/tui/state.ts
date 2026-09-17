@@ -88,13 +88,16 @@ export type TranscriptItem =
       roleWord: string; // "scouts" | "oracles" | "agents"
       // variant "child" — one finished child:
       label?: string;
-      childStatus?: "ok" | "fail";
+      // "partial" = the child returned a useful summary but stopped at its turn limit (or looping) rather than
+      // completing — its findings ARE handed to the parent, so it must not read as an outright failure.
+      childStatus?: "ok" | "partial" | "fail";
       turns?: number;
       durationMs?: number;
       summary?: string;
       // variant "done" — the wave's closing line:
       count?: number;
       okCount?: number;
+      partialCount?: number;
       failCount?: number;
     };
 
@@ -137,6 +140,9 @@ export interface WaveState {
   labels: Record<string, string>;
   /** Running tally of children that finished ok (for THIS wave's closing line). */
   okCount: number;
+  /** Running tally of children that returned findings but stopped at their turn limit (or looping) — "partial",
+   *  not failed. */
+  partialCount: number;
 }
 export interface WaveAction {
   childSessionId: string;
@@ -797,6 +803,7 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
           exactTotal: true,
           labels: {},
           okCount: 0,
+          partialCount: 0,
         },
         status: { ...state.status, activity: { verb: "Delegating" } },
       };
@@ -831,6 +838,7 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
           actions: [],
           labels: { [ev.childSessionId]: ev.label },
           okCount: 0,
+          partialCount: 0,
         },
       };
     }
@@ -869,7 +877,14 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
       if (!state.wave || state.wave.id !== ev.toolCallId) return state; // unknown parent → no-op
       const label = state.wave.labels[ev.childSessionId] ?? "";
       const roleWord = state.wave.roleWord;
-      const childStatus: "ok" | "fail" = ev.stopReason === "complete" ? "ok" : "fail";
+      // A child that stopped at its turn limit (or the doom-loop guard) still handed its findings summary to
+      // the parent — that's "partial", not a failure. Only a genuine error/cancel/block reads as failed.
+      const childStatus: "ok" | "partial" | "fail" =
+        ev.stopReason === "complete"
+          ? "ok"
+          : ev.stopReason === "max_turns" || ev.stopReason === "looping"
+            ? "partial"
+            : "fail";
       // 1) Append the durable per-child scrollback line (settled → commits to <Static> immediately).
       let next = pushItem(state, (id) => ({
         kind: "subagent-line",
@@ -884,6 +899,7 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
       }));
       const done = state.wave.done + 1;
       const okCount = state.wave.okCount + (childStatus === "ok" ? 1 : 0);
+      const partialCount = state.wave.partialCount + (childStatus === "partial" ? 1 : 0);
       const remainingActions = state.wave.actions.filter(
         (a) => a.childSessionId !== ev.childSessionId,
       );
@@ -897,12 +913,29 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
           roleWord,
           count,
           okCount,
-          failCount: count - okCount,
+          partialCount,
+          failCount: count - okCount - partialCount,
         }));
         return { ...next, wave: undefined };
       }
-      return { ...next, wave: { ...state.wave, done, okCount, actions: remainingActions } };
+      return {
+        ...next,
+        wave: { ...state.wave, done, okCount, partialCount, actions: remainingActions },
+      };
     }
+
+    case "run.checkpoint":
+      // A turn-budget checkpoint. `auto_continue` → a visible "compacted, continuing" marker so a long
+      // auto-continue run never looks frozen; `paused` is surfaced by the end-of-run stop notice instead
+      // (the run stops right after emitting it).
+      return ev.reason === "auto_continue"
+        ? pushItem(state, (id) => ({
+            kind: "notice",
+            id,
+            level: "info",
+            text: `◆ Checkpoint ${ev.segment}/${ev.of} — compacted, continuing…`,
+          }))
+        : state;
 
     case "turn.finished":
       return {
@@ -923,7 +956,7 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
  * in-flight items — a stream cut off by an abort/error must not blink forever.
  */
 export function withStop(state: ViewState, stopReason: string): ViewState {
-  return {
+  const stopped: ViewState = {
     ...state,
     transcript: terminalizeInFlight(state.transcript, stopReason === "cancelled"),
     pending: {},
@@ -932,6 +965,43 @@ export function withStop(state: ViewState, stopReason: string): ViewState {
     wave: undefined, // a cancelled/interrupted run must never leave a spinning wave panel
     status: { ...state.status, running: false, stopReason, activity: undefined },
   };
+  // A non-`complete` stop leaves the composer idle with no explanation — the "is it frozen?" gap. Append a
+  // durable one-line notice saying WHY it stopped and what to do, so the end state is always legible. `complete`
+  // (a clean finish) and `cancelled` (the user's own Ctrl-C) speak for themselves; `error` already printed one.
+  const notice = stopNotice(stopReason);
+  return notice
+    ? pushItem(stopped, (id) => ({ kind: "notice", id, level: notice.level, text: notice.text }))
+    : stopped;
+}
+
+/** The end-of-run explanation for a non-`complete` stop, or undefined when no extra line is warranted. */
+function stopNotice(
+  stopReason: string,
+): { level: "info" | "warn" | "error"; text: string } | undefined {
+  switch (stopReason) {
+    case "max_turns":
+      return {
+        level: "warn",
+        text: '⚠ Reached the turn limit — the findings and plan above are saved. Type "continue" (or give direction) to keep going.',
+      };
+    case "looping":
+      return {
+        level: "warn",
+        text: "⚠ Stopped — the model kept repeating itself with no progress. The work so far is above.",
+      };
+    case "blocked":
+      return {
+        level: "warn",
+        text: "⚠ Stopped — the work didn't fit the model's context window. Try a model with a larger window.",
+      };
+    case "verify_failed":
+      return {
+        level: "warn",
+        text: "⚠ Stopped — automated verification didn't pass. See the diagnostics above.",
+      };
+    default:
+      return undefined; // complete / cancelled / error → no extra line
+  }
 }
 
 /**

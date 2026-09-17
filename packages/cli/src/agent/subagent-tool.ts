@@ -47,6 +47,15 @@ const Spec = z.object({
   prompt: z.string().describe("The self-contained task for this subagent"),
   preset: z.string().optional(),
   model: z.string().optional(),
+  maxTurns: z
+    .number()
+    .int()
+    .min(1)
+    .max(80)
+    .optional()
+    .describe(
+      "Optional turn budget for this child (default: 30 scout/oracle, 50 builder). Raise it for a genuinely large investigation instead of spawning a second wave; capped at 80.",
+    ),
 });
 const Input = z.object({
   spawn: z.array(Spec).min(1).max(MAX_SUBAGENTS_PER_RUN),
@@ -147,6 +156,7 @@ export function makeSubagentTool(deps: SubagentToolDeps): ToolDefinition {
             prompt: preset ? `${preset.body}\n\n---\nTask: ${s.prompt}` : s.prompt,
             ...(s.preset ? { preset: s.preset } : {}),
             ...((s.model ?? preset?.model) ? { model: s.model ?? preset?.model } : {}),
+            ...(s.maxTurns ? { maxTurns: s.maxTurns } : {}),
             // Enforce the preset's declared tool allow-list (parsed in discoverAgents) on the child registry.
             ...(preset?.tools && preset.tools.length > 0 ? { allowedTools: preset.tools } : {}),
           };

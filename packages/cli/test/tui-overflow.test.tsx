@@ -189,6 +189,7 @@ describe("interactive overflow (real Ink render, fake TTY) — the clamp never e
       })),
       labels: {},
       okCount: 0,
+      partialCount: 0,
     };
     const { writes, stdout, stdin } = fakeTty();
     const Tree = (): ReactNode => (

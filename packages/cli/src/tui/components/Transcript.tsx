@@ -245,18 +245,33 @@ export function TranscriptRow({
       // The DURABLE scrollback record of a subagent wave — scroll up to read what each scout did.
       if (item.variant === "done") {
         const ok = item.okCount ?? 0;
+        const partial = item.partialCount ?? 0;
         const fail = item.failCount ?? 0;
+        // Only surface a breakdown when something wasn't a clean OK; list only the non-zero buckets.
+        const parts = [
+          `${ok} ok`,
+          ...(partial > 0 ? [`${partial} partial`] : []),
+          ...(fail > 0 ? [`${fail} failed`] : []),
+        ];
         return (
           <Box>
             <Text color={AmbientTheme.dim} wrap="truncate">
               {`◆ ${item.count ?? 0} ${item.roleWord} finished${
-                fail > 0 ? ` (${ok} ok · ${fail} failed)` : ""
+                partial > 0 || fail > 0 ? ` (${parts.join(" · ")})` : ""
               }`}
             </Text>
           </Box>
         );
       }
-      const okMark = item.childStatus !== "fail";
+      // ok → green ✓, partial (returned findings but hit its turn limit) → blue ◐, fail → red ✗.
+      const mark =
+        item.childStatus === "fail" ? "✗ " : item.childStatus === "partial" ? "◐ " : "✓ ";
+      const markColor =
+        item.childStatus === "fail"
+          ? AmbientTheme.bad
+          : item.childStatus === "partial"
+            ? AmbientTheme.signal
+            : AmbientTheme.add;
       const meta = `${item.turns ?? 0} turn${item.turns === 1 ? "" : "s"}${
         item.durationMs != null ? ` · ${mmss(Math.round(item.durationMs / 1000))}` : ""
       }`;
@@ -266,7 +281,7 @@ export function TranscriptRow({
       return (
         <Box flexDirection="column" marginTop={1}>
           <Box>
-            <Text color={okMark ? AmbientTheme.add : AmbientTheme.bad}>{okMark ? "✓ " : "✗ "}</Text>
+            <Text color={markColor}>{mark}</Text>
             <Text color={AmbientTheme.fg}>{`${item.label ?? ""}  `}</Text>
             <Text color={AmbientTheme.dim}>{meta}</Text>
           </Box>

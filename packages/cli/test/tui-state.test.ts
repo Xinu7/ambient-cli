@@ -1025,6 +1025,92 @@ describe("tui reducer — subagent visibility", () => {
     expect(s1.transcript).toEqual(s0.transcript);
     expect(s1.wave).toEqual(s0.wave);
   });
+
+  it("a child that hit its turn limit is PARTIAL (it returned findings), not failed", () => {
+    let s = reduce(init(), {
+      kind: "subagent.wave",
+      schemaVersion: 1,
+      sessionId: "ses_a",
+      turnId: "trn_a",
+      attemptId: "att_a",
+      toolCallId: "tc_p",
+      count: 1,
+      role: "scout",
+      labels: ["find-auth"],
+    } as NewEvent);
+    s = startGroup(s);
+    s = reduce(s, {
+      kind: "subagent.finished",
+      schemaVersion: 1,
+      sessionId: "ses_a",
+      turnId: "trn_a",
+      attemptId: "att_a",
+      toolCallId: "tc_p",
+      childSessionId: "ses_c",
+      stopReason: "max_turns",
+      turns: 30,
+      toolCount: 5,
+      summary: "found 3 issues before running out of turns",
+      durationMs: 60_000,
+    } as NewEvent);
+    const child = s.transcript.find(
+      (t): t is Extract<TranscriptItem, { kind: "subagent-line" }> =>
+        t.kind === "subagent-line" && t.variant === "child",
+    );
+    expect(child?.childStatus).toBe("partial"); // NOT "fail" — the summary reached the parent
+    const done = s.transcript.find(
+      (t): t is Extract<TranscriptItem, { kind: "subagent-line" }> =>
+        t.kind === "subagent-line" && t.variant === "done",
+    );
+    expect(done?.partialCount).toBe(1);
+    expect(done?.failCount).toBe(0);
+    expect(done?.okCount).toBe(0);
+  });
+
+  it("run.checkpoint (auto_continue) pushes a visible 'continuing' marker; a pause does not", () => {
+    const cont = reduce(init(), {
+      kind: "run.checkpoint",
+      schemaVersion: 1,
+      sessionId: "ses_a",
+      turnId: "trn_a",
+      segment: 1,
+      of: 3,
+      reason: "auto_continue",
+    } as NewEvent);
+    const marker = cont.transcript.at(-1);
+    expect(marker?.kind).toBe("notice");
+    expect(marker?.kind === "notice" ? marker.text : "").toContain("continuing");
+
+    const paused = reduce(init(), {
+      kind: "run.checkpoint",
+      schemaVersion: 1,
+      sessionId: "ses_a",
+      turnId: "trn_a",
+      segment: 0,
+      of: 3,
+      reason: "paused",
+    } as NewEvent);
+    expect(paused.transcript).toEqual(init().transcript); // no marker — the stop notice covers a pause
+  });
+});
+
+describe("withStop — legible end-of-run notice", () => {
+  it("max_turns appends a warn notice explaining the stop + how to continue", () => {
+    const s = withStop(init(), "max_turns");
+    const last = s.transcript.at(-1);
+    expect(last?.kind).toBe("notice");
+    if (last?.kind === "notice") {
+      expect(last.level).toBe("warn");
+      expect(last.text).toContain("turn limit");
+      expect(last.text.toLowerCase()).toContain("continue");
+    }
+    expect(s.status.stopReason).toBe("max_turns");
+  });
+
+  it("a clean complete (and a user cancel) add NO extra notice", () => {
+    expect(withStop(init(), "complete").transcript).toEqual(init().transcript);
+    expect(withStop(init(), "cancelled").transcript).toEqual(init().transcript);
+  });
 });
 
 describe("tui reducer — steer", () => {

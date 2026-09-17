@@ -15,6 +15,7 @@ function wave(total: number, actions: number): WaveState {
     actions: Array.from({ length: actions }, (_, i) => action(i + 1)),
     labels: {},
     okCount: 0,
+    partialCount: 0,
   };
 }
 
