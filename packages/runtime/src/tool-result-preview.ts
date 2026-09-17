@@ -81,9 +81,15 @@ export function previewResult(
     }
     case "glob": {
       const matches = Array.isArray(r?.matches) ? r.matches.map((m) => asString(m)) : [];
-      return matches.length ? cap(matches.join("\n")) : "no files";
+      // A soft time-budget stop returns partials — say so plainly instead of looking like a complete result.
+      const note = r?.timedOut === true ? " (searched a lot — partial results)" : "";
+      if (matches.length === 0)
+        return r?.timedOut === true ? "no matches yet (timed out)" : "no files matched";
+      return `${cap(matches.join("\n"))}${note}`;
     }
     case "list": {
+      // A missing directory is a soft, expected result (the model probed for a path) — calm, not a crash.
+      if (r?.notFound === true) return "(directory not found)";
       const entries = Array.isArray(r?.entries) ? r.entries : [];
       if (entries.length === 0) return "(empty)";
       const names = entries.map((e) => {
