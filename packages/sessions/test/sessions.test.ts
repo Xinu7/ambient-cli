@@ -224,7 +224,7 @@ describe("reconstructTranscript + turnCount (warm-continue resume)", () => {
     expect(t).toContain("Assistant: Done.");
   });
 
-  it("groups by turnId so interleaved turns don't cross-associate (audit #4)", async () => {
+  it("groups by turnId so interleaved turns don't cross-associate", async () => {
     const { reconstructTranscript } = await import("../src/reader.js");
     const sid = newSessionId();
     const w = new SessionWriter(sid, now, env);

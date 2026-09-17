@@ -22,7 +22,7 @@ const Output = z.object({ content: z.string() });
  * UNTRUSTED external code, so: its name is validated (rejected if unsafe), its description is sanitized +
  * labeled before entering the prompt, its output is returned as data the runtime's injection guard will
  * wrap, and its effects are conservative — `read` only when the server declares `readOnlyHint`, else
- * `process` so the DD-1 ladder ASKS before every call (never silently auto-run external code). Returns null
+ * `process` so the permission ladder ASKS before every call (never silently auto-run external code). Returns null
  * when the names are unsafe (the server/tool is skipped, not fatal).
  */
 export function mcpToolToDefinition(

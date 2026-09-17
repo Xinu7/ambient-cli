@@ -134,7 +134,7 @@ describe("executeTools emission wiring", () => {
     expect((result as { diff?: string }).diff).toContain("+2");
   });
 
-  it("apply_patch emits ONE file.mutation per changed file (so amb rewind sees them — audit #3)", async () => {
+  it("apply_patch emits ONE file.mutation per changed file (so amb rewind sees them)", async () => {
     await executeTools(
       [call("write", { path: "a.ts", content: "a1\n" })],
       registry(),

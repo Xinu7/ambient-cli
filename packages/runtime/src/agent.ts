@@ -98,8 +98,8 @@ export interface AgentOptions {
 }
 
 /**
- * The agent state machine (single-agent, native tool-call lane — Phase 1). Hardened per the Phase-1
- * audit: per-run session id, overflow→compaction, escalate-on-empty, budget-aware mid-run failover
+ * The agent state machine (single-agent, native tool-call lane). Hardened with a per-run session id,
+ * overflow→compaction, escalate-on-empty, budget-aware mid-run failover
  * that avoids already-failed models and backs off on rate limits, and truthful stop reasons.
  */
 export class Agent {
@@ -293,8 +293,8 @@ export class Agent {
     // window). A BLIND model gets a text description of the image via the vision relay (a ready vision model
     // from the same catalog), injected into the user text — so any model gets a vision workaround.
     const servedModel = liveCatalog.find((m) => m.id === target) ?? fallbackModel(target);
-    // `auto` effort is TASK-ADAPTIVE: a greeting like "sup" must not trigger medium reasoning (which made a
-    // reasoning model think for ~20s); computed once from the task + mode, then applied per attempt.
+    // `auto` effort is TASK-ADAPTIVE: a greeting like "sup" must not trigger medium reasoning (a trivial
+    // prompt shouldn't pay for deep reasoning); computed once from the task + mode, then applied per attempt.
     const autoLevel = autoEffortForTask(userInput, opts.mode);
     let firstUserContent: string | ContentPart[] = userInput;
     // The ACCURATE per-image token cost for THIS run's plan (from fitImages) — threaded into every prompt
@@ -384,7 +384,7 @@ export class Agent {
     let finalText = "";
     let stopReason: StopReason = "complete";
     let turns = 0;
-    // Doom-loop guard (user: "doesn't go in circles"): if the model issues the EXACT same tool-call batch
+    // Doom-loop guard: if the model issues the EXACT same tool-call batch
     // several times running with no progress, stop early with `looping` instead of burning to max_turns.
     let lastBatchSig = "";
     let batchRepeat = 0;
@@ -802,7 +802,7 @@ export class Agent {
         // the project's verification. On failure, feed the diagnostics back and re-ask (bounded). This is
         // what turns "looks done" into "verified done"; skipped entirely when no verify is configured.
         if (opts.verify && mutatedSinceVerify && verifyAttempts < MAX_VERIFY_ATTEMPTS) {
-          // A verifier that THROWS is a failure, not "unconfigured" (null) — never fail open (audit #10).
+          // A verifier that THROWS is a failure, not "unconfigured" (null) — never fail open.
           const outcome = await opts
             .verify(opts.signal)
             .catch((e: unknown) => ({ ok: false, summary: `verification errored: ${String(e)}` }));
@@ -810,7 +810,7 @@ export class Agent {
             mutatedSinceVerify = false; // consume this verification; a re-fix sets it true again
             verifyPassed = outcome.ok;
             // Earned-autonomy signal: record only the FIRST verification of the run, attributed to the model
-            // that actually produced the changes (not a later failover responder — audit #12).
+            // that actually produced the changes (not a later failover responder).
             if (!verifyRecorded) {
               opts.capabilities?.recordVerify?.(mutatingModel || target, outcome.ok);
               verifyRecorded = true;

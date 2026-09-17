@@ -126,7 +126,7 @@ describe("previewResult — human-readable tool previews (no JSON envelope)", ()
     expect(out).toContain("count: 4");
   });
 
-  // --- regressions from the Phase-1 adversarial review ---
+  // --- regression tests ---
 
   it("bash → a FAILURE signal survives a long stdout (exit + stderr are not buried by the line cap)", () => {
     const stdout = Array.from({ length: 20 }, (_, i) => `line ${i + 1} of output`).join("\n");

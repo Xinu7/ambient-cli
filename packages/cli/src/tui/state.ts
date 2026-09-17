@@ -153,8 +153,8 @@ function pluralizeRole(role: string | undefined, mixed = false): string {
 }
 
 /**
- * The FLIGHTLINE's state — deliberately minimal (user: "all I care about is what model I'm running
- * and how much context I have"). Only fields the StatusLine actually renders live here; run telemetry
+ * The FLIGHTLINE's state — deliberately minimal: what model is running and how much context remains.
+ * Only fields the StatusLine actually renders live here; run telemetry
  * (tokens/tools/±lines/files) was removed rather than accumulated-but-never-shown. The durable event log
  * (not this view-state) remains the source of truth for those records.
  */
@@ -644,7 +644,7 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
       const { [ev.toolCallId]: _a, ...active } = state.active;
       const rest = Object.values(active);
       // With several tools in flight, name WHAT (the distinct verbs) instead of a bare "N tools" so the line
-      // still says what it's doing (founder: "still confused what it's doing").
+      // still says what it's doing.
       const verbHint = Array.from(new Set(rest.map((a) => (a as Activity).verb.toLowerCase())))
         .slice(0, 3)
         .join(", ");

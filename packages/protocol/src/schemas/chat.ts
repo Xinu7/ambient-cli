@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /**
  * OpenAI-compatible /v1/chat/completions wire schemas. Clean-room from ambient-code-bridge (MIT).
- * These freeze the transport contract so Phase-0 conformance tests catch provider/SDK drift.
+ * These freeze the transport contract so conformance tests catch provider/SDK drift.
  */
 
 export const ChatRoleSchema = z.enum(["system", "developer", "user", "assistant", "tool"]);

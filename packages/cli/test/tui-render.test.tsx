@@ -94,9 +94,9 @@ describe("tui render", () => {
     unmount();
   });
 
-  it("a failed tool WRAPS its long error so the full path is readable, not truncated off the edge (founder report)", () => {
+  it("a failed tool WRAPS its long error so the full path is readable, not truncated off the edge", () => {
     const longErr =
-      "EACCES: permission denied, scandir '/Users/z/Library/Application Support/GeoComply/Player Location Check/4.3.0.0/PlayerLocationCheck/crash_dumps/b1a2c3'";
+      "EACCES: permission denied, scandir '/Users/alice/Library/Application Support/SomeApp/Location Service/4.3.0.0/LocationCheck/crash_dumps/b1a2c3'";
     const items: TranscriptItem[] = [
       {
         kind: "tool",
@@ -194,8 +194,8 @@ describe("tui render", () => {
     unmount();
   });
 
-  it("a large paste of LONG (wrapping) lines stays bounded — no unbounded wall (founder report)", () => {
-    // The founder's case: a big paste whose lines are long code. It must render a bounded window (the caret's
+  it("a large paste of LONG (wrapping) lines stays bounded — no unbounded wall", () => {
+    // A big paste whose lines are long code must render a bounded window (the caret's
     // tail), never a wall that overflows the screen.
     const longLine =
       "const PLAN_PREAMBLE = `You are amb, a terminal coding agent running entirely on the Ambient network`;";
@@ -208,7 +208,7 @@ describe("tui render", () => {
     unmount();
   });
 
-  it("EXPANDS a large paste into the available height when there's room (founder: 'why can't it expand?')", () => {
+  it("EXPANDS a large paste into the available height when there's room", () => {
     // A fresh screen has ~20 free rows below; the App raises maxRows so the window grows into it (showing the
     // caret's tail deep into the paste) instead of a one-line chip.
     const value = Array.from({ length: 50 }, (_, i) => `content line ${i + 1}`).join("\n");
@@ -236,7 +236,7 @@ describe("tui render", () => {
     unmount();
   });
 
-  it("caps a STREAMING answer to its recent lines but shows a SETTLED one in full (Phase-3 review #2)", () => {
+  it("caps a STREAMING answer to its recent lines but shows a SETTLED one in full", () => {
     const text = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join("\n");
     const streaming = render(
       <Transcript
@@ -281,7 +281,7 @@ describe("tui render", () => {
     unmount();
   });
 
-  it("hardWrap never splits a surrogate pair (emoji) into lone surrogates (Phase-1 review #1)", () => {
+  it("hardWrap never splits a surrogate pair (emoji) into lone surrogates", () => {
     const out = hardWrap("🔥".repeat(10), 8); // 10 code points > 8 → forced break
     // content preserved (no garbled �), and the break landed on a code-point boundary
     expect([...out].filter((c) => c !== "\n").join("")).toBe("🔥".repeat(10));
@@ -488,7 +488,7 @@ describe("tui render", () => {
     unmount();
   });
 
-  it("ActivityLine shows the reasoning EFFORT next to Thinking (Phase 4)", () => {
+  it("ActivityLine shows the reasoning EFFORT next to Thinking", () => {
     const { lastFrame, unmount } = render(
       <ActivityLine
         activity={{ verb: "Thinking" }}
@@ -504,7 +504,7 @@ describe("tui render", () => {
     unmount();
   });
 
-  it("ActivityLine effort rides only on Thinking, not on a tool verb (Phase 4)", () => {
+  it("ActivityLine effort rides only on Thinking, not on a tool verb", () => {
     const frame =
       render(
         <ActivityLine
@@ -519,7 +519,7 @@ describe("tui render", () => {
     expect(frame).not.toContain("Reading · high"); // effort is a thinking readout, not a tool one
   });
 
-  it("StatusLine shows a cumulative token readout when tokens have been used (Phase 4)", () => {
+  it("StatusLine shows a cumulative token readout when tokens have been used", () => {
     const status: Status = {
       agentMode: "build",
       permission: "ask",

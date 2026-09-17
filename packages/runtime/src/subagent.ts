@@ -200,7 +200,7 @@ function runOneChild(
       filesMutated.push({ path: ev.path, operation: ev.operation });
     } else if (ev.kind === "tool.proposed") {
       // Capture the child's target (file/pattern/query/…) from its args so the RUNNING row can show what it's
-      // actually doing, not a bare verb (founder: "still confused what it's doing").
+      // actually doing, not a bare verb.
       const target = childToolTarget(ev.toolName, ev.args);
       if (target) toolTargets.set(ev.toolCallId, target);
     } else if (ev.kind === "tool.started") {

@@ -25,7 +25,7 @@ const reasoning = model("re/asoning", ["tools", "reasoning"]);
 const plain = model("no/reasoning", ["tools"]);
 
 // Runtime Mode is plan | ask | accept-edits | bypass (the TUI's "build" maps to the permission axis).
-describe("autoEffortForTask — task-adaptive auto effort (fixes the 23s 'sup')", () => {
+describe("autoEffortForTask — task-adaptive auto effort", () => {
   it("trivial/greeting/tiny input → low (never medium reasoning on a hello)", () => {
     expect(autoEffortForTask("sup", "ask")).toBe("low");
     expect(autoEffortForTask("hi", "ask")).toBe("low");

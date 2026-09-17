@@ -47,7 +47,7 @@ const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
 // web_* (network), subagent (spawns agents), and `skill` (reads global ~/.claude files — not hermetic).
 // NOTE: this is NOT an OS sandbox. `amb eval` still executes code — a `command_succeeds` check runs a command,
 // and the agent can WRITE a file that command then executes. That is the SAME trust model as `npm test` / CI:
-// run suites you trust. A real OS sandbox (rooted at the scratch dir) is the Phase-5 follow-up that would make
+// run suites you trust. A real OS sandbox (rooted at the scratch dir) is a future follow-up that would make
 // running untrusted suites safe.
 const EVAL_AGENT_TOOLS = new Set([
   "read",

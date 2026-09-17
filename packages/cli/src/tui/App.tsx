@@ -170,8 +170,8 @@ function appReducer(state: ViewState, action: Action): ViewState {
     case "echo":
       return optimisticEcho(state, action.text);
     case "toggleThinking": {
-      // Flip it AND leave a clear trace — before, toggling gave no feedback at all (user: "no indication
-      // if it's on or off when I trigger it"). The flightline also shows a persistent `think` marker while on.
+      // Flip it AND leave a clear trace so toggling always gives visible feedback. The flightline also shows
+      // a persistent `think` marker while on.
       const next = !state.showThinking;
       return appendNotice(
         { ...state, showThinking: next },
@@ -825,7 +825,7 @@ export function App(deps: AppDeps): ReactNode {
         });
         break;
       case "/tools": {
-        // Make the tool set VISIBLE (the user: "idk if it can even use all the tools"). Built-ins are
+        // Make the tool set VISIBLE so it's clear which tools are available. Built-ins are
         // always wired; MCP tools connect in the background; the subagent tool delegates. Plan mode offers
         // only the read-only ones.
         const mcp = deps.getMcpTools?.() ?? deps.mcpTools ?? [];
@@ -1528,7 +1528,7 @@ export function App(deps: AppDeps): ReactNode {
                 width={interior}
               />
             ) : null}
-            {/* The queue/steer panel — labelled + count (the user: "I can't even see the queue"). Its visible
+            {/* The queue/steer panel — labelled + count so the queue is always visible. Its visible
             rows are capped to a rows-budget (qMax) so the always-on stack can't grow past the screen. */}
             {queued.length > 0 ? (
               <Box flexDirection="column" marginTop={1}>

@@ -37,7 +37,7 @@ change** as features grow — it must never rot into a bloated monolith no one c
 7. **Commit in small, reviewable slices** with a message that says *what changed and why*. One concern per
    commit. Never mix a big reformat with a behavior change.
 
-8. **Review after every ship.** An adversarial pass on the diff; fix real findings with tests. Green ≠
+8. **Review after every ship.** A careful review pass on the diff; fix real findings with tests. Green ≠
    correct until it's been reviewed.
 
 9. **No dead code, no built-but-not-wired seams.** If it's in the codebase it's reachable and tested, or it's
@@ -59,5 +59,5 @@ pnpm test                   # green
 pnpm -r build               # ok
 ```
 
-Then a small, well-described commit. If the change is non-trivial, run an adversarial review on the diff and
+Then a small, well-described commit. If the change is non-trivial, run a careful review on the diff and
 fix what's real before moving on.

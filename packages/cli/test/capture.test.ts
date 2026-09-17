@@ -27,8 +27,8 @@ describe("normalizePastedText (bracketed-paste + control-byte hygiene)", () => {
     expect(normalizePastedText("\t\tif (x) {\n\t\t\treturn;")).toBe("    if (x) {\n      return;");
   });
   it("a drag-dropped path wrapped in paste markers survives as a clean path (still attach-detectable)", () => {
-    const cleaned = normalizePastedText("\x1b[200~/Users/z/pic.png\x1b[201~");
-    expect(cleaned).toBe("/Users/z/pic.png");
+    const cleaned = normalizePastedText("\x1b[200~/Users/alice/pic.png\x1b[201~");
+    expect(cleaned).toBe("/Users/alice/pic.png");
     expect(looksLikeImagePath(cleaned)).toBe(true);
   });
 });

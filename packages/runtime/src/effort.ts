@@ -4,14 +4,14 @@ import type { EffortSetting } from "./ports.js";
 /** Hard-work signals in a task → `auto` reasons HARD. */
 const HARD_TASK =
   /\b(debug|why|fix|bug|error|fail|failing|broken|crash|refactor|optimi[sz]e|architect|design|implement|migrat|crash|race condition|regression|investigat|analy[sz]e|trace|root ?cause|performance|security|audit|algorithm|concurren)\b/i;
-/** Clearly-trivial / conversational input → `auto` should NOT burn deep reasoning (this is the "sup" case
- *  that took 23s at medium vs 3s at low). */
+/** Clearly-trivial / conversational input → `auto` should NOT burn deep reasoning — a trivial prompt
+ *  shouldn't pay for the latency of deep reasoning. */
 const TRIVIAL_TASK =
   /^\s*(hi|hey|hello|sup|yo|hiya|thanks|thank you|ty|ok|okay|k|cool|nice|great|got it|test|ping|yes|no|y|n)\b[\s!.?]*$/i;
 
 /**
  * The `auto` reasoning level for a task — TASK-ADAPTIVE (not just mode-based), so a greeting doesn't trigger
- * medium reasoning that makes a reasoning model think for 20s. Plan mode always reasons hard (planning is
+ * medium reasoning that makes a reasoning model think for many seconds. Plan mode always reasons hard (planning is
  * deliberate); otherwise: clearly-hard work → high, a trivial/tiny/greeting → low, everything else → medium.
  */
 export function autoEffortForTask(text: string, mode: Mode): "low" | "medium" | "high" {

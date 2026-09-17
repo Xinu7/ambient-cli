@@ -109,8 +109,8 @@ function childSink(now: () => number) {
 
 /**
  * The `subagent` delegation tool (CLI edge — it spawns `new Agent`, which can't live in tools-core without a
- * dependency cycle). `effects:["read"]` so the spawn itself is frictionless; the children obey the SAME DD-1
- * ladder + risk classifier, and any builder file changes surface in the output so the parent's verify gate
+ * dependency cycle). `effects:["read"]` so the spawn itself is frictionless; the children obey the SAME
+ * permission ladder + risk classifier, and any builder file changes surface in the output so the parent's verify gate
  * still runs.
  */
 export function makeSubagentTool(deps: SubagentToolDeps): ToolDefinition {

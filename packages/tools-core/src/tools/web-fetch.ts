@@ -159,7 +159,7 @@ async function runWebFetch(
         : null;
       if (location) {
         // undici keeps the socket alive until the body is consumed or cancelled — release the redirect
-        // response's body before following, so a redirect chain can't leak connections (audit #25).
+        // response's body before following, so a redirect chain can't leak connections.
         try {
           await response.body?.cancel?.();
         } catch {
@@ -202,7 +202,7 @@ async function runWebFetch(
 
 /**
  * Build the `web_fetch` tool with injectable transport + DNS (so tests never touch the network). `effects`
- * is `["network"]`, so the DD-1 ladder gates it: deny in plan, ask in ask/accept-edits, allow only in
+ * is `["network"]`, so the permission ladder gates it: deny in plan, ask in ask/accept-edits, allow only in
  * bypass or via a grant. The returned text is UNTRUSTED — the runtime wraps it with the injection guard.
  */
 export function makeWebFetchTool(deps?: {

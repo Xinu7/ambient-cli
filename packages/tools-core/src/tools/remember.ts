@@ -15,9 +15,9 @@ const Output = z.object({ ok: z.boolean() });
  * The `remember` tool — the model records a deliberate durable note into the project's curated memory
  * (`.ambient/MEMORY.md`), which compounds across sessions and is re-injected as context on the next run.
  *
- * `effects:["write"]`: it DOES write a file (`.ambient/MEMORY.md`), so it is gated by the DD-1 ladder like any
+ * `effects:["write"]`: it DOES write a file (`.ambient/MEMORY.md`), so it is gated by the permission ladder like any
  * other write — PLAN mode (read-only) blocks it, accept-edits/bypass auto-approve it (no path ⇒ no workspace-
- * boundary friction), ask prompts. Declaring it read-only let it bypass plan-mode read-only (audit). The write
+ * boundary friction), ask prompts. Declaring it read-only would let it bypass plan mode's read-only guard. The write
  * is best-effort; a failure never aborts the run.
  */
 export const rememberTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Output>> = {

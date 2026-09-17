@@ -107,7 +107,7 @@ const OPEN_FENCE_RE = new RegExp(`(^|\\n) {0,3}\`\`\`${ACTION_FENCE}[ \\t]*(\\n|
 export function parseAssistedResponse(text: string): AssistedParse {
   const matches = [...text.matchAll(FENCE_RE_G)];
   if (matches.length === 0) {
-    // No valid fence. If the model clearly TRIED (mentioned the fence name), nudge it to repair (audit #4).
+    // No valid fence. If the model clearly TRIED (mentioned the fence name), nudge it to repair.
     if (new RegExp(ACTION_FENCE, "i").test(text)) {
       return {
         kind: "error",
@@ -156,7 +156,7 @@ export function parseAssistedResponse(text: string): AssistedParse {
       text,
     };
   }
-  // `args`, if present, must be a plain object (not a string/array/number) — else nudge to repair (audit #5).
+  // `args`, if present, must be a plain object (not a string/array/number) — else nudge to repair.
   const rawArgsVal = obj.args;
   if (
     rawArgsVal !== undefined &&

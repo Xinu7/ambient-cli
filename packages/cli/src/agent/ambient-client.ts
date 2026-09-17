@@ -90,9 +90,8 @@ export function toWireMessages(messages: Msg[]): unknown[] {
 
 /**
  * Shape a message's content for the wire. A content-parts ARRAY (text + image_url, the OpenAI vision format)
- * passes through VERBATIM — the load-bearing vision fix: the old code JSON.stringify'd any non-string content,
- * which silently collapsed image parts into a dead string. A string stays a string; anything else is stringified
- * defensively.
+ * passes through VERBATIM so image parts survive (stringifying non-string content would collapse them into a
+ * dead string). A string stays a string; anything else is stringified defensively.
  */
 function wireContent(content: unknown): unknown {
   if (typeof content === "string") return content;

@@ -409,7 +409,7 @@ describe("Agent loop", () => {
     expect(recorded).toEqual([["moonshotai/kimi-k2.7-code", false]]);
   });
 
-  it("verify gate: a successful bash command (process/write effects) triggers verification (audit #2)", async () => {
+  it("verify gate: a successful bash command (process/write effects) triggers verification", async () => {
     const client = new MockClient([
       {
         content: "",
@@ -491,7 +491,7 @@ describe("Agent loop", () => {
       }),
     );
     expect(called).toBe(3); // MAX_VERIFY_ATTEMPTS — re-asks stop after the cap
-    // A run whose verification NEVER passed must NOT report a clean 'complete' (audit #1: no fail-open).
+    // A run whose verification NEVER passed must NOT report a clean 'complete' (no fail-open).
     expect(res.stopReason).toBe("verify_failed");
   });
 

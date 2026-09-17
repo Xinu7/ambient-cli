@@ -13,7 +13,7 @@ import type { RoutedRole } from "@amb/reliability";
 
 /**
  * The runtime's view of capability evidence (implemented by the CLI over @amb/capabilities). Lets the
- * agent pick the honest lane per model and learn from real runs. Optional — absent ⇒ Phase-1 behavior
+ * agent pick the honest lane per model and learn from real runs. Optional — absent ⇒ default behavior
  * (assume `direct`, no learning).
  */
 export interface CapabilityPort {

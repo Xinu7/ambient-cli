@@ -47,7 +47,7 @@ describe("htmlToText", () => {
     const ms = Number(process.hrtime.bigint() - start) / 1e6;
     expect(ms).toBeLessThan(1000);
   });
-  it("is LINEAR on a large run of unbalanced '<' (audit #25 quadratic-DoS regression)", () => {
+  it("is LINEAR on a large run of unbalanced '<' (quadratic-DoS regression)", () => {
     // The old greedy regex was O(n²): 32k '<' took ~400ms. A linear scan handles 500k in a few ms.
     const ms = (n: number) => {
       const s = "<".repeat(n);

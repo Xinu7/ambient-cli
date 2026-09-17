@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { EffectSchema } from "./tool.js";
 
-/** DD-1 mode ladder. */
+/** Permission mode ladder. */
 export const ModeSchema = z.enum(["plan", "ask", "accept-edits", "bypass"]);
 export type Mode = z.infer<typeof ModeSchema>;
 
