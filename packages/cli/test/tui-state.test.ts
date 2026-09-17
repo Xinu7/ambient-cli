@@ -12,6 +12,7 @@ import {
   reduce,
   setGoal,
   setRequestedModel,
+  splitCommittable,
   toRuntimeMode,
   toggleAgentMode,
   withStop,
@@ -1060,5 +1061,104 @@ describe("isSettled — the Static/live split for scrollback (Phase 3)", () => {
     ];
     const firstLive = transcript.findIndex((it) => !isSettled(it));
     expect(firstLive).toBe(1); // stops at the running t1 — t2 stays in the live tail until t1 settles
+  });
+});
+
+describe("splitCommittable — the incremental <Static> commit boundary (pure)", () => {
+  it("returns null when there is no completed paragraph yet", () => {
+    expect(splitCommittable("")).toBeNull();
+    expect(splitCommittable("one paragraph, still going")).toBeNull();
+    expect(splitCommittable("line one\nline two — a single paragraph")).toBeNull(); // single \n is not a break
+  });
+
+  it("commits completed paragraphs and keeps the last one live", () => {
+    expect(splitCommittable("Para 1\n\nPara 2 in progress")).toEqual({
+      commit: "Para 1",
+      live: "Para 2 in progress",
+    });
+    // Commits ALL completed paragraphs at once, preserving the internal blank line in the committed chunk.
+    expect(splitCommittable("Para 1\n\nPara 2\n\nPara 3 partial")).toEqual({
+      commit: "Para 1\n\nPara 2",
+      live: "Para 3 partial",
+    });
+  });
+
+  it("never commits the final paragraph even with a trailing blank line", () => {
+    // A trailing \n\n means the last paragraph isn't 'followed by content' → nothing after is committable.
+    expect(splitCommittable("Only one\n\n")).toBeNull();
+    // Para 2 stays live and KEEPS its trailing break, so a continued 'Para 3' still starts a new paragraph.
+    expect(splitCommittable("Para 1\n\nPara 2\n\n")).toEqual({
+      commit: "Para 1",
+      live: "Para 2\n\n",
+    });
+  });
+
+  it("never commits inside an OPEN code fence (indentation there is load-bearing + unrevertable)", () => {
+    // The blank line sits inside an open ``` fence → not committable; keep the whole thing live.
+    expect(splitCommittable("Intro text\n\n```js\nconst a = 1;\n\nconst b = 2;")).toEqual({
+      commit: "Intro text",
+      live: "```js\nconst a = 1;\n\nconst b = 2;",
+    });
+    // A blank line INSIDE the open fence alone is not a commit point.
+    expect(splitCommittable("```js\nconst a = 1;\n\nconst b = 2; still coding")).toBeNull();
+  });
+
+  it("commits a CLOSED code block as a unit once the fence balances", () => {
+    const text = "```js\nconst a = 1;\n\nconst b = 2;\n```\n\nAfter the block";
+    expect(splitCommittable(text)).toEqual({
+      commit: "```js\nconst a = 1;\n\nconst b = 2;\n```",
+      live: "After the block",
+    });
+  });
+});
+
+describe("assistant streaming → incremental <Static> commit (reducer)", () => {
+  const stream = (chunks: string[]) => {
+    let s = init();
+    for (const c of chunks) {
+      s = reduce(s, { kind: "assistant.delta", ...base, text: c } as NewEvent);
+    }
+    return s;
+  };
+  const assistantText = (s: ReturnType<typeof init>) =>
+    s.transcript.filter(
+      (t): t is Extract<TranscriptItem, { kind: "assistant" }> => t.kind === "assistant",
+    );
+
+  it("splits a multi-paragraph answer: completed paragraphs settle, only the tail stays streaming", () => {
+    const s = stream(["Para one.\n\n", "Para two.\n\n", "Para three (in progress)"]);
+    const a = assistantText(s);
+    // committed 'Para one.' + 'Para two.' settled; the last paragraph is the sole streaming item.
+    const streaming = a.filter((t) => t.streaming);
+    const settled = a.filter((t) => !t.streaming);
+    expect(streaming).toHaveLength(1);
+    expect(streaming[0]?.text).toBe("Para three (in progress)");
+    expect(settled.map((t) => t.text).join(" | ")).toContain("Para one.");
+    expect(settled.map((t) => t.text).join(" | ")).toContain("Para two.");
+  });
+
+  it("finalize keeps the streamed suffix (never re-applies finalText over a committed answer → no dup)", () => {
+    let s = stream(["Alpha.\n\n", "Bravo tail"]);
+    // finalText is the WHOLE answer; because a paragraph was committed, the suffix must NOT be overwritten by it.
+    s = reduce(s, { kind: "assistant.final", ...base, text: "Alpha.\n\nBravo tail" } as NewEvent);
+    const a = assistantText(s);
+    expect(a.every((t) => !t.streaming)).toBe(true); // all settled after final
+    // 'Alpha.' appears exactly once (committed), 'Bravo tail' exactly once (the finalized suffix) — no duplicate.
+    const joined = a.map((t) => t.text).join("");
+    expect(joined.match(/Alpha\./g) ?? []).toHaveLength(1);
+    expect(joined.match(/Bravo tail/g) ?? []).toHaveLength(1);
+  });
+
+  it("a single-paragraph answer still uses finalText (unchanged behavior when nothing was committed)", () => {
+    let s = stream(["Just one paragraph, no breaks"]);
+    s = reduce(s, {
+      kind: "assistant.final",
+      ...base,
+      text: "  Just one paragraph, no breaks (final-corrected)",
+    } as NewEvent);
+    const a = assistantText(s);
+    expect(a).toHaveLength(1);
+    expect(a[0]?.streaming).toBe(false);
+    expect(a[0]?.text).toBe("  Just one paragraph, no breaks (final-corrected)");
   });
 });

@@ -48,7 +48,18 @@ export type TranscriptItem =
   // `optimistic`: echoed the instant the user submits (before the catalog fetch → turn.started), so their
   // message + a "Thinking" line appear with ZERO perceived lag; turn.started confirms it in place (no dup).
   | { kind: "user"; id: string; text: string; optimistic?: boolean }
-  | { kind: "assistant"; id: string; text: string; streaming: boolean; spin: number }
+  // `committed`: while STREAMING, completed paragraphs of this answer have already been flushed to <Static> as
+  // separate settled assistant items and only the in-progress paragraph remains here (so the live frame stays
+  // short and the layout never jumps on settle). It tells `assistant.final` NOT to re-apply the whole finalText
+  // over the suffix (that would duplicate the committed prefix).
+  | {
+      kind: "assistant";
+      id: string;
+      text: string;
+      streaming: boolean;
+      spin: number;
+      committed?: boolean;
+    }
   | {
       kind: "tool";
       id: string;
@@ -288,6 +299,38 @@ function pushItem(s: ViewState, make: (id: string) => TranscriptItem): ViewState
   return { ...s, seq, transcript: [...s.transcript, make(`i-${seq}`)] };
 }
 
+/** Count ``` code-fence toggles in a string (to know whether an offset sits inside an open fence). */
+function fenceToggles(s: string): number {
+  const m = s.match(/```/g);
+  return m ? m.length : 0;
+}
+
+/**
+ * Split a STREAMING answer into a committable prefix (completed paragraphs, safe to flush ONCE to <Static>) and
+ * a live remainder (the in-progress paragraph, kept re-rendering). This is what keeps the live frame short so
+ * the layout never jumps on settle: finished paragraphs flow top-down into scrollback as they complete.
+ *
+ * Rules that make it safe against <Static>'s unrevertable, append-only contract:
+ *  - commit only at a blank-line paragraph break (`\n\n`);
+ *  - NEVER commit at a break that sits inside an open ``` code fence (a code block's whitespace is load-bearing
+ *    and `assistant.final` may retro-correct it — Static can't be rewritten);
+ *  - NEVER commit the final paragraph (there must be real content after the break — it stays live until final).
+ * Returns null when nothing can be committed yet. Pure + unit-tested.
+ */
+export function splitCommittable(text: string): { commit: string; live: string } | null {
+  let best = -1;
+  for (let p = text.indexOf("\n\n"); p >= 0; p = text.indexOf("\n\n", p + 1)) {
+    const after = text.slice(p + 2);
+    if (after.trim().length === 0) break; // no real remainder past here (and none further) → keep it all live
+    if (fenceToggles(text.slice(0, p)) % 2 === 0) best = p; // fence-balanced boundary → committable
+  }
+  if (best < 0) return null;
+  const commit = text.slice(0, best); // completed paragraphs, no trailing newline (best is at the break)
+  const live = text.slice(best + 2).replace(/^\n+/, ""); // drop any extra separator newlines from the live head
+  if (commit.length === 0 || live.length === 0) return null;
+  return { commit, live };
+}
+
 function replaceAt(items: TranscriptItem[], idx: number, item: TranscriptItem): TranscriptItem[] {
   return [...items.slice(0, idx), item, ...items.slice(idx + 1)];
 }
@@ -492,8 +535,34 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
       const base = state.thinking ? { ...state, thinking: "" } : state;
       const last = base.transcript[base.transcript.length - 1];
       if (last && last.kind === "assistant" && last.streaming) {
-        // `spin` advances one frame per streamed chunk — the globe turns at the model's real token rate.
-        const updated: TranscriptItem = { ...last, text: last.text + text, spin: last.spin + 1 };
+        const full = last.text + text;
+        // Flush completed paragraphs to <Static> as their own settled items; keep only the in-progress
+        // paragraph live. Each committed item + the live suffix render with the same marginTop, so the
+        // paragraph spacing is identical to an unsplit answer — but the live frame never grows tall.
+        const split = splitCommittable(full);
+        if (split) {
+          const seq = base.seq + 1;
+          const committed: TranscriptItem = {
+            kind: "assistant",
+            id: `i-${seq}`,
+            text: split.commit,
+            streaming: false,
+            spin: 0,
+          };
+          // `spin` advances one frame per streamed chunk — the globe turns at the model's real token rate.
+          const streaming: TranscriptItem = {
+            ...last,
+            text: split.live,
+            spin: last.spin + 1,
+            committed: true,
+          };
+          return {
+            ...base,
+            seq,
+            transcript: [...base.transcript.slice(0, -1), committed, streaming],
+          };
+        }
+        const updated: TranscriptItem = { ...last, text: full, spin: last.spin + 1 };
         return { ...base, transcript: [...base.transcript.slice(0, -1), updated] };
       }
       // Don't OPEN a streaming item on whitespace-only content — a model that streams a blank preamble
@@ -515,8 +584,12 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
       if (idx >= 0) {
         const item = state.transcript[idx] as Extract<TranscriptItem, { kind: "assistant" }>;
         // The final IS the canonical complete text — prefer it when present (the streamed accumulation may
-        // be missing a dropped leading-whitespace delta, e.g. an indented code block's indentation).
-        const text = finalText.length > 0 ? finalText : item.text;
+        // be missing a dropped leading-whitespace delta, e.g. an indented code block's indentation). BUT once
+        // paragraphs of this answer were incrementally committed to <Static>, `item.text` is only the live
+        // SUFFIX — re-applying the whole finalText here would duplicate the committed prefix, so keep the
+        // streamed suffix as-is (the committed prose is whitespace-safe; a dropped suffix delta is rare and
+        // self-heals to no worse than today).
+        const text = item.committed ? item.text : finalText.length > 0 ? finalText : item.text;
         return {
           ...state,
           transcript: replaceAt(state.transcript, idx, {
