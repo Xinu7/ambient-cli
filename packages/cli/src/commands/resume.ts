@@ -233,7 +233,7 @@ export async function runResume(args: string[]): Promise<void> {
     sessionId,
     mode: parsed.mode,
     requestedModel: parsed.model,
-    maxTurns: 50,
+    maxTurns: 120,
     cwd,
     workspaceRoot: cwd,
     signal: controller.signal,

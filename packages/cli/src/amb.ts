@@ -49,7 +49,7 @@ Run flags:
   --bypass, --yolo    Full autonomy: no approval prompts (incl. shell)
   --effort <level>    Reasoning effort: auto (default) | off | low | medium | high
   --yes, -y           Auto-approve file edits (shell/network still prompt; use --bypass for those)
-  --max-turns <n>     Cap the agent loop (integer 1–1000, default 30)
+  --max-turns <n>     Cap the agent loop (integer 1–1000, default 120)
   --jsonl             Emit machine-readable JSONL events to stdout (for scripts/CI)
 
 Eval flags:

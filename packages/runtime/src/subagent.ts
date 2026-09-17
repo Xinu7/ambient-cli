@@ -25,6 +25,9 @@ export interface SubagentSpec {
   /** Ambient tool names a resolved preset restricts this child to (∩ the role's read/write constraint).
    *  Undefined ⇒ the role default (all read-only for scout/oracle, all builtins for builder). */
   allowedTools?: string[];
+  /** Orchestrator-requested turn budget for THIS child, bounded by MAX_TURNS_CEILING. Undefined ⇒ the role
+   *  default. Lets the parent grant a big-package scout more turns instead of fanning out a second wave. */
+  maxTurns?: number;
 }
 
 export interface SubagentFileChange {
@@ -87,7 +90,12 @@ const TIMEOUT_MS: Record<SubagentRole, number> = {
   oracle: 180_000,
   builder: 300_000,
 };
-const MAX_TURNS: Record<SubagentRole, number> = { scout: 12, oracle: 12, builder: 20 };
+/** Per-role turn budgets. Moderate defaults so a read-heavy scout can actually finish a package pass (each
+ *  read/grep burns a turn) instead of being cut off; the orchestrator can raise a child's budget per-spec via
+ *  `spec.maxTurns` (bounded) when a task genuinely needs more. */
+const MAX_TURNS: Record<SubagentRole, number> = { scout: 30, oracle: 30, builder: 50 };
+/** Hard ceiling on an orchestrator-requested per-child `maxTurns`, so a runaway spec can't burn unbounded turns. */
+const MAX_TURNS_CEILING = 80;
 /** Fleet phase routing (#27): a subagent role maps to a routed role, so an `auto` child auto-picks a
  *  role-appropriate model from the live fleet — the oracle gets a strong reviewer, a builder the best coder. */
 const ROUTED_ROLE: Record<SubagentRole, RoutedRole> = {
@@ -258,7 +266,9 @@ function runOneChild(
     sessionId: childSessionId,
     mode: capMode(deps.parentMode, role),
     requestedModel: model,
-    maxTurns: MAX_TURNS[role],
+    maxTurns: spec.maxTurns
+      ? Math.min(MAX_TURNS_CEILING, Math.max(1, Math.floor(spec.maxTurns)))
+      : MAX_TURNS[role],
     cwd: ctx.cwd,
     workspaceRoot: ctx.workspaceRoot,
     signal: ac.signal,
