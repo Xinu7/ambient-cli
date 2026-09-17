@@ -662,12 +662,17 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
       const { [ev.toolCallId]: _p, ...pending } = state.pending;
       const { [ev.toolCallId]: _a, ...active } = state.active;
       const rest = Object.values(active);
+      // With several tools in flight, name WHAT (the distinct verbs) instead of a bare "N tools" so the line
+      // still says what it's doing (founder: "still confused what it's doing").
+      const verbHint = Array.from(new Set(rest.map((a) => (a as Activity).verb.toLowerCase())))
+        .slice(0, 3)
+        .join(", ");
       const activity: Activity =
         rest.length === 0
           ? { verb: "Thinking" }
           : rest.length === 1
             ? (rest[0] as Activity)
-            : { verb: "Running", detail: `${rest.length} tools` };
+            : { verb: "Running", detail: `${rest.length} tools · ${verbHint}` };
       if (idx < 0) {
         return { ...state, pending, active, status: { ...state.status, activity } };
       }

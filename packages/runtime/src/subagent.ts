@@ -97,6 +97,20 @@ const ROUTED_ROLE: Record<SubagentRole, RoutedRole> = {
 };
 const SUMMARY_CAP = 1200;
 
+/** A short, human target for a child's running tool row (path/pattern/query/name/url/command), from its args. */
+function childToolTarget(toolName: string, args: unknown): string | undefined {
+  const a = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
+  const s = (k: string): string | undefined =>
+    typeof a[k] === "string" ? (a[k] as string) : undefined;
+  const t =
+    toolName === "bash"
+      ? s("command")
+      : (s("path") ?? s("pattern") ?? s("query") ?? s("name") ?? s("url") ?? s("command"));
+  if (!t) return undefined;
+  const flat = t.replace(/\s+/g, " ").trim();
+  return flat.length > 60 ? `${flat.slice(0, 59)}…` : flat;
+}
+
 /**
  * Run a wave of subagents concurrently (bounded), each in its OWN isolated Agent + session, re-emitting a
  * subset of each child's activity onto the PARENT stream as `subagent.*` events so the user SEES the work.
@@ -161,15 +175,22 @@ function runOneChild(
 
   // Re-tag: persist EVERY child event to its own log, and translate a legible subset onto the PARENT stream.
   const toolNames = new Map<string, string>();
+  const toolTargets = new Map<string, string>(); // toolCallId → a short target (path/pattern/…) from the args
   const filesMutated: SubagentFileChange[] = [];
   let toolCount = 0;
   const childEmit = (ev: NewEvent): void => {
     durableSink(ev);
     if (ev.kind === "file.mutation") {
       filesMutated.push({ path: ev.path, operation: ev.operation });
+    } else if (ev.kind === "tool.proposed") {
+      // Capture the child's target (file/pattern/query/…) from its args so the RUNNING row can show what it's
+      // actually doing, not a bare verb (founder: "still confused what it's doing").
+      const target = childToolTarget(ev.toolName, ev.args);
+      if (target) toolTargets.set(ev.toolCallId, target);
     } else if (ev.kind === "tool.started") {
       toolCount += 1;
       toolNames.set(ev.toolCallId, ev.toolName);
+      const target = toolTargets.get(ev.toolCallId);
       ctx.emit({
         ...base,
         kind: "subagent.tool",
@@ -177,6 +198,7 @@ function runOneChild(
         childToolCallId: ev.toolCallId,
         toolName: ev.toolName,
         status: "running",
+        ...(target ? { preview: target } : {}),
       });
     } else if (ev.kind === "tool.result") {
       ctx.emit({
