@@ -94,6 +94,27 @@ describe("tui render", () => {
     unmount();
   });
 
+  it("a failed tool WRAPS its long error so the full path is readable, not truncated off the edge (founder report)", () => {
+    const longErr =
+      "EACCES: permission denied, scandir '/Users/z/Library/Application Support/GeoComply/Player Location Check/4.3.0.0/PlayerLocationCheck/crash_dumps/b1a2c3'";
+    const items: TranscriptItem[] = [
+      {
+        kind: "tool",
+        id: "t1",
+        name: "glob",
+        preview: "/**/tui/Composer.tsx",
+        status: "fail",
+        durationMs: 29841,
+        error: longErr,
+      },
+    ];
+    const { lastFrame, unmount } = render(<Transcript items={items} width={80} />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("permission denied"); // the start of the error…
+    expect(frame).toContain("crash_dumps"); // …AND the TAIL of the path — before, this was truncated off-screen
+    unmount();
+  });
+
   it("wraps assistant prose and hard-breaks an unbroken long token within the width (no overflow — defect F)", () => {
     const longToken = "x".repeat(300); // a single unbroken run, far wider than the terminal
     const items: TranscriptItem[] = [

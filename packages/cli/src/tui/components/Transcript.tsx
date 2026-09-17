@@ -30,6 +30,13 @@ export function hardWrap(text: string, width: number): string {
   });
 }
 
+/** Cap an already-wrapped string to at most `n` lines with an honest elision — so a long error/output the user
+ *  WANTS to read still wraps and stays readable, but a giant one can't grow the live region past the screen. */
+function capLines(text: string, n: number): string {
+  const lines = text.split("\n");
+  return lines.length <= n ? text : `${lines.slice(0, n).join("\n")}\n…`;
+}
+
 /** While an answer is STREAMING it renders in the live region (re-drawn, not yet in <Static>); cap its
  *  on-screen height so a long answer can't grow the dynamic tree past the terminal (which would force Ink's
  *  scrollback-erasing full clear). The full text commits to <Static> the instant it finalizes. */
@@ -217,9 +224,11 @@ export function TranscriptRow({
           {item.diff ? <Diff diff={item.diff} width={width} /> : null}
           {item.resultPreview ? <Output text={item.resultPreview} width={width} /> : null}
           {item.error ? (
+            // WRAP the error (a failed glob/grep/bash often carries a long path) so it's fully readable across
+            // lines instead of running off the right edge; capped so a giant error can't grow the live region.
             <Box marginLeft={2}>
-              <Text color={AmbientTheme.bad} wrap="truncate">
-                {clip(item.error, Math.max(1, width - 2))}
+              <Text color={AmbientTheme.bad} wrap="wrap">
+                {capLines(hardWrap(item.error, Math.max(8, width - 4)), 8)}
               </Text>
             </Box>
           ) : null}

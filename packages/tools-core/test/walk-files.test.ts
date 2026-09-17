@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -57,5 +57,23 @@ describe("walkFiles — .gitignore + secret skipping", () => {
     write("target/debug/x.rs");
     const files = await collect();
     expect(files).toEqual(["src/a.ts"]);
+  });
+
+  it("SKIPS an unreadable directory (EACCES) and keeps walking — one denied dir never fails the whole walk", async () => {
+    // root bypasses permission bits, so chmod 000 wouldn't produce EACCES there — skip in that (CI) case.
+    if (typeof process.getuid === "function" && process.getuid() === 0) return;
+    write("src/a.ts");
+    write("locked/secret.ts");
+    write("src/b.ts");
+    const locked = join(ws, "locked");
+    chmodSync(locked, 0o000); // the owner can no longer readdir it → EACCES, exactly like the founder's crash_dumps
+    try {
+      const files = await collect(); // must NOT throw
+      expect(files).toContain("src/a.ts");
+      expect(files).toContain("src/b.ts"); // the walk continued past the denied dir
+      expect(files.some((f) => f.startsWith("locked/"))).toBe(false); // the unreadable dir was skipped
+    } finally {
+      chmodSync(locked, 0o755); // restore so afterEach can clean up
+    }
   });
 });

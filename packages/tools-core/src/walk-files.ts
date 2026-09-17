@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -91,7 +92,15 @@ async function* walkDir(
   signal: AbortSignal | undefined,
 ): AsyncGenerator<string> {
   if (signal?.aborted) return;
-  const dirents = await readdir(join(root, dir), { withFileTypes: true });
+  let dirents: Dirent[];
+  try {
+    dirents = await readdir(join(root, dir), { withFileTypes: true });
+  } catch {
+    // Skip a directory we can't read — permission denied (EACCES, e.g. a macOS app-support/crash-dumps dir
+    // when the agent is run from $HOME), vanished (ENOENT), or not a directory (ENOTDIR). A single unreadable
+    // directory must NOT fail the whole glob/grep; the walk just steps over it and continues.
+    return;
+  }
   for (const d of dirents) {
     if (signal?.aborted) return;
     if (d.isSymbolicLink()) continue;
