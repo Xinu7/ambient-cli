@@ -80,6 +80,9 @@ export interface ToolContext {
    *  `ask_user` tool. Optional — absent ⇒ no interactive human (headless / subagent child), so the tool
    *  returns a proceed-with-best-judgment note rather than blocking forever. */
   ask?(req: AskRequest): Promise<AskResponse>;
+  /** Characters of this call's result that fit in the caller's context right now (from the served model's
+   *  window). Lets a tool that gathers a lot (a subagent wave) share that room fairly. Optional. */
+  resultChars?: number;
 }
 
 /** A tool = serializable manifest + Zod I/O schemas + an execute fn. Not fully serializable (has execute). */

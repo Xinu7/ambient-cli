@@ -625,7 +625,7 @@ export class Agent {
         shouldCompact(
           messages,
           budget.contextWindow,
-          compactionConfigForWindow(budget.contextWindow),
+          compactionConfigForWindow(budget.contextWindow, undefined, budget.outputCap),
           opts.capabilities?.bytesPerToken?.(target), // learned tokenizer accuracy
         )
       ) {
@@ -1051,7 +1051,14 @@ export class Agent {
               turnId,
               ok: outcome.ok,
               attempt: verifyAttempts,
-              ...(outcome.ok ? {} : { summary: capToolResult(outcome.summary) }),
+              ...(outcome.ok
+                ? {}
+                : {
+                    summary: capToolResult(
+                      outcome.summary,
+                      profileOf(target).budgets.toolResultMaxChars,
+                    ),
+                  }),
             });
             if (!outcome.ok) {
               verifyAttempts += 1;
@@ -1063,7 +1070,7 @@ export class Agent {
               batchRepeat = 0;
               messages.push({
                 role: "user",
-                content: `Automated verification failed (attempt ${verifyAttempts}/${MAX_VERIFY_ATTEMPTS}):\n\n${capToolResult(outcome.summary)}\n\nFix the problem(s) above, then finish.`,
+                content: `Automated verification failed (attempt ${verifyAttempts}/${MAX_VERIFY_ATTEMPTS}):\n\n${capToolResult(outcome.summary, profileOf(target).budgets.toolResultMaxChars)}\n\nFix the problem(s) above, then finish.`,
               });
               continue; // re-enter the loop with the failure fed back, instead of reporting success
             }
@@ -1122,6 +1129,19 @@ export class Agent {
         MAX_CONSECUTIVE_AUTO_APPROVALS,
         opts.capabilities?.verifyStats?.(target),
       );
+      // Room each result will get in context (the same split applied to the results below).
+      const resultChars = Math.max(
+        600,
+        Math.floor(
+          toolResultCharBudget(
+            budgetFromCatalog(
+              liveCatalog.find((m) => m.id === target) ?? fallbackModel(target),
+              opts.capabilities?.learnedCeiling?.(target),
+            ),
+            estimateMessagesTokens(messages, estimateOpts()) + toolTokens,
+          ) / Math.max(1, toolCalls.length),
+        ),
+      );
       const outcomes = await executeTools(
         toolCalls,
         this.registry,
@@ -1129,6 +1149,7 @@ export class Agent {
         { sessionId, turnId, attemptId: lastAttemptId },
         grants,
         autoApproval,
+        resultChars,
       );
       // Auto-continue cost gate: a segment must land at least one successful tool call to earn another one —
       // a whole segment with nothing succeeding is a stuck run, not progress, so we stop rather than extend.

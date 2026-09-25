@@ -1,4 +1,4 @@
-import { budgetsFor } from "@amb/reliability";
+import { UNKNOWN_OUTPUT, budgetsFor } from "@amb/reliability";
 import { estimateMessagesTokens } from "./tokens.js";
 
 /**
@@ -60,11 +60,12 @@ export const DEFAULT_COMPACTION: CompactionConfig = {
 export function compactionConfigForWindow(
   contextWindow: number,
   base: CompactionConfig = DEFAULT_COMPACTION,
+  outputCap: number = UNKNOWN_OUTPUT,
 ): CompactionConfig {
   if (!Number.isFinite(contextWindow) || contextWindow <= 0) return base;
   // Both scale with the window (ModelProfile policy): a 1M-token model keeps far more recent history and
   // compacts later than a 32K one, with headroom for the next answer + a tool result.
-  const b = budgetsFor(contextWindow, contextWindow);
+  const b = budgetsFor(contextWindow, outputCap);
   return {
     anchorCount: base.anchorCount,
     keepRecentTokens: b.keepRecent,

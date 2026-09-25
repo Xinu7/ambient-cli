@@ -76,9 +76,14 @@ export function budgetsFor(window: number, outputCap: number): ModelBudgets {
   const toolResultMaxChars = clamp(w * 0.05 * CHARS_PER_TOKEN, 8_000, 200_000);
   return {
     desiredOutput,
-    // Headroom for the next answer plus a tool result, never more than a quarter of the window.
-    compactReserve: clamp(desiredOutput + toolResultMaxChars / CHARS_PER_TOKEN, 2_000, w * 0.25),
-    keepRecent: clamp(w * 0.35, 4_000, 350_000),
+    // Headroom for the next answer plus a tool result, never more than a quarter of the window. The floors
+    // yield on a tiny window so reserve + kept history always fit inside it.
+    compactReserve: clamp(
+      desiredOutput + toolResultMaxChars / CHARS_PER_TOKEN,
+      Math.min(2_000, w * 0.25),
+      w * 0.25,
+    ),
+    keepRecent: clamp(w * 0.35, Math.min(4_000, w * 0.35), 350_000),
     toolResultMaxChars,
     repoMapMaxTokens: clamp(w * 0.02, 4_000, 16_000),
     skillsMaxTokens: clamp(w * 0.01, 2_500, 10_000),

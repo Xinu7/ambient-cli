@@ -6,7 +6,7 @@ import {
   planCompaction,
 } from "@amb/context";
 import type { CatalogModel } from "@amb/protocol";
-import { UNKNOWN_WINDOW, pickForRole, streamTimeouts } from "@amb/reliability";
+import { UNKNOWN_OUTPUT, UNKNOWN_WINDOW, pickForRole, streamTimeouts } from "@amb/reliability";
 import { SPILL_NOTE, SUMMARY_MARKER, deterministicSummary, planSpill } from "./agent-support.js";
 import { MAX_COMPACTIONS } from "./constants.js";
 import { summaryEffort } from "./effort.js";
@@ -44,7 +44,12 @@ export async function compact(
   // transcript can actually shrink below its ceiling (a fixed 20k-recent floor can't fit a ≤32k model). The
   // window is the caller's LEARNED-ceiling-aware budget: using the raw catalog window here
   // while the trigger used the learned window made compaction retain too much and re-overflow → "blocked".
-  const cfg = compactionConfigForWindow(windowTokens);
+  const served = catalog.find((m) => m.id === target);
+  const cfg = compactionConfigForWindow(
+    windowTokens,
+    undefined,
+    Math.min(served?.maxOutputLength ?? UNKNOWN_OUTPUT, windowTokens),
+  );
   const before = estimateMessagesTokens(messages);
   const plan = planCompaction(messages, cfg);
   if (plan.toSummarize.length === 0) return null;
@@ -128,11 +133,15 @@ export async function compact(
 /** Most summarizer calls one compaction may spend; older overflow is folded in deterministically instead. */
 const MAX_SUMMARY_CHUNKS = 8;
 
-/** Summary output budget from the COMPACTOR's own catalog limits: roomy enough to be lossless on files and
- *  decisions, small enough to leave its window for the input. */
-export function summaryOutputTokens(model: CatalogModel | undefined, window: number): number {
-  const cap = model?.maxOutputLength ?? 4096;
-  return Math.max(1024, Math.min(8192, cap, Math.floor(window * 0.15)));
+/** Summary output budget: the COMPACTOR's own output cap, at most 15% of its window (room for the input) and
+ *  of the READER's window (the summary has to fit where it lands). */
+export function summaryOutputTokens(
+  model: CatalogModel | undefined,
+  window: number,
+  readerWindow: number = window,
+): number {
+  const cap = model?.maxOutputLength ?? UNKNOWN_OUTPUT;
+  return Math.max(1024, Math.min(cap, Math.floor(window * 0.15), Math.floor(readerWindow * 0.15)));
 }
 
 /**
@@ -154,7 +163,7 @@ async function rollingSummary(
   // When the compactor IS the served model, the caller's window already includes its learned ceiling; a
   // different compactor uses its own catalog window, or a conservative default when it doesn't publish one.
   const window = sameAsTarget ? fallbackWindow : (model?.contextLength ?? UNKNOWN_WINDOW);
-  const maxTokens = summaryOutputTokens(model, window);
+  const maxTokens = summaryOutputTokens(model, window, fallbackWindow);
   const inputBudget = Math.floor(window * 0.9) - maxTokens;
   if (inputBudget < 1024) return undefined;
   // The prior summary may take at most a quarter of the input; per-message clipping keeps any single giant

@@ -95,3 +95,21 @@ describe("forward compatibility", () => {
     expect(models[0]?.inputModalities).toEqual(["text", "image", "video"]);
   });
 });
+
+describe("catalog entries with null fields", () => {
+  it("keeps the model and reads null text fields as absent", () => {
+    const models = normalizeCatalog(
+      CatalogResponseSchema.parse({
+        data: [
+          { id: "ok/x", name: "X" },
+          { id: "nulls/y", name: null, description: null, hugging_face_id: null, is_ready: null },
+        ],
+      }),
+    );
+    const y = models.find((m) => m.id === "nulls/y");
+    expect(y).toBeDefined();
+    expect(y?.name).toBe("nulls/y");
+    expect(y?.description).toBeUndefined();
+    expect(y?.isReady).toBeUndefined();
+  });
+});

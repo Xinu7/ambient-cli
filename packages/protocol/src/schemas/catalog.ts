@@ -40,19 +40,22 @@ export const PricingSchema = z
 export type Pricing = z.infer<typeof PricingSchema>;
 
 /** Raw record from GET /v1/models (snake_case, tolerant). Unknown keys are stripped. */
+/** An optional text field: null or a wrong type reads as absent instead of rejecting the whole model. */
+const zOptStr = z.string().optional().catch(undefined);
+
 export const RawCatalogModelSchema = z.object({
   id: z.string().min(1),
-  name: z.string().optional(),
-  description: z.string().optional(),
+  name: zOptStr,
+  description: zOptStr,
   input_modalities: zStrList,
   output_modalities: zStrList,
   context_length: zPosInt,
   max_output_length: zPosInt,
   supported_features: zStrList,
   supported_sampling_parameters: zStrList,
-  hugging_face_id: z.string().optional(),
+  hugging_face_id: zOptStr,
   pricing: PricingSchema,
-  is_ready: z.union([z.boolean(), z.string(), z.number()]).optional(),
+  is_ready: z.union([z.boolean(), z.string(), z.number()]).optional().catch(undefined),
 });
 export type RawCatalogModel = z.infer<typeof RawCatalogModelSchema>;
 

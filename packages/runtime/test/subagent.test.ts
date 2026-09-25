@@ -334,3 +334,28 @@ describe("subagent budgets", () => {
     expect(out.results[0]?.summary.length ?? 0).toBeGreaterThanOrEqual(long.length);
   });
 });
+
+describe("report size follows the parent's room", () => {
+  it("splits the room the parent has for the result evenly across the children", async () => {
+    const long = "x".repeat(20_000);
+    const d = {
+      ...deps(),
+      client: new MockClient([
+        { content: long, toolCalls: [] },
+        { content: long, toolCalls: [] },
+      ]),
+    };
+    const out = await runSubagents(
+      [
+        { label: "a", role: "scout", prompt: "look" },
+        { label: "b", role: "scout", prompt: "look" },
+      ],
+      { ...ctx(), resultChars: 10_000 },
+      d,
+    );
+    for (const r of out.results) {
+      expect(r.summary.length).toBeLessThanOrEqual(5_000 + 200); // half each, plus the truncation note
+      expect(r.summary.length).toBeGreaterThan(2_000);
+    }
+  });
+});

@@ -13,7 +13,23 @@ import { gitState } from "./git-state.js";
  * clock, platform) through @amb/context + node at the CLI edge — so the runtime state machine itself stays
  * free of direct effects and remains deterministic/replayable. `now` is injectable for tests.
  */
-export function makeWorkspaceContextPort(now: () => Date = () => new Date()): WorkspaceContextPort {
+export function makeWorkspaceContextPort(
+  now: () => Date = () => new Date(),
+  opts: { stableRepoMap?: boolean } = {},
+): WorkspaceContextPort {
+  // With `stableRepoMap` (one port per interactive session) the map is built once per workspace + budget: it
+  // sits in the system prompt, and rebuilding it after every edit would change the prompt and defeat the
+  // provider's prompt cache. The agent's tools see the live tree regardless.
+  const maps = new Map<string, string>();
+  const map = (workspaceRoot: string, tokenBudget: number): string => {
+    if (!opts.stableRepoMap) return repoMap(workspaceRoot, tokenBudget);
+    const key = `${workspaceRoot}\0${tokenBudget}`;
+    const hit = maps.get(key);
+    if (hit !== undefined) return hit;
+    const built = repoMap(workspaceRoot, tokenBudget);
+    maps.set(key, built);
+    return built;
+  };
   return {
     instructions: (cwd, limits) => loadInstructions(cwd, limits).text,
     readMemory: (workspaceRoot) => readMemory(workspaceRoot),
@@ -23,7 +39,7 @@ export function makeWorkspaceContextPort(now: () => Date = () => new Date()): Wo
     // Only the CURATED skills auto-load into the prompt (the user's own) — the hundreds of bundled plugin +
     // Codex skills are discoverable via `ambient skills` and evocable by name, not force-fed every turn.
     skills: (workspaceRoot) => discoverInjectableSkills(workspaceRoot),
-    repoMap: (workspaceRoot, tokenBudget) => repoMap(workspaceRoot, tokenBudget),
+    repoMap: map,
     // Read-only git snapshot (branch / changed files / recent commits) at run start — so the agent isn't
     // blind to git without spending tool calls. Undefined outside a repo.
     git: (cwd) => gitState(cwd),

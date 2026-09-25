@@ -1,6 +1,7 @@
 import type { CatalogModel } from "@amb/protocol";
 import {
   SAFE_MAX_OUTPUT_TOKENS,
+  UNKNOWN_OUTPUT,
   UNKNOWN_WINDOW,
   budgetsFor,
   effectiveWindow,
@@ -70,7 +71,8 @@ export function budgetFromCatalog(m: CatalogModel, learnedCeiling?: number): Mod
   // A model that publishes no window is budgeted conservatively (same default as ModelProfile).
   const window =
     effectiveWindow(m.contextLength ?? UNKNOWN_WINDOW, learnedCeiling) ?? UNKNOWN_WINDOW;
-  const outputCap = Math.min(m.maxOutputLength ?? SAFE_MAX_OUTPUT_TOKENS, SAFE_MAX_OUTPUT_TOKENS);
+  // Same output cap as ModelProfile, so preflight and the agent agree on what a model can return.
+  const outputCap = Math.min(m.maxOutputLength ?? UNKNOWN_OUTPUT, SAFE_MAX_OUTPUT_TOKENS, window);
   return { model: m.id, contextWindow: window, outputCap };
 }
 

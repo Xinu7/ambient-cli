@@ -278,6 +278,7 @@ export async function executeTools(
   scope: Scope,
   grants: Grant[] = [],
   autoApproval: { streak: number; cap?: number } = { streak: 0 },
+  resultChars?: number,
 ): Promise<ToolOutcome[]> {
   const makeToolCtx = (toolCallId: string): ToolContext => ({
     cwd: opts.cwd,
@@ -293,6 +294,7 @@ export async function executeTools(
     // Correlation for tools that author nested events (e.g. the subagent tool → subagent.* on the parent).
     scope: { sessionId: scope.sessionId, turnId: scope.turnId, attemptId: scope.attemptId },
     toolCallId,
+    ...(resultChars !== undefined ? { resultChars } : {}),
   });
 
   const ids = calls.map((c) => (c.id.startsWith("tc_") ? c.id : newToolCallId()));

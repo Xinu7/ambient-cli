@@ -173,6 +173,7 @@ export function makeSubagentTool(deps: SubagentToolDeps): ToolDefinition {
           emit: ctx.emit,
           signal: ctx.signal,
           cwd: ctx.cwd,
+          ...(ctx.resultChars !== undefined ? { resultChars: ctx.resultChars } : {}),
           workspaceRoot: ctx.workspaceRoot,
         },
         {

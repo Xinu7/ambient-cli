@@ -296,6 +296,8 @@ export function App(deps: AppDeps): ReactNode {
   // A model chosen while a run is flying — handed to the agent at its next turn boundary, then cleared.
   const pendingSwitchRef = useRef<string | undefined>(undefined);
   const sessionImagesRef = useRef<ImageAttachment[]>([]);
+  // One workspace port per conversation: its repo map stays fixed so the system prompt stays cacheable.
+  const workspacePortRef = useRef(makeWorkspaceContextPort(undefined, { stableRepoMap: true }));
   // Discover the user's existing Claude/Codex slash commands ONCE — their names join the palette, their
   // bodies (with $ARGUMENTS/$1 expansion) run as a task on dispatch.
   const customCommands = useMemo(() => {
@@ -578,6 +580,7 @@ export function App(deps: AppDeps): ReactNode {
         persistedGoalRef.current = undefined; // a fresh session log hasn't recorded the goal yet
         conversationRef.current = []; // a fresh session starts with no carried-forward conversation
         sessionImagesRef.current = []; // image numbers restart with the session
+        workspacePortRef.current = makeWorkspaceContextPort(undefined, { stableRepoMap: true });
       }
       const sessionId = sessionIdRef.current;
       const writer = writerRef.current;
@@ -706,7 +709,7 @@ export function App(deps: AppDeps): ReactNode {
           // vision model about any of them later (ask_vision).
           ...(sessionImages.length > 0 ? { sessionImages } : {}),
           capabilities: deps.capabilities,
-          workspace: makeWorkspaceContextPort(),
+          workspace: workspacePortRef.current,
           verify: makeVerifyPort(deps.workspaceRoot),
           checkpoint: (content) => saveObject(sessionId, content),
           artifact: (content) => saveObject(sessionId, content), // offload large tool outputs

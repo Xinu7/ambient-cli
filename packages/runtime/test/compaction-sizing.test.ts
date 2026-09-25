@@ -76,7 +76,9 @@ describe("compaction summary sizing", () => {
       "",
     );
     expect(client.calls[0]?.maxTokens).toBeGreaterThan(2048);
-    expect(client.calls[0]?.maxTokens).toBeLessThanOrEqual(8192);
+    // Bounded by policy (15% of the window it lands in) and the compactor's own output cap — no fixed number.
+    expect(client.calls[0]?.maxTokens).toBeLessThanOrEqual(Math.floor(60_000 * 0.15));
+    expect(client.calls[0]?.maxTokens).toBeLessThanOrEqual(TEXT_200K.max_output_length ?? 0);
   });
 });
 

@@ -89,3 +89,12 @@ describe("profileFor", () => {
     );
   });
 });
+
+describe("tiny windows", () => {
+  it("kept history plus the compaction reserve always fit inside the window", () => {
+    for (const w of [2_048, 4_096, 8_192, 16_384]) {
+      const b = budgetsFor(w, 1_024);
+      expect(b.keepRecent + b.compactReserve, String(w)).toBeLessThanOrEqual(w);
+    }
+  });
+});

@@ -56,6 +56,8 @@ export interface SubagentCtx {
   signal: AbortSignal;
   cwd: string;
   workspaceRoot: string;
+  /** Characters the wave's combined result gets in the parent's context; shared across the children. */
+  resultChars?: number;
 }
 
 /** Everything the orchestrator needs, injected at the CLI edge (keeps the runtime pure w.r.t. fs). */
@@ -110,9 +112,10 @@ const ROUTED_ROLE: Record<SubagentRole, RoutedRole> = {
 };
 /** Time a child gets to write its wrap-up after the soft deadline before it is hard-stopped. */
 const WRAP_UP_GRACE_MS = 180_000; // ≥ a request's own first-byte allowance, so the wrap-up isn't cut off
-/** Per-child summary cap. Generous on purpose: the parent's own tool-result budget still fits the whole wave
- *  to the served window (offloading the rest to read_artifact), so a scout's findings aren't cut to a stub. */
-const SUMMARY_CAP = 8_000;
+/** Per-child report cap when the caller didn't say how much room the wave's result has. */
+const DEFAULT_SUMMARY_CAP = 8_000;
+/** Floor per child, so a large wave on a small model still gets usable findings (the rest is offloaded). */
+const MIN_SUMMARY_CAP = 2_000;
 
 /** A short, human target for a child's running tool row (path/pattern/query/name/url/command), from its args. */
 function childToolTarget(toolName: string, args: unknown): string | undefined {
@@ -142,6 +145,12 @@ export async function runSubagents(
   const now = deps.now ?? Date.now;
   const limit = Math.max(1, deps.maxConcurrent ?? 4);
   const results = new Array<SubagentChildResult>(specs.length);
+  // Each child's report gets an equal share of the room the parent has for this result (the parent offloads
+  // anything past its own budget to read_artifact, so this only keeps the split fair).
+  const summaryCap =
+    ctx.resultChars !== undefined
+      ? Math.max(MIN_SUMMARY_CAP, Math.floor(ctx.resultChars / Math.max(1, specs.length)))
+      : DEFAULT_SUMMARY_CAP;
 
   // Serialize child approval prompts: the parent approver has a SINGLE resolver slot, so two builder children
   // asking concurrently would clobber each other (one promise never settles). A per-run promise chain queues
@@ -175,7 +184,7 @@ export async function runSubagents(
     while (true) {
       const i = next++;
       if (i >= specs.length) return;
-      results[i] = await runOneChild(specs[i] as SubagentSpec, ctx, childDeps, now);
+      results[i] = await runOneChild(specs[i] as SubagentSpec, ctx, childDeps, now, summaryCap);
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, specs.length) }, worker));
@@ -190,6 +199,7 @@ function runOneChild(
   ctx: SubagentCtx,
   deps: SubagentDeps,
   now: () => number,
+  summaryCap: number,
 ): Promise<SubagentChildResult> {
   const childSessionId = newSessionId();
   const role = spec.role;
@@ -313,7 +323,7 @@ function runOneChild(
       clearTimeout(timer);
       clearTimeout(softTimer);
       ctx.signal.removeEventListener("abort", onAbort);
-      const summary = capToolResult(result.finalText || "(no output)", SUMMARY_CAP);
+      const summary = capToolResult(result.finalText || "(no output)", summaryCap);
       ctx.emit({
         ...base,
         kind: "subagent.finished",
