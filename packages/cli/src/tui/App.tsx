@@ -1596,7 +1596,11 @@ export function App(deps: AppDeps): ReactNode {
 
   // A picker/overlay (model · effort · skills) replaces the splash banner so an overlay opened on a fresh
   // screen gets the full window height — otherwise the banner eats ~9 rows and the overlay overflows.
-  const onSplash = state.transcript.length === 0 && picker === null;
+  // The splash stays until the conversation starts; notices from launch (a key note, an update) sit under it.
+  const conversationStarted = state.transcript.some(
+    (t) => t.kind !== "notice" && t.kind !== "receipt",
+  );
+  const onSplash = !conversationStarted && picker === null;
   const slashMatches = matchSlash(input, customCommands.palette);
   const showSlash = input.startsWith("/") && slashMatches.length > 0 && !pending && picker === null;
   const elapsed = runActive && runStartRef.current ? (Date.now() - runStartRef.current) / 1000 : 0;
@@ -1610,8 +1614,10 @@ export function App(deps: AppDeps): ReactNode {
   // append-only even when parallel tools settle out of order — Static must never see an item re-ordered.
   const firstLive = state.transcript.findIndex((it) => !isSettled(it));
   const settledCount = firstLive < 0 ? state.transcript.length : firstLive;
-  const settledItems = state.transcript.slice(0, settledCount);
-  const liveItems = state.transcript.slice(settledCount);
+  // On the splash nothing is committed yet: launch notices render live under the banner, and commit to
+  // scrollback with the rest once the conversation starts.
+  const settledItems = onSplash ? [] : state.transcript.slice(0, settledCount);
+  const liveItems = onSplash ? state.transcript : state.transcript.slice(settledCount);
   const interior = Math.max(1, width - 2);
   // Visible queue rows — a rows-derived budget so the always-on panel stack stays under the screen height.
   const qMax = Math.min(5, Math.max(1, rows - 20));

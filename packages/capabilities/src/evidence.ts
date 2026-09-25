@@ -1,9 +1,4 @@
-import {
-  type CapabilityProvenance,
-  type CatalogModel,
-  type Lane,
-  availability,
-} from "@amb/protocol";
+import type { CapabilityProvenance, CatalogModel, Lane } from "@amb/protocol";
 
 /**
  * Capability evidence. A model's ability to reliably drive native tool-calls is established from four
@@ -106,14 +101,14 @@ export function resolveRecord(
 }
 
 /**
- * Decide the autonomy lane for a model given its evidence.
- *  - cold model ⇒ `unavailable`
+ * Decide the autonomy lane for a model given its tool-calling evidence. Readiness plays no part: the catalog's
+ * flag is only a hint (flagged models have been seen serving), and a model that truly can't serve is handled
+ * by failover, not by the lane.
  *  - proven tool-calling (yes) ⇒ `direct`
  *  - proven NOT tool-calling (no) ⇒ `assisted` (controller lane drives it)
  *  - unknown ⇒ `unknown` (try direct first, downgrade on evidence)
  */
-export function laneFor(model: CatalogModel, rec: CapabilityRecord): Lane {
-  if (availability(model) === "cold") return "unavailable";
+export function laneFor(_model: CatalogModel, rec: CapabilityRecord): Lane {
   if (rec.toolCalling === "yes") return "direct";
   if (rec.toolCalling === "no") return "assisted";
   return "unknown";

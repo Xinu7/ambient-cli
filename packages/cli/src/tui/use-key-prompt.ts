@@ -89,7 +89,7 @@ export function useKeyPrompt(
         switchedKey.current = true;
         notice(
           "info",
-          `The key from ${account.sourceLabel(rejected ?? "keychain")} was rejected, so ambient is using ${account.mask(alternative.key)} from ${account.sourceLabel(alternative.source)}. Type /login to set a different one.`,
+          `Signed in with ${account.mask(alternative.key)} from ${account.sourceLabel(alternative.source)} (the key in ${account.sourceLabel(rejected ?? "keychain")} was rejected). /logout clears the rejected one · /login replaces it`,
         );
         // A key panel opened by a run that already failed on the old key → retry it with the working one.
         const openPanel = ref.current;

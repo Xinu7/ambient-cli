@@ -66,10 +66,6 @@ export async function runRoute(args: string[]): Promise<void> {
       process.stdout.write(
         dim("  → tools are described as text; the model replies with a fenced action envelope.\n"),
       );
-    if (lane === "unavailable")
-      process.stdout.write(
-        dim("  → currently cold; a task would wait, substitute, or fail cleanly.\n"),
-      );
   }
 }
 

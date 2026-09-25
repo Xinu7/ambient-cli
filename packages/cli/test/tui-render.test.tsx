@@ -48,8 +48,8 @@ describe("tui render", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("█"); // the block "AMBIENT" wordmark (wide terminal)
     expect(frame.toLowerCase()).toContain("terminal coding agent");
-    expect(frame).toContain("4"); // live model count (e.g. "4 models ready")
-    expect(frame).toContain("models ready");
+    expect(frame).toContain("4"); // live model count ("4 models on Ambient")
+    expect(frame).toContain("models on Ambient");
     expect(frame).toContain("BUILD"); // agent-mode label
     expect(frame).toMatch(/BUILD\s+ask/); // double-space grouping: mode then permission (not just any "ask"/"task")
     expect(frame).toContain("Describe a coding task"); // the persistent input box
@@ -746,14 +746,12 @@ describe("tui render", () => {
 });
 
 describe("splash readiness line", () => {
-  it("says how many models exist when none is marked ready (never a false 'no models')", async () => {
+  it("counts every model Ambient offers — readiness is only a hint, never a false 'none ready'", async () => {
     const { readyLine } = await import("../src/tui/components/Banner.js");
-    expect(readyLine({ ready: 0, total: 4 })).toEqual({
-      count: "4",
-      rest: " models · none marked ready",
-    });
+    expect(readyLine({ ready: 0, total: 4 })).toEqual({ count: "4", rest: " models on Ambient" });
+    expect(readyLine({ ready: 2, total: 4 })).toEqual({ count: "4", rest: " models on Ambient" });
+    expect(readyLine({ ready: 0, total: 1 }).rest).toBe(" model on Ambient");
     expect(readyLine({ ready: 0, total: 0 }).rest).toBe("no models available");
-    expect(readyLine({ ready: 2, total: 4 })).toEqual({ count: "2", rest: " models ready" });
   });
 });
 

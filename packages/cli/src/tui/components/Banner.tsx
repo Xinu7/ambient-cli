@@ -12,20 +12,17 @@ const TAGLINE = "A terminal coding agent for the Ambient network.";
 const LOCKUP_W = (BRAILLE_GLOBE[0]?.length ?? 20) + 3 + (AMBIENT_BANNER[0]?.length ?? 30);
 
 /**
- * The count of models ready to serve right now. The catalog's readiness flag can lag reality (flagged models
- * have been seen serving), so when none is marked ready but models exist, say exactly that — not "no models".
+ * How many models Ambient offers right now. The catalog's readiness flag is only a hint (flagged models have
+ * been seen serving), so the splash counts every model instead of reporting a misleading "none ready".
  */
 export function readyLine(fleet?: { ready: number; total?: number }): {
   count: string;
   rest: string;
 } {
   if (!fleet) return { count: "", rest: "connecting…" };
-  if (fleet.ready === 0 && (fleet.total ?? 0) > 0) {
-    const t = fleet.total ?? 0;
-    return { count: String(t), rest: ` model${t === 1 ? "" : "s"} · none marked ready` };
-  }
-  if (fleet.ready === 0) return { count: "", rest: "no models available" };
-  return { count: String(fleet.ready), rest: ` model${fleet.ready === 1 ? "" : "s"} ready` };
+  const t = Math.max(fleet.total ?? 0, fleet.ready);
+  if (t === 0) return { count: "", rest: "no models available" };
+  return { count: String(t), rest: ` model${t === 1 ? "" : "s"} on Ambient` };
 }
 
 /**

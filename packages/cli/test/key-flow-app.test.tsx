@@ -205,7 +205,7 @@ describe("key panel races", () => {
     });
     await settle(80);
     expect(used).toEqual(["sk-shared-key-2222"]);
-    expect(ui.lastFrame()).toContain("using …2222");
+    expect(ui.lastFrame()).toContain("Signed in with …2222");
     expect(ui.lastFrame()).not.toContain("Your saved Ambient key doesn't work");
     ui.unmount();
   });

@@ -66,10 +66,8 @@ describe("resolveRecord (provenance precedence + TTL)", () => {
 
 describe("laneFor", () => {
   const now = 1;
-  it("cold model → unavailable regardless of evidence", () => {
-    expect(laneFor(model({ isReady: false }), declaredRecord(model({ isReady: false }), now))).toBe(
-      "unavailable",
-    );
+  it("a model flagged not-ready keeps its tool-calling lane (readiness is only a hint)", () => {
+    expect(laneFor(model({ isReady: false }), learnedRecord("m/x", true, now))).toBe("direct");
   });
   it("proven tool-calling → direct", () => {
     expect(laneFor(model(), learnedRecord("m/x", true, now))).toBe("direct");
