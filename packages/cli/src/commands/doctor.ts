@@ -1,6 +1,7 @@
-import { KEYS_URL, fetchCatalog, resolveConfig } from "@amb/ambient-api";
+import { KEYS_URL, fetchCatalog, resolveConfig, verifyApiKey } from "@amb/ambient-api";
 import { createBuiltinRegistry } from "@amb/tools-core";
 import { githubStatus, githubSummary } from "../agent/github.js";
+import { resolveWorkingApiKey } from "../agent/working-key.js";
 import { loadConfig } from "../config.js";
 import { bold, dim } from "../render/color.js";
 import { KEY_SOURCE_LABEL, maskKey, resolveApiKeyWithSource } from "../secrets.js";
@@ -38,8 +39,20 @@ export async function runDoctor(): Promise<void> {
 
   const found = resolveApiKeyWithSource();
   const key = found?.key;
-  if (found) ok(`API key ${maskKey(found.key)} (from ${KEY_SOURCE_LABEL[found.source]})`);
-  else
+  if (found) {
+    const where = `${maskKey(found.key)} (from ${KEY_SOURCE_LABEL[found.source]})`;
+    const check = await verifyApiKey({ baseUrl, apiKey: found.key });
+    if (check === "valid") ok(`API key ${where} — accepted by Ambient`);
+    else if (check === "unknown") warn(`API key ${where} — couldn't reach Ambient to check it`);
+    else {
+      warn(
+        `API key ${where} — REJECTED by Ambient (revoked or mistyped); run 'ambient login' to replace it`,
+      );
+      const working = await resolveWorkingApiKey(baseUrl);
+      if (working && working.key !== found.key)
+        ok(`meanwhile ambient uses ${maskKey(working.key)}, which works`);
+    }
+  } else
     warn(
       `not signed in — 'ambient models' works without a key; run 'ambient login' (or create one at ${KEYS_URL}) to run tasks`,
     );

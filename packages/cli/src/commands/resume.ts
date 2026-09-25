@@ -33,6 +33,7 @@ import { EventRenderer } from "../agent/render-events.js";
 import { resolveSessionId } from "../agent/session-select.js";
 import { makeSubagentTool } from "../agent/subagent-tool.js";
 import { makeVerifyPort } from "../agent/verify-port.js";
+import { resolveWorkingApiKey } from "../agent/working-key.js";
 import { makeWorkspaceContextPort } from "../agent/workspace-context-port.js";
 import { loadConfig } from "../config.js";
 import { bold, dim } from "../render/color.js";
@@ -150,11 +151,13 @@ export async function runResume(args: string[]): Promise<void> {
   }
 
   // No key in an interactive terminal: sign in right here, then carry on with the task.
-  const apiKey =
-    resolveApiKey() ??
-    (process.stdin.isTTY && process.stdout.isTTY && (await signInInteractive({ firstRun: true }))
-      ? resolveApiKey()
-      : undefined);
+  if (!resolveApiKey() && process.stdin.isTTY && process.stdout.isTTY) {
+    await signInInteractive({ firstRun: true });
+  }
+  // With more than one key on this machine, use one Ambient accepts (a revoked saved key falls back).
+  const working = await resolveWorkingApiKey(resolveConfig().baseUrl);
+  if (working?.note) process.stderr.write(`${working.note}\n`);
+  const apiKey = working?.key;
   if (!apiKey) {
     process.stderr.write(`${NOT_SIGNED_IN}\n`);
     process.exitCode = 1;
