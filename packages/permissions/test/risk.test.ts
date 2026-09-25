@@ -240,4 +240,25 @@ describe("classifyToolRisk — Windows destructive commands", () => {
     expect(bash("Get-ChildItem -Recurse src").level).toBe("none");
     expect(bash("dir /s").level).toBe("none");
   });
+  it.each([
+    String.raw`rmdir /s/q C:\ `,
+    String.raw`rd /q/s C:\ `,
+    String.raw`Remove-Item -Rec -Fo C:\ `,
+    String.raw`Remove-Item -Recurse C:\Users\z`,
+    String.raw`rm -r -fo C:\ `,
+    "rm -rf /c/",
+    "rm -rf /c/Users",
+    String.raw`r^d /s /q C:\ `,
+    String.raw`cmd //c rd /s /q C:\ `,
+    String.raw`cmd /c"rd /s /q C:\ "`,
+    String.raw`powershell Remove-Item -Recurse -Force C:\ `,
+    "rd /s /q %HOMEDRIVE%%HOMEPATH%",
+    String.raw`Remove-Item -Recurse -Force $env:USERPROFILE\*`,
+  ])("treats %s as critical", (cmd) => {
+    expect(bash(cmd).level).toBe("critical");
+  });
+  it("flags an encoded PowerShell command it can't read", () => {
+    expect(bash("powershell -EncodedCommand ZQBjAGgAbwA=").level).toBe("elevated");
+    expect(bash("pwsh -enc ZQBjAGgAbwA=").level).toBe("elevated");
+  });
 });

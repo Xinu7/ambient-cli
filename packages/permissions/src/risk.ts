@@ -25,9 +25,15 @@ const FORK_BOMB = /:\s*\(\s*\)\s*\{[^}]{0,60}[|][^}]{0,60}&[^}]{0,60}\}\s*;?\s*:
 function isCatastrophicTarget(a: string): boolean {
   if (a === "/" || a === "/*" || a === "~" || a === "~/" || a === "$HOME" || a === "$HOME/")
     return true;
-  return /^\/(bin|boot|dev|etc|lib|lib64|proc|root|sbin|sys|usr|var|System|Applications|Users|home)(\/|$)/.test(
-    a,
-  );
+  if (
+    /^\/(bin|boot|dev|etc|lib|lib64|proc|root|sbin|sys|usr|var|System|Applications|Users|home)(\/|$)/.test(
+      a,
+    )
+  ) {
+    return true;
+  }
+  // Git Bash spellings of a Windows drive root or its system folders (`/c/`, `/c/Users`).
+  return /^\/[a-z](\/(\*|users|windows|program files|programdata)?)?\/?$/i.test(a);
 }
 
 /** Windows delete targets that are catastrophic: a drive root, the user profile, or a system folder. */
@@ -35,10 +41,20 @@ function isCatastrophicWindowsTarget(a: string): boolean {
   const t = a.trim().replace(/^["']|["']$/g, "");
   return (
     /^[a-z]:[\\/]?\*?$/i.test(t) ||
-    /^(%userprofile%|\$env:userprofile|%systemroot%|\$env:systemroot|~)[\\/]?$/i.test(t) ||
-    /^[a-z]:[\\/](windows|users|program files( \(x86\))?|programdata)[\\/]?$/i.test(t)
+    /^(%userprofile%|\$env:userprofile|%homedrive%%homepath%|%systemroot%|\$env:systemroot|\$home|~)([\\/]\*?)?$/i.test(
+      t,
+    ) ||
+    /^[a-z]:[\\/](windows|users|program files( \(x86\))?|programdata)[\\/]?$/i.test(t) ||
+    /^[a-z]:[\\/]users[\\/][^\\/]+[\\/]?$/i.test(t) // one user's whole profile
   );
 }
+
+/** cmd options may be written together (`/s/q`); split them so each is recognized. */
+const splitCmdOptions = (argv: string[]) =>
+  argv.flatMap((a) => (/^\/[^\\/]/.test(a) ? a.split(/(?=\/)/) : [a]));
+/** A PowerShell parameter written as any unambiguous prefix (`-Rec`, `-Fo`). */
+const psParam = (opt: string, name: string, minLength: number) =>
+  opt.length >= minLength && name.startsWith(opt);
 
 /**
  * Windows (cmd / PowerShell) destructive commands, tokenized the Windows way: backslashes are literal path
@@ -46,15 +62,35 @@ function isCatastrophicWindowsTarget(a: string): boolean {
  * commands (`cmd /c …`, `powershell -Command …`) are classified too.
  */
 function windowsCommandRisk(command: string, risk: Risk, depth = 0): void {
-  for (const segment of command.split(/&&|\|\||[&|;\n]/)) {
+  // cmd's escape character (`r^d`) doesn't change which command runs.
+  for (const segment of command.replace(/\^(?=\S)/g, "").split(/&&|\|\||[&|;\n]/)) {
     const argv = segment.match(/"[^"]*"|\S+/g)?.map((t) => t.replace(/^"|"$/g, "")) ?? [];
     if (argv.length === 0) continue;
     const base = baseName(argv[0] as string)
       .toLowerCase()
       .replace(/\.exe$/, "");
-    if (depth < 2 && ["cmd", "powershell", "pwsh"].includes(base)) {
-      const i = argv.findIndex((a) => /^(\/c|\/k|-c|-command)$/i.test(a));
-      if (i >= 0) windowsCommandRisk(argv.slice(i + 1).join(" "), risk, depth + 1);
+    if (depth < 2 && base === "cmd") {
+      // `/c`, Git Bash's `//c`, or `/c"rd …"` glued to the command.
+      const i = argv.findIndex((a) => /^\/\/?[ck]/i.test(a));
+      if (i >= 0) {
+        const rest = (argv[i] as string).replace(/^\/\/?[ck]/i, "");
+        windowsCommandRisk([rest, ...argv.slice(i + 1)].join(" "), risk, depth + 1);
+      }
+      continue;
+    }
+    if (depth < 2 && (base === "powershell" || base === "pwsh")) {
+      const opts = argv.slice(1).map((a) => a.toLowerCase());
+      if (
+        opts.some((o) =>
+          psParam(o, "-encodedcommand", 2) && o !== "-e" ? true : o === "-e" || o === "-ec",
+        )
+      ) {
+        risk.add("elevated", "runs an encoded PowerShell command that can't be read here");
+      }
+      // The script follows -Command, or is simply the rest of the line when no parameter names it.
+      const i = opts.findIndex((o) => o === "-c" || psParam(o, "-command", 4));
+      const start = i >= 0 ? i + 1 : opts.findIndex((o) => !o.startsWith("-")) + 1;
+      if (start > 0) windowsCommandRisk(argv.slice(start).join(" "), risk, depth + 1);
       continue;
     }
     windowsRisk(base, argv, risk);
@@ -63,10 +99,13 @@ function windowsCommandRisk(command: string, risk: Risk, depth = 0): void {
 
 /** Classify one Windows command. `base` is lower-cased without `.exe`. */
 function windowsRisk(base: string, argv: string[], risk: Risk): void {
-  const opts = argv.slice(1).map((a) => a.toLowerCase());
-  const targets = argv.slice(1).filter((a) => !/^[-/]/.test(a));
+  const opts = splitCmdOptions(argv.slice(1)).map((a) => a.toLowerCase());
+  // A target is anything that isn't an option (a drive-rooted path like C:\ is a target, never an option).
+  const targets = argv.slice(1).filter((a) => !/^-/.test(a) && !/^\/[a-z?]{1,2}$/i.test(a));
   const has = (...names: string[]) => opts.some((o) => names.includes(o));
   const catastrophic = targets.some(isCatastrophicWindowsTarget);
+  const psRecurse = opts.some((o) => psParam(o, "-recurse", 2));
+  const psForce = opts.some((o) => o === "-f" || psParam(o, "-force", 3));
   if ((base === "rd" || base === "rmdir") && has("/s")) {
     risk.add(
       catastrophic ? "critical" : "elevated",
@@ -75,10 +114,11 @@ function windowsRisk(base: string, argv: string[], risk: Risk): void {
   } else if ((base === "del" || base === "erase") && has("/s")) {
     risk.add(catastrophic ? "critical" : "elevated", "recursively deletes files");
   } else if (
-    (base === "remove-item" || base === "ri") &&
-    has("-recurse", "-r") &&
-    has("-force", "-fo", "-f")
+    ["remove-item", "ri", "rm", "del", "erase", "rd", "rmdir"].includes(base) &&
+    psRecurse &&
+    (psForce || catastrophic)
   ) {
+    // PowerShell's Remove-Item and its aliases.
     risk.add(
       catastrophic ? "critical" : "elevated",
       catastrophic ? "recursive delete of a drive or system folder" : "force-deletes a folder tree",
