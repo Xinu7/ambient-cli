@@ -62,8 +62,8 @@ npm install -g https://github.com/xinu7/ambient-cli/releases/latest/download/amb
 git pull && ./scripts/install.sh                                                             # from source
 ```
 
-`ambient` checks for a newer release on launch (and in `ambient doctor`) and shows a one-line `brew upgrade`
-hint when one is available — cached, best-effort, and never blocking. Turn it off with `AMBIENT_NO_UPDATE_CHECK=1`
+`ambient` checks for a newer release on launch (and in `ambient doctor`) and shows the right one-line update
+command for how you installed it — cached, best-effort, and never blocking. Turn it off with `AMBIENT_NO_UPDATE_CHECK=1`
 or `"checkUpdates": false` in `~/.config/amb/config.json`.
 
 ### Uninstall
@@ -76,12 +76,18 @@ rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
 
 ## What makes it different
 
-- **Live model fleet.** Every run shows which Ambient model is serving it (requested → served), its readiness,
-  and its capability lane. `ambient models` renders the whole fleet.
+- **Adapts to the live fleet.** Context window, output length, vision, tool calling and reasoning all come
+  from Ambient's live model catalog, and every budget (compaction, tool output, instructions, subagent
+  reports) scales with the model serving you — a 1M-context model gets proportionally more room than a 32K
+  one, with no update to the CLI. Switch models mid-task with `/model`; the conversation is re-fitted to the
+  new model at the next step. `ambient models` shows the whole fleet.
 - **Works with *every* serveable model.** Models with native tool-calling use it directly; models without it
   are driven through a controller-assisted text protocol — not just the tool-capable ones.
-- **Honest reliability.** Warm-model substitution is never silent; cold models fail cleanly; context is
-  budgeted per model; failover is bounded and visible; the transcript is crash-safe and resumable.
+- **Images for every model.** Attach a screenshot (paste a path, drag a file, or Ctrl+V). A model that can't
+  see images gets it described by a vision model from the same fleet — you see it happen — and can ask
+  follow-up questions about any image in the session.
+- **Honest reliability.** Substitution and failover are always visible and bounded; stalled streams are
+  detected and retried; network errors say what happened; the transcript is crash-safe and resumable.
 - **You hold the dial.** A two-axis control — **Plan ⇄ Build** (Tab) × **ask / accept-edits / bypass**
   (Shift+Tab) — with a diff-first approval prompt and a local risk classifier.
 - **Honest reasoning effort.** `auto` (default) picks per turn — none for chat, high for work, max for
@@ -91,7 +97,30 @@ rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
   compaction); the agent can propose a revision, but only you commit it.
 - **Brings your setup.** Reads your existing `.claude/agents`, skills, slash commands, `AGENTS.md`, and MCP
   servers (both the `.mcp.json` and Codex `config.toml` dialects) so what you already use works on Ambient
-  models.
+  models. When your MCP servers bring more tools than the model has room for, it sees an index and loads
+  the ones it needs on demand.
+- **Runs everywhere.** macOS, Linux and Windows (Git Bash or PowerShell), tested on all three.
+
+## In the interactive TUI
+
+The activity line narrates what the agent is actually doing — `Reading src/app.ts`, `Running pnpm test`,
+`Thinking · max  ↓ 1.2k tok · 40 tok/s` — and how long it thought stays in the transcript.
+
+```
+/model [id]      switch model (also mid-task)      /compact [focus]  summarize the conversation now
+/effort          auto · off · high · max           /context          how full the model's context is
+/plan  /build    plan first, or just build         /usage            tokens sent and received (never money)
+/goal <text>     a north-star kept every turn      /skills           browse and pin your skills
+/attach <path>   attach an image                   /login  /logout   add, change or remove your API key
+/tools           what the agent can use            /clear            start a fresh conversation
+/help            every command and key             /quit
+```
+
+Keys: `↑`/`↓` previous prompts · `Ctrl+R` search them · `@` pick a file · `\` then Enter for a new line ·
+`Ctrl+A/E/U/K/W` and `Alt+B/F` edit like a shell · `Ctrl+V` paste an image · `Tab` plan/build ·
+`Shift+Tab` permission · `Ctrl+T` show reasoning · `Esc` stop. Your own Claude/Codex slash commands appear
+in the `/` menu too. The terminal bell rings when an approval is waiting or a long run finishes
+(`AMBIENT_BELL=0` turns it off).
 
 ## Commands
 
