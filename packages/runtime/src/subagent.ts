@@ -274,7 +274,7 @@ function runOneChild(
     signal: ac.signal,
     emit: childEmit,
     approve: deps.approve,
-    workspace: deps.workspace,
+    workspace: childWorkspace(deps.workspace),
     ...(deps.capabilities ? { capabilities: deps.capabilities } : {}),
     ...(deps.effort ? { effort: deps.effort } : {}),
     ...(deps.goal ? { goal: deps.goal } : {}),
@@ -315,4 +315,12 @@ function runOneChild(
         ...(filesMutated.length > 0 ? { files: filesMutated } : {}),
       };
     });
+}
+
+/**
+ * The workspace port a child runs with. Children never write project memory: parallel children would race to
+ * overwrite MEMORY.md with their own narrow summaries. Only the parent session compounds it.
+ */
+export function childWorkspace(ws: WorkspaceContextPort): WorkspaceContextPort {
+  return { ...ws, writeMemory: () => {} };
 }

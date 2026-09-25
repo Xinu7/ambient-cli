@@ -39,7 +39,7 @@ const NOTES_HEADER = "## Notes (curated by the agent — durable across sessions
 const MAX_NOTES = 100;
 
 /** Extract the curated Notes block (from its header to EOF), or "" if none. */
-function extractNotes(content: string): string {
+export function extractNotes(content: string): string {
   const i = content.indexOf(NOTES_HEADER);
   return i >= 0 ? content.slice(i).trimEnd() : "";
 }

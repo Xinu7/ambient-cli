@@ -3,6 +3,7 @@ import {
   compactionConfigForWindow,
   estimateMessagesTokens,
   estimateTokens,
+  extractNotes,
   fitImages,
   fitInjectedBlocks,
   planImages,
@@ -38,6 +39,7 @@ import {
 } from "@amb/reliability";
 import { type ToolRegistry, createBuiltinRegistry, toOpenAITools } from "@amb/tools-core";
 import {
+  SUMMARY_MARKER,
   capToolResult,
   catalogHash,
   fallbackModel,
@@ -226,7 +228,13 @@ export class Agent {
     const gitBlock = opts.workspace.git?.(opts.cwd);
     // Durable project memory (.ambient/MEMORY.md) — compounds across sessions; injected into the SYSTEM
     // prompt so it survives compaction, and re-verified with tools rather than trusted blindly.
-    const memory = opts.workspace.readMemory(opts.workspaceRoot);
+    // In a carried session that has already compacted, the auto-summary part of MEMORY.md is the SAME text
+    // as the carried summary message — injecting both doubles it. Keep only the curated notes then.
+    const rawMemory = opts.workspace.readMemory(opts.workspaceRoot);
+    const carriesSummary = (opts.priorMessages ?? []).some(
+      (m) => typeof m.content === "string" && m.content.startsWith(SUMMARY_MARKER),
+    );
+    const memory = rawMemory && carriesSummary ? extractNotes(rawMemory) || undefined : rawMemory;
     const memoryBlock = memory
       ? `## Project memory (.ambient/MEMORY.md — durable notes from prior sessions; re-verify with tools, don't trust blindly)\n${memory}`
       : "";
@@ -366,7 +374,8 @@ export class Agent {
         content: currentPlanBlock ? `${baseSystem}\n\n${currentPlanBlock}` : baseSystem,
       },
       ...carried,
-      { role: "user", content: firstUserContent },
+      // Pinned: compaction keeps the CURRENT task verbatim however long the session grows.
+      { role: "user", content: firstUserContent, pinned: true },
     ];
     // Track the project memory across compactions so each summary COMPOUNDS the last, and write it.
     let projectMemory = memory ?? "";

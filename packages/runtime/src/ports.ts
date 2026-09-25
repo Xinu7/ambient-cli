@@ -63,6 +63,8 @@ export interface Msg {
   toolCalls?: ToolCall[];
   /** Groups a tool call with its result so compaction never splits them. */
   toolGroupId?: string;
+  /** The current run's task message: compaction never summarizes it. Cleared when carried to a later run. */
+  pinned?: boolean;
 }
 
 /**

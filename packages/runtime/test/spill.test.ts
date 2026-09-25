@@ -12,7 +12,8 @@ import type { Msg } from "../src/ports.js";
 describe("planSpill (last-resort context spill)", () => {
   const anchor: Msg[] = [
     { role: "system", content: "system prompt with the goal anchor" },
-    { role: "user", content: "the original task instruction" },
+    // The agent pins the current task message, so eviction can never drop it.
+    { role: "user", content: "the original task instruction", pinned: true },
   ];
   const groupA: Msg[] = [
     { role: "assistant", content: "calling read on a.ts", toolGroupId: "A" },

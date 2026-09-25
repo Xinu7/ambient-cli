@@ -16,6 +16,8 @@ export interface CompactableMessage {
   content?: unknown;
   /** Marks a message that pairs a tool call with its result (kept together). */
   toolGroupId?: string;
+  /** Never summarized or evicted — the current task message, wherever it sits in the conversation. */
+  pinned?: boolean;
 }
 /** @deprecated Use {@link CompactableMessage}. Kept as an alias so external importers don't break. */
 export type ChatMsg = CompactableMessage;
@@ -25,6 +27,8 @@ export interface CompactionPlan<T extends CompactableMessage = CompactableMessag
   toSummarize: T[];
   /** Messages kept verbatim (recent window + the anchor). */
   kept: T[];
+  /** The immovable part of `kept`: the leading anchor plus every pinned message, in original order. */
+  anchor: T[];
   /** Index in the original array where `kept` begins. */
   keepFromIndex: number;
 }
@@ -34,14 +38,15 @@ export interface CompactionConfig {
   reserveTokens: number;
   /** Keep at least this many tokens of the most recent messages verbatim. */
   keepRecentTokens: number;
-  /** Number of leading messages that are the immovable anchor (system + goal). */
+  /** Number of leading messages that are always kept (the system prompt). The current task is kept by
+   *  marking it `pinned`, so a long multi-message session never summarizes away what it's working on now. */
   anchorCount: number;
 }
 
 export const DEFAULT_COMPACTION: CompactionConfig = {
   reserveTokens: 16_384,
   keepRecentTokens: 20_000,
-  anchorCount: 2,
+  anchorCount: 1,
 };
 
 const clampN = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
@@ -84,8 +89,12 @@ export function planCompaction<T extends CompactableMessage>(
   cfg: CompactionConfig = DEFAULT_COMPACTION,
   bytesPerToken?: number,
 ): CompactionPlan<T> {
-  const anchor = messages.slice(0, cfg.anchorCount);
-  const rest = messages.slice(cfg.anchorCount);
+  const anchor: T[] = [];
+  const rest: T[] = [];
+  messages.forEach((m, i) => {
+    if (i < cfg.anchorCount || m.pinned === true) anchor.push(m);
+    else rest.push(m);
+  });
   const opts = bytesPerToken ? { bytesPerToken } : {};
 
   // Walk backward accumulating recent messages until we hit keepRecentTokens. Always keep AT LEAST the
@@ -111,7 +120,8 @@ export function planCompaction<T extends CompactableMessage>(
   return {
     toSummarize,
     kept: [...anchor, ...recent],
-    keepFromIndex: cfg.anchorCount + cut,
+    anchor,
+    keepFromIndex: messages.length - recent.length,
   };
 }
 
@@ -144,17 +154,56 @@ function flattenContent(content: unknown): string {
     .join(" ");
 }
 
+/** Keep the head and tail of an over-long text so one giant message can't blow the summarizer's window. */
+function clipMiddle(text: string, maxChars: number | undefined): string {
+  if (maxChars === undefined || text.length <= maxChars) return text;
+  const half = Math.max(0, Math.floor((maxChars - 40) / 2));
+  return `${text.slice(0, half)}\n…[${text.length - 2 * half} chars omitted]…\n${text.slice(-half)}`;
+}
+
 /** Build the summarizer request messages: prior summary (if any) + the block to compress. */
 export function buildSummaryRequest(
   toSummarize: CompactableMessage[],
   priorSummary?: string,
+  opts: { maxCharsPerMessage?: number } = {},
 ): { role: "system" | "user"; content: string }[] {
   const instruction = `Summarize the conversation below into the exact sections that follow. Preserve the original goal verbatim, every file path touched, test/build outcomes, and decisions with rationale. Be concise but lossless on those. Do not invent progress.\n\n${SUMMARY_SKELETON}`;
   const parts: { role: "system" | "user"; content: string }[] = [
     { role: "system", content: instruction },
   ];
   if (priorSummary) parts.push({ role: "user", content: `Prior summary:\n${priorSummary}` });
-  const transcript = toSummarize.map((m) => `${m.role}: ${flattenContent(m.content)}`).join("\n");
+  const transcript = toSummarize
+    .map((m) => `${m.role}: ${clipMiddle(flattenContent(m.content), opts.maxCharsPerMessage)}`)
+    .join("\n");
   parts.push({ role: "user", content: `Conversation to summarize:\n${transcript}` });
   return parts;
+}
+
+/**
+ * Split messages into consecutive chunks whose summary REQUEST (instruction + prior + chunk) fits
+ * `budgetTokens` — so a summarizer with a small window is never sent more than it can read. A single message
+ * too big for any chunk is clipped (head + tail) by `maxCharsPerMessage` rather than dropped.
+ */
+export function chunkForSummary<T extends CompactableMessage>(
+  messages: T[],
+  budgetTokens: number,
+  priorSummary: string | undefined,
+  maxCharsPerMessage: number,
+): T[][] {
+  const fits = (chunk: T[]) =>
+    estimateMessagesTokens(buildSummaryRequest(chunk, priorSummary, { maxCharsPerMessage })) <=
+    budgetTokens;
+  const chunks: T[][] = [];
+  let cur: T[] = [];
+  for (const m of messages) {
+    const next = [...cur, m];
+    if (cur.length > 0 && !fits(next)) {
+      chunks.push(cur);
+      cur = [m];
+    } else {
+      cur = next;
+    }
+  }
+  if (cur.length > 0) chunks.push(cur);
+  return chunks;
 }

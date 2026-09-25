@@ -98,7 +98,9 @@ export function withTurnBudget(
  */
 export function stubCarriedImages(msgs: readonly Msg[]): Msg[] {
   let n = 0;
-  return msgs.map((m) => {
+  return msgs.map((msg) => {
+    // A carried message is history: an earlier run's pinned task is no longer the current one.
+    const m: Msg = msg.pinned ? { ...msg, pinned: undefined } : msg;
     if (!Array.isArray(m.content)) return m;
     const parts = m.content as Array<{ type?: string; text?: string }>;
     if (!parts.some((p) => p?.type === "image_url")) return m;
@@ -176,7 +178,7 @@ export function planSpill(messages: Msg[]): {
   anchor: Msg[];
   recent: Msg[];
 } | null {
-  const plan = planCompaction(messages, { anchorCount: 2, keepRecentTokens: 1, reserveTokens: 0 });
+  const plan = planCompaction(messages, { anchorCount: 1, keepRecentTokens: 1, reserveTokens: 0 });
   if (plan.toSummarize.length === 0) return null;
   // Serialize the WHOLE messages — role, content AND the native tool-call fields (toolCalls/toolCallId/
   // toolGroupId). A native assistant tool-call message carries content:"" with its real state in toolCalls, so
@@ -186,8 +188,8 @@ export function planSpill(messages: Msg[]): {
   return {
     evictedText,
     evictedCount: plan.toSummarize.length,
-    anchor: messages.slice(0, 2),
-    recent: plan.kept.slice(2),
+    anchor: plan.anchor,
+    recent: plan.kept.slice(plan.anchor.length),
   };
 }
 
@@ -265,7 +267,7 @@ export function deterministicSummary(msgs: Msg[]): string {
     );
   }
   lines.push(
-    "- The original goal is in the first user message. Continue from the recent messages below; verify before claiming success.",
+    "- The current task is the pinned user message above. Continue from the recent messages below; verify before claiming success.",
   );
   return lines.join("\n");
 }

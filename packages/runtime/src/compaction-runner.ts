@@ -1,5 +1,6 @@
 import {
   buildSummaryRequest,
+  chunkForSummary,
   compactionConfigForWindow,
   estimateMessagesTokens,
   planCompaction,
@@ -71,39 +72,31 @@ export async function compact(
         reason: "cheap-model compaction",
       });
     }
-    try {
-      // Feed the PRIOR project memory as the prior-summary so the new summary COMPOUNDS it instead of
-      // replacing it (memory lives in the anchor, excluded from toSummarize, so without this the
-      // next session's first compaction would erase it).
-      const req = buildSummaryRequest(plan.toSummarize, priorMemory || undefined);
-      const out = await client.chat({
-        model: compactor,
-        messages: req,
-        tools: [],
-        maxTokens: 2048,
-        // Utility task — cheap by design; never spends the run's high-effort tokens summarizing.
-        reasoningEffort: summaryEffort(catalog.find((m) => m.id === compactor)),
-        timeouts: streamTimeouts({ promptTokens: estimateMessagesTokens(req) }),
-        signal,
-      });
-      // Use the model's NARRATIVE but ALWAYS append the AUTHORITATIVE facts from the log (files touched,
-      // tool ok/fail, last error) so a weak compactor can't fabricate "all tests pass" or drop real errors
-      // and then steer the strong model wrong. A TRUNCATED summary (hit the output cap) is untrusted
-      // → keep the deterministic one whole.
-      const modelText = out.content.trim();
-      if (modelText.length > 0 && out.finishReason !== "length") {
-        summary =
-          factsBody.length > 0
-            ? `${modelText}\n\n## Ground truth (from the session log — authoritative; trust over the narrative above)\n${factsBody}`
-            : modelText;
-      }
-    } catch {
-      // keep the deterministic fallback
+    // Feed the PRIOR project memory as the prior-summary so the new summary COMPOUNDS it instead of
+    // replacing it (memory lives in the anchor, excluded from toSummarize, so without this the next
+    // session's first compaction would erase it).
+    const narrative = await rollingSummary(
+      client,
+      catalog.find((m) => m.id === compactor),
+      compactor,
+      plan.toSummarize,
+      priorMemory || undefined,
+      windowTokens,
+      signal,
+    );
+    // Use the model's NARRATIVE but ALWAYS append the AUTHORITATIVE facts from the log (files touched, tool
+    // ok/fail, last error) so a weak compactor can't fabricate "all tests pass" or drop real errors and then
+    // steer the strong model wrong.
+    if (narrative) {
+      summary =
+        factsBody.length > 0
+          ? `${narrative}\n\n## Ground truth (from the session log — authoritative; trust over the narrative above)\n${factsBody}`
+          : narrative;
     }
   }
 
-  const anchor = messages.slice(0, cfg.anchorCount); // system + original goal, kept together (never summarized)
-  const recent = plan.kept.slice(cfg.anchorCount);
+  const anchor = plan.anchor; // system + the pinned current task (never summarized)
+  const recent = plan.kept.slice(anchor.length);
   const summaryMsg: Msg = {
     role: "system",
     // MUST start with SUMMARY_MARKER (the SAME constant the deterministic path reads) so a LATER compaction
@@ -129,6 +122,74 @@ export async function compact(
     summarizedPhases: plan.toSummarize.length,
   });
   return next;
+}
+
+/** Most summarizer calls one compaction may spend; older overflow is folded in deterministically instead. */
+const MAX_SUMMARY_CHUNKS = 8;
+
+/** Summary output budget from the COMPACTOR's own catalog limits: roomy enough to be lossless on files and
+ *  decisions, small enough to leave its window for the input. */
+export function summaryOutputTokens(model: CatalogModel | undefined, window: number): number {
+  const cap = model?.maxOutputLength ?? 4096;
+  return Math.max(1024, Math.min(8192, cap, Math.floor(window * 0.15)));
+}
+
+/**
+ * Summarize `toSummarize` with the compactor, sized to the compactor's OWN window: a middle bigger than that
+ * window is split into chunks and summarized as a rolling refine (each call gets the previous summary as its
+ * prior). Returns the narrative, or undefined on any failure/truncation (the caller keeps the deterministic
+ * summary — compaction never blocks on the model).
+ */
+async function rollingSummary(
+  client: ChatClient,
+  model: CatalogModel | undefined,
+  compactor: string,
+  toSummarize: Msg[],
+  prior: string | undefined,
+  fallbackWindow: number,
+  signal: AbortSignal,
+): Promise<string | undefined> {
+  const window = model?.contextLength ?? fallbackWindow;
+  const maxTokens = summaryOutputTokens(model, window);
+  const inputBudget = Math.floor(window * 0.9) - maxTokens;
+  if (inputBudget < 1024) return undefined;
+  // The prior summary may take at most a quarter of the input; per-message clipping keeps any single giant
+  // tool output from monopolizing a chunk.
+  const clipPrior = (p: string | undefined) =>
+    p && p.length > inputBudget ? `${p.slice(0, inputBudget)}\n…[earlier summary clipped]` : p;
+  const maxCharsPerMessage = Math.floor(inputBudget * 1.5);
+  let chunks = chunkForSummary(toSummarize, inputBudget, clipPrior(prior), maxCharsPerMessage);
+  let rolling = clipPrior(prior);
+  if (chunks.length > MAX_SUMMARY_CHUNKS) {
+    const overflow = chunks.slice(0, chunks.length - MAX_SUMMARY_CHUNKS).flat();
+    rolling = clipPrior(
+      [rolling, deterministicSummary(overflow)].filter((x): x is string => Boolean(x)).join("\n\n"),
+    );
+    chunks = chunks.slice(-MAX_SUMMARY_CHUNKS);
+  }
+  for (const chunk of chunks) {
+    if (signal.aborted) return undefined;
+    const req = buildSummaryRequest(chunk, rolling, { maxCharsPerMessage });
+    try {
+      const out = await client.chat({
+        model: compactor,
+        messages: req,
+        tools: [],
+        maxTokens,
+        // Utility task — cheap by design; never spends the run's high-effort tokens summarizing.
+        reasoningEffort: summaryEffort(model),
+        timeouts: streamTimeouts({ promptTokens: estimateMessagesTokens(req) }),
+        signal,
+      });
+      const text = out.content.trim();
+      // A TRUNCATED summary (hit the output cap) is untrusted → the caller keeps the deterministic one.
+      if (text.length === 0 || out.finishReason === "length") return undefined;
+      rolling = clipPrior(text);
+    } catch {
+      return undefined;
+    }
+  }
+  return rolling;
 }
 
 /**

@@ -282,3 +282,19 @@ describe("runSubagents", () => {
     expect(out.results).toHaveLength(2);
   });
 });
+
+describe("childWorkspace", () => {
+  it("a child can read memory but never writes it", async () => {
+    const { childWorkspace } = await import("../src/subagent.js");
+    const writes: string[] = [];
+    const parent: WorkspaceContextPort = {
+      ...testWorkspace(),
+      readMemory: () => "parent memory",
+      writeMemory: (_r, s) => writes.push(s),
+    };
+    const child = childWorkspace(parent);
+    child.writeMemory("/ws", "child summary");
+    expect(writes).toEqual([]);
+    expect(child.readMemory("/ws")).toBe("parent memory");
+  });
+});
