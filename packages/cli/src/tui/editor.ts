@@ -90,6 +90,59 @@ export function moveRight(text: string, cursor: number): number {
   return c >= text.length ? text.length : c + cpLenAt(text, c);
 }
 
+// ---- line and word editing (readline-style keys) ----
+
+/** Start of the logical line the cursor is on. */
+export function lineStart(text: string, cursor: number): number {
+  const c = clampCursor(text, cursor);
+  return text.lastIndexOf("\n", c - 1) + 1;
+}
+
+/** End of the logical line the cursor is on. */
+export function lineEnd(text: string, cursor: number): number {
+  const c = clampCursor(text, cursor);
+  const nl = text.indexOf("\n", c);
+  return nl < 0 ? text.length : nl;
+}
+
+/** Ctrl+U: delete from the start of the line to the cursor. */
+export function deleteToLineStart(text: string, cursor: number): { text: string; cursor: number } {
+  const c = clampCursor(text, cursor);
+  const start = lineStart(text, c);
+  return { text: text.slice(0, start) + text.slice(c), cursor: start };
+}
+
+/** Ctrl+K: delete from the cursor to the end of the line. */
+export function deleteToLineEnd(text: string, cursor: number): { text: string; cursor: number } {
+  const c = clampCursor(text, cursor);
+  return { text: text.slice(0, c) + text.slice(lineEnd(text, c)), cursor: c };
+}
+
+const isWordChar = (ch: string | undefined) => ch !== undefined && /[\p{L}\p{N}_]/u.test(ch);
+
+/** Alt+B: the start of the word before the cursor (skipping any separators first). */
+export function wordLeft(text: string, cursor: number): number {
+  let c = clampCursor(text, cursor);
+  while (c > 0 && !isWordChar(text[c - 1])) c--;
+  while (c > 0 && isWordChar(text[c - 1])) c--;
+  return c;
+}
+
+/** Alt+F: the end of the word after the cursor. */
+export function wordRight(text: string, cursor: number): number {
+  let c = clampCursor(text, cursor);
+  while (c < text.length && !isWordChar(text[c])) c++;
+  while (c < text.length && isWordChar(text[c])) c++;
+  return c;
+}
+
+/** Ctrl+W: delete the word before the cursor. */
+export function deleteWordBack(text: string, cursor: number): { text: string; cursor: number } {
+  const c = clampCursor(text, cursor);
+  const start = wordLeft(text, c);
+  return { text: text.slice(0, start) + text.slice(c), cursor: start };
+}
+
 // ---- wrapped-layout math ----
 
 export interface VisualRow {

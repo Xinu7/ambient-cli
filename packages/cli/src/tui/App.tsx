@@ -78,16 +78,24 @@ import {
   cursorGoalCol,
   deleteBackAt,
   deleteForwardAt,
+  deleteToLineEnd,
+  deleteToLineStart,
+  deleteWordBack,
   insertAt,
   layoutRows,
+  lineEnd,
+  lineStart,
   moveDown,
   moveEnd,
   moveHome,
   moveLeft,
   moveRight,
   moveUp,
+  wordLeft,
+  wordRight,
 } from "./editor.js";
 import { fleetChanges } from "./fleet-diff.js";
+import { helpText } from "./help.js";
 import {
   type AgentMode,
   EFFORTS,
@@ -959,7 +967,7 @@ export function App(deps: AppDeps): ReactNode {
         dispatch({
           t: "notice",
           level: "info",
-          text: `commands — ${SLASH_COMMANDS.map((c) => c.name).join("  ")}`,
+          text: helpText(SLASH_COMMANDS, customCommands.palette.length),
         });
         break;
       case "/tools": {
@@ -1347,6 +1355,29 @@ export function App(deps: AppDeps): ReactNode {
       return;
     }
 
+    // Readline-style editing in the composer: Ctrl+A/E line start/end, Ctrl+U/K cut to start/end of the
+    // line, Ctrl+W delete the previous word, Alt+B/F move by word. Pickers keep their own keys.
+    if (pickerRef.current === null && (key.ctrl || key.meta)) {
+      const text = inputRef.current;
+      const cur = cursorRef.current;
+      const edit = (r: { text: string; cursor: number }) => {
+        setBuffer(r.text, r.cursor);
+        goalColRef.current = undefined;
+        hist.stopBrowsing();
+      };
+      const move = (to: number) => {
+        setBuffer(text, to);
+        goalColRef.current = undefined;
+      };
+      if (key.ctrl && ch === "a") return move(lineStart(text, cur));
+      if (key.ctrl && ch === "e") return move(lineEnd(text, cur));
+      if (key.ctrl && ch === "u") return edit(deleteToLineStart(text, cur));
+      if (key.ctrl && ch === "k") return edit(deleteToLineEnd(text, cur));
+      if (key.ctrl && ch === "w") return edit(deleteWordBack(text, cur));
+      if (key.meta && ch === "b") return move(wordLeft(text, cur));
+      if (key.meta && ch === "f") return move(wordRight(text, cur));
+    }
+
     // Ctrl+V pastes an image from the clipboard (macOS) — attach it to the next message.
     if (key.ctrl && ch === "v") {
       void captureImage();
@@ -1500,7 +1531,16 @@ export function App(deps: AppDeps): ReactNode {
       return;
     }
 
-    // 7) Enter runs (idle) or QUEUES (in flight).
+    // 7) Enter runs (idle) or QUEUES (in flight). A line ending in `\` continues onto a new line instead
+    //    (works in every terminal, unlike Shift+Enter).
+    if (
+      key.return &&
+      inputRef.current.endsWith("\\") &&
+      cursorRef.current === inputRef.current.length
+    ) {
+      setBuffer(`${inputRef.current.slice(0, -1)}\n`);
+      return;
+    }
     if (key.return) {
       const task = inputRef.current.trim();
       // A slash-prefixed input that matched no command is a typo (e.g. `/modle`) — report it, don't
