@@ -13,6 +13,7 @@ import { render } from "ink";
 import { createElement } from "react";
 import { AmbientChatClient } from "../agent/ambient-client.js";
 import { makeCapabilityPort } from "../agent/capability-port.js";
+import { listWorkspaceFiles } from "../agent/file-list.js";
 import { type McpConnection, connectMcp } from "../agent/mcp-connect.js";
 import { openBrowser, signInInteractive } from "../commands/login.js";
 import { type FleetRow, formatFleetRows, laneResolver } from "../render/fleet.js";
@@ -227,6 +228,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       skills: skillRows,
       onTogglePin,
       account,
+      listFiles: () => listWorkspaceFiles(cwd),
       history: {
         load: () => loadHistory(historyPath(cwd)),
         append: (text: string) => appendHistory(historyPath(cwd), text),

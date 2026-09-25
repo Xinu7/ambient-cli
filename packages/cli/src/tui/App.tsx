@@ -57,6 +57,7 @@ import {
 import { Banner } from "./components/Banner.js";
 import { Composer } from "./components/Composer.js";
 import { EffortPicker } from "./components/EffortPicker.js";
+import { FilePicker } from "./components/FilePicker.js";
 import { Goal } from "./components/Goal.js";
 import { HistorySearch } from "./components/HistorySearch.js";
 import { KeyPrompt } from "./components/KeyPrompt.js";
@@ -97,7 +98,9 @@ import {
   wordRight,
 } from "./editor.js";
 import { fleetChanges } from "./fleet-diff.js";
+import { fuzzyRank } from "./fuzzy.js";
 import { helpText } from "./help.js";
+import { activeMention, insertMention } from "./mention.js";
 import { contextReport, tokens, usageReport } from "./reports.js";
 import {
   type Activity,
@@ -170,6 +173,8 @@ export interface AppDeps {
   onTogglePin?: (name: string) => boolean;
   /** Prompt history for ↑/↓ recall and Ctrl+R search, persisted at the edge per workspace. */
   history?: HistoryPort;
+  /** The workspace's files for the `@` picker (listed at the edge, on first use). */
+  listFiles?: () => Promise<string[]>;
 }
 
 type Action =
@@ -233,6 +238,9 @@ function appReducer(state: ViewState, action: Action): ViewState {
 
 /** Most lines of launch notes that may sit under the splash banner. */
 const SPLASH_NOTE_LINES = 4;
+
+/** Most matches the `@` picker keeps (it shows a scrolling window of them). */
+const FILE_PICKER_ROWS = 50;
 
 /** Runs at least this long ring the terminal bell when they finish. */
 const BELL_AFTER_MS = 30_000;
@@ -306,6 +314,15 @@ export function App(deps: AppDeps): ReactNode {
   const [runActive, setRunActive] = useState(false);
   const [queued, setQueued] = useState<string[]>([]);
   const [slashSel, setSlashSel] = useState(0);
+  // The `@` file picker: the workspace file list (loaded on first use), the highlighted row, and the mention
+  // the user closed with Esc (so it stays closed until they start another one).
+  const [, setFiles] = useState<string[] | undefined>(undefined); // re-render once the list arrives
+  const filesRef = useRef<string[] | undefined>(undefined);
+  const filesLoadingRef = useRef(false);
+  const [fileSel, setFileSel] = useState(0);
+  const fileSelRef = useRef(0);
+  const [, setMentionClosedAt] = useState<number | undefined>(undefined);
+  const mentionClosedRef = useRef<number | undefined>(undefined);
   // Bumped by /clear to remount <Static> after the screen + scrollback are wiped.
   const [staticEpoch, setStaticEpoch] = useState(0);
   /** How many transcript items <Static> has printed this epoch (it only ever grows until /clear). */
@@ -1298,6 +1315,32 @@ export function App(deps: AppDeps): ReactNode {
     setBuffer("");
   };
 
+  /** Files matching the `@` mention being typed at `cursor` (empty when none, or it was closed with Esc). */
+  const fileMatchesFor = (text: string, cur: number): string[] => {
+    const mention = activeMention(text, cur);
+    if (!mention) {
+      mentionClosedRef.current = undefined; // a new @ later opens the picker again
+      return [];
+    }
+    if (mention.start === mentionClosedRef.current) return [];
+    if (filesRef.current === undefined) {
+      if (!filesLoadingRef.current && deps.listFiles) {
+        filesLoadingRef.current = true;
+        void deps
+          .listFiles()
+          .catch(() => [])
+          .then((list) => {
+            filesRef.current = list;
+            setFiles(list);
+          });
+      }
+      return [];
+    }
+    return (
+      mention.query ? fuzzyRank(mention.query, filesRef.current, (f) => f) : filesRef.current
+    ).slice(0, FILE_PICKER_ROWS);
+  };
+
   useInput((ch, key) => {
     // 0) The key panel owns the keyboard while open (Ctrl+C still quits).
     if (!(key.ctrl && ch === "c") && keyFlow.handleInput(ch, key)) return;
@@ -1383,6 +1426,33 @@ export function App(deps: AppDeps): ReactNode {
     if (key.ctrl && ch === "r" && pickerRef.current === null) {
       hist.startSearch(inputRef.current);
       return;
+    }
+
+    // 2c) The `@` file picker owns ↑/↓/Tab/Enter/Esc while it's showing.
+    const fileMatches = fileMatchesFor(inputRef.current, cursorRef.current);
+    if (fileMatches.length > 0 && pickerRef.current === null) {
+      const mention = activeMention(inputRef.current, cursorRef.current);
+      if (key.escape && mention) {
+        mentionClosedRef.current = mention.start;
+        setMentionClosedAt(mention.start);
+        return;
+      }
+      if (key.upArrow || key.downArrow) {
+        const next = key.upArrow
+          ? Math.max(0, fileSelRef.current - 1)
+          : Math.min(fileMatches.length - 1, fileSelRef.current + 1);
+        fileSelRef.current = next;
+        setFileSel(next);
+        return;
+      }
+      if ((key.tab || key.return) && mention) {
+        const chosen = fileMatches[Math.min(fileSelRef.current, fileMatches.length - 1)] as string;
+        const r = insertMention(inputRef.current, cursorRef.current, mention, chosen);
+        setBuffer(r.text, r.cursor);
+        fileSelRef.current = 0;
+        setFileSel(0);
+        return;
+      }
     }
 
     // Ctrl+T toggles the live model-reasoning view anytime (view-only; safe mid-run).
@@ -1737,6 +1807,8 @@ export function App(deps: AppDeps): ReactNode {
       setBuffer(ins.text, ins.cursor);
       goalColRef.current = undefined;
       hist.stopBrowsing();
+      fileSelRef.current = 0; // a changed @ query starts at its best match
+      setFileSel(0);
     }
   });
 
@@ -1767,8 +1839,10 @@ export function App(deps: AppDeps): ReactNode {
       SPLASH_NOTE_LINES;
   const slashMatches = matchSlash(input, customCommands.palette);
   const showSlash = input.startsWith("/") && slashMatches.length > 0 && !pending && picker === null;
+  const fileMatches = picker === null && !pending ? fileMatchesFor(input, cursor) : [];
+  const showFiles = !showSlash && fileMatches.length > 0;
   // The banner steps aside for any menu, so the menu gets the room (a squeezed menu overlaps its own rows).
-  const onSplash = !conversationStarted && picker === null && !showSlash;
+  const onSplash = !conversationStarted && picker === null && !showSlash && !showFiles;
   const elapsed = runActive && runStartRef.current ? (Date.now() - runStartRef.current) / 1000 : 0;
   // Per-PHASE clock (P1.10): reset whenever the current activity verb changes, so "Thinking · 0:12" means
   // thinking FOR 0:12, not 0:12 into the whole run (the user wanted both readouts).
@@ -1805,6 +1879,7 @@ export function App(deps: AppDeps): ReactNode {
     !runActive &&
     !planAwaitingReview &&
     !showSlash &&
+    !showFiles &&
     picker === null &&
     queued.length === 0 &&
     state.plan.length === 0;
@@ -1954,6 +2029,15 @@ export function App(deps: AppDeps): ReactNode {
                 <SlashPalette
                   commands={slashMatches}
                   selected={Math.min(slashSel, slashMatches.length - 1)}
+                  width={width}
+                />
+              </Box>
+            ) : null}
+            {showFiles ? (
+              <Box marginTop={1} flexShrink={0}>
+                <FilePicker
+                  files={fileMatches}
+                  selected={Math.min(fileSel, fileMatches.length - 1)}
                   width={width}
                 />
               </Box>
