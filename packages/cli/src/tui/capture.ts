@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { type ImageAttachment, ImageAttachmentSchema } from "@amb/protocol";
+import { linuxClipboardImage, resizeImage, windowsClipboardImage } from "./clipboard-image.js";
 
 const run = promisify(execFile);
 
@@ -53,7 +54,13 @@ export function normalizeDroppedPath(raw: string): string {
   if ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith('"') && s.endsWith('"'))) {
     s = s.slice(1, -1);
   }
-  return s.replace(/\\ /g, " ").trim();
+  // `\ ` is a POSIX shell escape; in a Windows path the backslash is the separator, so leave it alone.
+  return isWindowsPath(s) ? s.trim() : s.replace(/\\ /g, " ").trim();
+}
+
+/** A Windows drive (`C:\…`, `C:/…`) or UNC (`\\server\share`) path. */
+export function isWindowsPath(s: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(s) || s.startsWith("\\\\");
 }
 
 /** A quick, PURE gate: does this look like a single-line FILE PATH to an image? Requires a filesystem-path
@@ -63,7 +70,8 @@ export function looksLikeImagePath(raw: string): boolean {
   const s = normalizeDroppedPath(raw);
   if (s.length === 0 || s.includes("\n")) return false;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) return false; // http(s)://…, file://… — a URL, not a local path
-  if (!/^(\/|~\/|\.\.?\/)/.test(s)) return false; // must be an absolute / home / relative path (drag-drop is absolute)
+  // must be an absolute / home / relative path (drag-drop is absolute), POSIX or Windows
+  if (!/^(\/|~\/|\.\.?[\\/])/.test(s) && !isWindowsPath(s)) return false;
   const dot = s.lastIndexOf(".");
   if (dot < 0) return false;
   return Object.keys(EXT_MEDIA).includes(s.slice(dot).toLowerCase());
@@ -197,8 +205,24 @@ export async function attachImageFile(
  * caller falls back to /attach. Bounded by a 5s timeout; the temp file is always cleaned up.
  */
 export async function captureClipboardImage(): Promise<CaptureResult> {
+  if (process.platform === "win32") return captureClipboardImageWindows();
+  if (process.platform === "linux") {
+    const bytes = await linuxClipboardImage();
+    if (!bytes) {
+      return {
+        ok: false,
+        reason:
+          "no image on the clipboard (image paste needs wl-paste or xclip) — or use /attach <path>",
+      };
+    }
+    if (bytes.byteLength > MAX_ATTACH_BYTES)
+      return { ok: false, reason: "image too large (>10MB)" };
+    const media = sniffMediaType(bytes);
+    if (!media) return { ok: false, reason: "the clipboard holds an unsupported image format" };
+    return { ok: true, attachment: makeAttachment(bytes, media, "clipboard") };
+  }
   if (process.platform !== "darwin") {
-    return { ok: false, reason: "clipboard image paste needs macOS — use /attach <path>" };
+    return { ok: false, reason: "clipboard image paste isn't supported here — use /attach <path>" };
   }
   const dir = await mkdtemp(join(tmpdir(), "amb-clip-"));
   const out = join(dir, "clip.png");
@@ -251,22 +275,51 @@ export async function captureClipboardImage(): Promise<CaptureResult> {
   }
 }
 
-/** Downscale an already-captured attachment's longest edge to `maxEdge` (via `sips`), best-effort. Returns the
- *  original attachment unchanged if sips is unavailable or the image is already within bounds. */
+/** Windows clipboard: an image (e.g. a Snipping Tool screenshot) or a copied image file. */
+async function captureClipboardImageWindows(): Promise<CaptureResult> {
+  const dir = await mkdtemp(join(tmpdir(), "amb-clip-"));
+  const out = join(dir, "clip.png");
+  try {
+    const r = await windowsClipboardImage(out);
+    if (r === "ok") {
+      const bytes = new Uint8Array(await readFile(out));
+      if (bytes.byteLength > MAX_ATTACH_BYTES)
+        return { ok: false, reason: "image too large (>10MB)" };
+      return {
+        ok: true,
+        attachment: makeAttachment(bytes, sniffMediaType(bytes) ?? "image/png", "clipboard"),
+      };
+    }
+    if (r?.startsWith("file:")) return attachImageFile(r.slice(5), "clipboard");
+    return { ok: false, reason: "no image on the clipboard" };
+  } catch {
+    return { ok: false, reason: "no image on the clipboard" };
+  } finally {
+    await rm(dir, { recursive: true, force: true, maxRetries: 3 }).catch(() => {});
+  }
+}
+
+/** Downscale an already-captured attachment's longest edge to `maxEdge` (sips on macOS, .NET on Windows,
+ *  ImageMagick on Linux), best-effort. Returns the original attachment unchanged if no resizer is available
+ *  or the image is already within bounds. */
 export async function downscaleForWindow(
   att: ImageAttachment,
   maxEdge: number,
 ): Promise<ImageAttachment> {
   const longest = Math.max(att.width ?? 0, att.height ?? 0);
-  if (process.platform !== "darwin" || longest === 0 || longest <= maxEdge) return att;
+  if (longest === 0 || longest <= maxEdge) return att;
   const dir = await mkdtemp(join(tmpdir(), "amb-scale-"));
   const inPath = join(dir, `in.${att.mediaType === "image/png" ? "png" : "jpg"}`);
   const outPath = join(dir, "out.png");
   try {
     await writeFile(inPath, Buffer.from(att.dataBase64, "base64"));
-    await run("sips", ["-Z", String(maxEdge), inPath, "--out", outPath], {
-      timeout: CAPTURE_TIMEOUT_MS,
-    });
+    if (process.platform === "darwin") {
+      await run("sips", ["-Z", String(maxEdge), inPath, "--out", outPath], {
+        timeout: CAPTURE_TIMEOUT_MS,
+      });
+    } else if (!(await resizeImage(inPath, outPath, maxEdge))) {
+      return att;
+    }
     const st = await stat(outPath).catch(() => undefined);
     if (st?.isFile() && st.size > 0) {
       const bytes = new Uint8Array(await readFile(outPath));
