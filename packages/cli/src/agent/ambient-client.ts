@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   type AmbientConfig,
   type ChatRequest,
+  type FetchLike,
   fetchCatalog,
   streamChatCompletion,
 } from "@amb/ambient-api";
@@ -10,15 +11,44 @@ import type { ChatClient, ChatParams, Msg, ToolCall, TurnCompletion } from "@amb
 
 /** The real Ambient adapter: implements the runtime's ChatClient over @amb/ambient-api. Ambient-only. */
 export class AmbientChatClient implements ChatClient {
-  constructor(private config: AmbientConfig) {}
+  private cached: { at: number; models: CatalogModel[] } | undefined;
+  private readonly ttlMs: number;
+  private readonly doFetch: FetchLike | undefined;
+
+  /**
+   * The catalog is reused for a short while (default 30s) so every message doesn't re-download the fleet;
+   * failover and model switches ask for a fresh copy. A failed refresh falls back to the last good catalog.
+   */
+  constructor(
+    private config: AmbientConfig,
+    opts: { fetch?: FetchLike; ttlMs?: number } = {},
+  ) {
+    this.ttlMs = opts.ttlMs ?? 30_000;
+    this.doFetch = opts.fetch;
+  }
 
   /** Switch to a new API key for every later request (the in-app /login flow). */
   setApiKey(apiKey: string): void {
     this.config = { ...this.config, apiKey };
   }
 
-  fetchCatalog(signal?: AbortSignal): Promise<CatalogModel[]> {
-    return fetchCatalog(this.config, signal ? { signal } : {});
+  async fetchCatalog(
+    signal?: AbortSignal,
+    opts: { fresh?: boolean } = {},
+  ): Promise<CatalogModel[]> {
+    const c = this.cached;
+    if (!opts.fresh && c && Date.now() - c.at < this.ttlMs) return c.models;
+    try {
+      const models = await fetchCatalog(this.config, {
+        ...(signal ? { signal } : {}),
+        ...(this.doFetch ? { fetch: this.doFetch } : {}),
+      });
+      this.cached = { at: Date.now(), models };
+      return models;
+    } catch (e) {
+      if (c && !signal?.aborted) return c.models; // keep working on the last good fleet
+      throw e;
+    }
   }
 
   async chat(params: ChatParams): Promise<TurnCompletion> {

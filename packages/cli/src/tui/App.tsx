@@ -86,6 +86,7 @@ import {
   moveRight,
   moveUp,
 } from "./editor.js";
+import { fleetChanges } from "./fleet-diff.js";
 import {
   type AgentMode,
   EFFORTS,
@@ -148,6 +149,8 @@ export interface AppDeps {
   skills?: SkillRow[];
   /** Account effects for the in-app key flow (/login, /logout, a rejected or revoked key). */
   account?: AccountPort;
+  /** Fetch the fleet as it is right now (keeps the model list live while the TUI is open). */
+  refreshFleet?: () => Promise<FleetRow[] | undefined>;
   /** Pin/unpin a skill from the browser — writes the pin list at the edge; returns the new pinned state. */
   onTogglePin?: (name: string) => boolean;
 }
@@ -236,7 +239,25 @@ export function App(deps: AppDeps): ReactNode {
   const [question, setQuestion] = useState<QuestionState | null>(null);
   // Images pending on the NEXT message (Ctrl+V / drag-drop / /attach). Ref mirror for synchronous key handling.
   const [attachments, setAttachmentsState] = useState<ImageAttachment[]>([]);
-  const [fleet] = useState(deps.fleet);
+  const [fleet, setFleet] = useState(deps.fleet);
+  const fleetRef = useRef(deps.fleet);
+  // Keep the model list live: refresh in the background while idle (and whenever the picker opens), and say
+  // when models join or leave the fleet — the catalog changes without the CLI needing an update.
+  const refreshFleet = useCallback(async () => {
+    const next = await deps.refreshFleet?.().catch(() => undefined);
+    if (!next) return;
+    for (const text of fleetChanges(fleetRef.current ?? [], next)) {
+      dispatch({ t: "notice", level: "info", text });
+    }
+    fleetRef.current = next;
+    setFleet(next);
+  }, [deps]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!busyRef.current) void refreshFleet();
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, [refreshFleet]);
   // The picker lists EVERY model, ready ones first. The catalog's readiness flag is a hint (flagged models
   // have been seen serving), so a flagged one stays selectable and is marked; a truly down one fails over.
   const pickerFleet = useMemo(() => {
@@ -860,6 +881,7 @@ export function App(deps: AppDeps): ReactNode {
   };
 
   const openModelPicker = (): void => {
+    void refreshFleet(); // the list updates in place if the fleet changed
     const list = pickerFleet;
     // No LIVE models (fleet fetch failed, or every model is cold) → don't open an empty no-op box; point at
     // the manual path (a cold model can still be chosen by id — the runtime substitutes a warm one).

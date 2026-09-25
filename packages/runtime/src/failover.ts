@@ -272,7 +272,7 @@ export async function runChatWithFailover(
       // Fail over to a warm model, never one we've already failed on this turn.
       failed.add(current);
       try {
-        live = await deps.client.fetchCatalog(ctx.signal);
+        live = await deps.client.fetchCatalog(ctx.signal, { fresh: true });
       } catch (fe) {
         // A cancelled failover catalog refresh is a cancellation, not an error.
         if (ctx.signal.aborted || isAbortError(fe))

@@ -517,7 +517,7 @@ export class Agent {
       const switchTo = opts.nextModel?.();
       if (switchTo && switchTo !== target) {
         try {
-          liveCatalog = await this.client.fetchCatalog(opts.signal); // the fleet may have changed since launch
+          liveCatalog = await this.client.fetchCatalog(opts.signal, { fresh: true }); // as it is right now
         } catch {
           // keep the catalog we have
         }

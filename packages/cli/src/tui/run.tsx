@@ -226,6 +226,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       skills: skillRows,
       onTogglePin,
       account,
+      refreshFleet: async () => {
+        const models = await client.fetchCatalog(undefined, { fresh: true });
+        return formatFleetRows(models, laneResolver());
+      },
     }),
     { exitOnCtrlC: false },
   );

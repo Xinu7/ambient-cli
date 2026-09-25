@@ -129,8 +129,9 @@ export interface ChatParams {
  * scripted mock (a replay-harness pattern) so the whole agent loop runs offline + deterministic.
  */
 export interface ChatClient {
-  /** Fetch the live catalog. Accepts an abort signal so a hung fetch can be cancelled. */
-  fetchCatalog(signal?: AbortSignal): Promise<CatalogModel[]>;
+  /** Fetch the live catalog. Accepts an abort signal so a hung fetch can be cancelled. `fresh` bypasses any
+   *  short-lived cache (failover and model switches need the fleet as it is right now). */
+  fetchCatalog(signal?: AbortSignal, opts?: { fresh?: boolean }): Promise<CatalogModel[]>;
   chat(params: ChatParams): Promise<TurnCompletion>;
 }
 
