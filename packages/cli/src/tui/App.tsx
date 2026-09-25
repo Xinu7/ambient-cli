@@ -1520,8 +1520,12 @@ export function App(deps: AppDeps): ReactNode {
           });
         } else {
           setBuffer("");
+          // Read the command file again now: what runs must be what's on disk and trusted today, not the copy
+          // loaded when the session started (a branch checkout can change it in between).
+          const current =
+            discoverCommands(deps.workspaceRoot).find((c) => `/${c.name}` === command.name) ?? body;
           void runTaskRef.current?.(
-            expandSlashCommand(body, splitArgs(arg), {
+            expandSlashCommand(current, splitArgs(arg), {
               workspaceRoot: deps.workspaceRoot,
               home: homedir(),
               ...(deps.settings?.rules() ? { rules: deps.settings.rules() } : {}),

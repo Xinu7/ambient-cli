@@ -10,6 +10,7 @@ import {
   discoverRuleLists,
   hooksFingerprint,
   loadMcpConfig,
+  projectEnabledPlugins,
   projectShellCommands,
 } from "@amb/context";
 import { type PermissionRules, parseRules } from "@amb/permissions";
@@ -47,17 +48,19 @@ function readTrust(file: string): Record<string, string> {
   }
 }
 
-/** What identifies a project MCP server for trust: what it runs or where it connects (not secret values). */
+/** What identifies a project MCP server for trust: its entry exactly as written — command, arguments, URL,
+ *  and every environment and header template — so any change to it needs trusting again. */
 function mcpIdentity(s: McpServerSpec): unknown[] {
-  return [
-    s.name,
-    s.transport,
-    s.command ?? "",
-    s.args ?? [],
-    s.url ?? "",
-    Object.keys(s.env ?? {}).sort(),
-    Object.keys(s.headers ?? {}).sort(),
-  ];
+  return [s.name, s.raw ?? [s.transport, s.command ?? "", s.args ?? [], s.url ?? ""]];
+}
+
+/** Text from a project file, shown for review: control characters (which could hide or rewrite what's on
+ *  screen) made visible instead of interpreted. */
+export function visible(text: string): string {
+  return text.replace(
+    /[\u0000-\u001f\u007f-\u009f]/g,
+    (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`,
+  );
 }
 
 /** Trust is granted to exactly this configuration: the project's hooks, allow rules and MCP servers. */
@@ -66,9 +69,12 @@ export function projectFingerprint(
   allow: readonly string[],
   mcp: readonly McpServerSpec[] = [],
   commands: ReadonlyArray<{ name: string; lines: string[]; allowedTools: string[] }> = [],
+  plugins: Record<string, unknown> = {},
 ): string {
   return createHash("sha256")
-    .update(JSON.stringify([hooksFingerprint(hooks), allow, mcp.map(mcpIdentity), commands]))
+    .update(
+      JSON.stringify([hooksFingerprint(hooks), allow, mcp.map(mcpIdentity), commands, plugins]),
+    )
     .digest("hex")
     .slice(0, 32);
 }
@@ -108,6 +114,7 @@ interface Snapshot {
   projectAllow: string[];
   projectMcp: McpServerSpec[];
   projectCommands: Array<{ name: string; lines: string[]; allowedTools: string[] }>;
+  projectPlugins: Record<string, unknown>;
   trusted: boolean;
 }
 
@@ -156,13 +163,26 @@ export function makeWorkspaceSettings(opts: {
       (m) => m.source === "project",
     );
     const projectCommands = projectShellCommands(opts.workspaceRoot, home);
+    const projectPlugins = projectEnabledPlugins(opts.workspaceRoot);
     const trusted =
       (hooks.project.length > 0 ||
         lists.project.allow.length > 0 ||
         projectMcp.length > 0 ||
-        projectCommands.length > 0) &&
+        projectCommands.length > 0 ||
+        Object.keys(projectPlugins).length > 0) &&
       readTrust(opts.trustFile)[opts.workspaceRoot] ===
-        projectFingerprint(hooks.project, lists.project.allow, projectMcp, projectCommands);
+        projectFingerprint(
+          hooks.project,
+          lists.project.allow,
+          projectMcp,
+          projectCommands,
+          projectPlugins,
+        );
+    // Plugin hooks only count the project's own plugin choices once the project is trusted.
+    const pluginHooks =
+      claude && trusted
+        ? discoverHooks({ workspaceRoot: opts.workspaceRoot, home, projectPlugins: true }).plugins
+        : hooks.plugins;
     const ruleSources = [
       { label: "ambient config", lists: ambient, allowApplies: true },
       { label: "this project (.claude/settings)", lists: lists.project, allowApplies: trusted },
@@ -173,7 +193,7 @@ export function makeWorkspaceSettings(opts: {
       activeHooks: [
         ...hooks.ambient,
         ...(trusted ? hooks.project : []),
-        ...(claude ? [...hooks.claudeUser, ...hooks.plugins] : []),
+        ...(claude ? [...hooks.claudeUser, ...pluginHooks] : []),
       ],
       waitingHooks: trusted ? [] : hooks.project,
       offHooks: claude ? 0 : hooks.claudeUser.length + hooks.plugins.length,
@@ -189,6 +209,7 @@ export function makeWorkspaceSettings(opts: {
       projectAllow: lists.project.allow,
       projectMcp,
       projectCommands,
+      projectPlugins,
       trusted,
     };
   };
@@ -281,7 +302,8 @@ export function makeWorkspaceSettings(opts: {
         : s.projectHooks.length +
             s.projectAllow.length +
             s.projectMcp.length +
-            s.projectCommands.length;
+            s.projectCommands.length +
+            Object.keys(s.projectPlugins).length;
     },
     projectTrusted: () => snapshot().trusted,
     trustSummary() {
@@ -290,7 +312,8 @@ export function makeWorkspaceSettings(opts: {
         s.projectHooks.length +
         s.projectAllow.length +
         s.projectMcp.length +
-        s.projectCommands.length;
+        s.projectCommands.length +
+        Object.keys(s.projectPlugins).length;
       if (total === 0)
         return ["This project has no hooks, rules, MCP servers or shell commands of its own."];
       const lines: string[] = [
@@ -298,26 +321,37 @@ export function makeWorkspaceSettings(opts: {
           ? "This project's settings are trusted:"
           : "This project's own settings (off until you trust them):",
       ];
+      // Everything is shown in full (nothing cut short), with control characters made visible, so what you
+      // trust is exactly what you read.
       if (s.projectHooks.length > 0) {
         lines.push(" Hooks (commands that run on your machine):");
-        for (const h of s.projectHooks) lines.push(describeHook(h));
+        for (const h of s.projectHooks) {
+          const on = h.matcher && h.matcher !== "*" ? `${h.event}(${visible(h.matcher)})` : h.event;
+          lines.push(`  ${on} → ${visible(h.command)}`);
+        }
       }
       if (s.projectAllow.length > 0) {
         lines.push(" Allow rules (calls that run without asking):");
-        for (const r of s.projectAllow) lines.push(`  ${r}`);
+        for (const r of s.projectAllow) lines.push(`  ${visible(r)}`);
       }
       if (s.projectMcp.length > 0) {
-        lines.push(" MCP servers:");
-        for (const m of s.projectMcp) {
-          const what = m.command ? [m.command, ...(m.args ?? [])].join(" ") : (m.url ?? "");
-          lines.push(`  ${m.name} → ${what.length > 70 ? `${what.slice(0, 69)}…` : what}`);
-        }
+        lines.push(" MCP servers (as configured):");
+        for (const m of s.projectMcp)
+          lines.push(`  ${m.name} → ${visible(JSON.stringify(m.raw ?? {}))}`);
+      }
+      const pluginChoices = Object.entries(s.projectPlugins);
+      if (pluginChoices.length > 0) {
+        lines.push(" Claude Code plugins it turns on or off:");
+        for (const [id, on] of pluginChoices)
+          lines.push(`  ${visible(id)}: ${on === true ? "on" : "off"}`);
       }
       if (s.projectCommands.length > 0) {
         lines.push(" Commands that run shell lines when you use them:");
         for (const c of s.projectCommands) {
-          const what = c.lines.join(" · ");
-          lines.push(`  /${c.name} → ${what.length > 70 ? `${what.slice(0, 69)}…` : what}`);
+          const allowed =
+            c.allowedTools.length > 0 ? ` (allows ${visible(c.allowedTools.join(", "))})` : "";
+          lines.push(`  /${c.name}${allowed}:`);
+          for (const l of c.lines) lines.push(`    ${visible(l)}`);
         }
       }
       if (!s.trusted) {
@@ -334,14 +368,21 @@ export function makeWorkspaceSettings(opts: {
       const allow = s.projectAllow.length;
       const mcp = s.projectMcp.length;
       const cmds = s.projectCommands.length;
-      if (hooks + allow + mcp + cmds === 0)
+      const plugins = Object.keys(s.projectPlugins).length;
+      if (hooks + allow + mcp + cmds + plugins === 0)
         return "This project has no hooks, rules, MCP servers or shell commands to trust.";
       if (s.trusted) return "This project's settings are already trusted.";
       try {
         saveTrust(
           opts.trustFile,
           opts.workspaceRoot,
-          projectFingerprint(s.projectHooks, s.projectAllow, s.projectMcp, s.projectCommands),
+          projectFingerprint(
+            s.projectHooks,
+            s.projectAllow,
+            s.projectMcp,
+            s.projectCommands,
+            s.projectPlugins,
+          ),
         );
       } catch (e) {
         return `Couldn't save the trust setting: ${(e as Error).message}`;
@@ -351,6 +392,7 @@ export function makeWorkspaceSettings(opts: {
         ...(allow > 0 ? [plural(allow, "allow rule")] : []),
         ...(mcp > 0 ? [plural(mcp, "MCP server")] : []),
         ...(cmds > 0 ? [plural(cmds, "shell command")] : []),
+        ...(plugins > 0 ? [plural(plugins, "plugin setting")] : []),
       ];
       const list =
         parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];

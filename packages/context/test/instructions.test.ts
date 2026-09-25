@@ -143,3 +143,24 @@ describe("Claude Code instruction files", () => {
     }
   });
 });
+
+describe("imports from a project with no repository", () => {
+  it("stay inside the working folder — never home, never the filesystem root", async () => {
+    const plain = await mkdtemp(join(tmpdir(), "amb-nogit-"));
+    const home = await mkdtemp(join(tmpdir(), "amb-nogit-home-"));
+    try {
+      writeFileSync(join(home, "secret.md"), "HOME-SECRET");
+      writeFileSync(join(plain, "notes.md"), "PLAIN-NOTES");
+      writeFileSync(
+        join(plain, "AGENTS.md"),
+        `See @notes.md and @~/secret.md and @${join(home, "secret.md")} and @../${home.split(/[\\/]/).at(-1)}/secret.md`,
+      );
+      const out = loadInstructions(plain, undefined, { home });
+      expect(out.text).toContain("PLAIN-NOTES");
+      expect(out.text).not.toContain("HOME-SECRET");
+    } finally {
+      await rm(plain, { recursive: true, force: true });
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});

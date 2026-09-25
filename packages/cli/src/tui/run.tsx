@@ -181,6 +181,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     connect: {
       // A project's own servers connect once the project's settings are trusted (/trust).
       approveServer: async () => settings.projectTrusted(),
+      projectPlugins: settings.projectTrusted(),
       plugins: opts.settingsConfig?.claudeSettings === true,
     },
   });

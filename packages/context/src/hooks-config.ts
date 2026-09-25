@@ -106,6 +106,8 @@ export function discoverHooks(opts: {
   home?: string;
   /** The `hooks` block from ambient's config, if any. */
   ambientSettings?: unknown;
+  /** Whether the project's own settings may turn plugins on or off (only once it's trusted). */
+  projectPlugins?: boolean;
 }): DiscoveredHooks {
   const home = opts.home ?? homedir();
   const projectDir = join(opts.workspaceRoot, ".claude");
@@ -120,7 +122,9 @@ export function discoverHooks(opts: {
     ambient: parseHooks(opts.ambientSettings, "ambient"),
     project: sameAsUser ? [] : project,
     claudeUser: parseHooks(readJsonFile(join(userDir, "settings.json"), userDir), "claude-user"),
-    plugins: installedPlugins(opts.workspaceRoot, home).flatMap((p) =>
+    plugins: installedPlugins(opts.workspaceRoot, home, {
+      projectSettings: opts.projectPlugins === true,
+    }).flatMap((p) =>
       parseHooks(readJsonFile(join(p.root, "hooks", "hooks.json"), p.root), "plugin", p.root),
     ),
   };

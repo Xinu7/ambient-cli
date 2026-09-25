@@ -20,6 +20,8 @@ export interface McpServerSpec {
   headers?: Record<string, string>;
   /** Environment variables the entry refers to that aren't set — the server can't work until they are. */
   missingEnv?: string[];
+  /** The entry exactly as written (before `${VAR}` expansion) — what trusting a project server covers. */
+  raw?: unknown;
   /** project = a workspace file (higher trust surface — the CLI gates these before spawning); plugin = an
    *  enabled Claude Code plugin's `.mcp.json`. */
   source: McpSource;
@@ -206,6 +208,8 @@ function pluginServerName(plugin: string, server: string): string {
 export interface McpConfigOptions {
   /** Include the servers of enabled Claude Code plugins. */
   plugins?: boolean;
+  /** Whether the project's own settings may turn plugins on or off (only once it's trusted). */
+  projectPlugins?: boolean;
 }
 
 /**
@@ -254,7 +258,9 @@ export function loadMcpConfig(
       root: home,
     },
     ...(opts.plugins
-      ? installedPlugins(workspaceRoot, home).map((p) => ({
+      ? installedPlugins(workspaceRoot, home, {
+          projectSettings: opts.projectPlugins === true,
+        }).map((p) => ({
           path: join(p.root, ".mcp.json"),
           read: readJsonServers,
           source: "plugin" as const,
@@ -275,7 +281,7 @@ export function loadMcpConfig(
       // `docs:{enabled:false}` must suppress a lower-precedence global `docs` server.
       claimed.add(name);
       const spec = toSpec(name, raw, src.source, srcEnv);
-      if (spec) byName.set(name, spec);
+      if (spec) byName.set(name, { ...spec, raw });
     }
   }
   return [...byName.values()];

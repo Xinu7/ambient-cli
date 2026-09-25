@@ -33,6 +33,12 @@ function isRepoRoot(dir: string): boolean {
   return existsSync(join(dir, ".git"));
 }
 
+/** Whether `dir` is `other` or one of its ancestors. */
+function isWithinOrEqual(dir: string, other: string): boolean {
+  const rel = relative(dir, other);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
 /** Directories from cwd up to (and including) the repo root, or the filesystem root if none. */
 export function ancestorDirs(cwd: string): string[] {
   const dirs: string[] = [];
@@ -98,7 +104,10 @@ function withImports(
 ): string {
   if (depth >= MAX_IMPORT_DEPTH) return text;
   const parts = [text];
+  // A project's files import from the project; `~/` is only for the user's own files.
+  const fromHome = root === home;
   for (const ref of importRefs(text)) {
+    if (ref.startsWith("~/") && !fromHome) continue;
     const target = ref.startsWith("~/") ? join(home, ref.slice(2)) : resolve(dirname(file), ref);
     const rel = relative(root, target);
     if (rel.startsWith("..") || isAbsolute(rel) || seen.has(target)) continue;
@@ -170,7 +179,11 @@ export function loadInstructions(
   // other loader uses (fs-safe): an instruction file is repo-committable and flows into the SYSTEM prompt, so a
   // committed symlink `CLAUDE.md -> ~/.ssh/id_rsa` must NOT be followed (secret exfil).
   const dirs = ancestorDirs(cwd);
-  const repoRoot = dirs.at(-1) ?? cwd;
+  const top = dirs.at(-1) ?? cwd;
+  // Imports stay inside the project: the repository when there is one — but never the home folder or above
+  // it (no `.git` anywhere walks up to `/`; a home folder can itself be a repo), where the working folder is
+  // the limit instead.
+  const repoRoot = isRepoRoot(top) && !isWithinOrEqual(top, home) ? top : cwd;
   const projectRead: Reader = (p) => readTextCappedSafe(p, { root: repoRoot });
   const project: Array<{ text: string; path: string }> = [];
   for (const dir of dirs) {

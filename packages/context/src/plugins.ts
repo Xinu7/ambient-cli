@@ -33,19 +33,50 @@ function readJson(file: string, root: string): unknown {
   }
 }
 
-/** The merged `enabledPlugins` map: user settings, then the project's shared and local settings. */
+export interface PluginOptions {
+  /** Let the project's own settings turn plugins on or off. False where a plugin's hooks or MCP servers
+   *  would run and the project isn't trusted: a clone mustn't switch on a plugin you left off, or switch off a
+   *  guard you rely on. */
+  projectSettings?: boolean;
+}
+
+/** The project's own `enabledPlugins` entries (shared, then local) — part of what trusting a project covers. */
+export function projectEnabledPlugins(workspaceRoot: string): Record<string, unknown> {
+  const dir = join(workspaceRoot, ".claude");
+  const out: Record<string, unknown> = {};
+  for (const name of ["settings.json", "settings.local.json"]) {
+    const data = readJson(join(dir, name), dir) as
+      | { enabledPlugins?: Record<string, unknown> }
+      | undefined;
+    Object.assign(out, data?.enabledPlugins ?? {});
+  }
+  return out;
+}
+
+/** The merged `enabledPlugins` map: user settings, then (unless told not to) the project's shared and local
+ *  settings. */
 export function enabledPluginIds(
   workspaceRoot: string,
   home: string = homedir(),
+  opts: PluginOptions = {},
 ): Map<string, boolean> {
   const out = new Map<string, boolean>();
+  const project =
+    opts.projectSettings !== false && join(workspaceRoot, ".claude") !== join(home, ".claude");
   const files: Array<{ file: string; root: string }> = [
     { file: join(home, ".claude", "settings.json"), root: join(home, ".claude") },
-    { file: join(workspaceRoot, ".claude", "settings.json"), root: join(workspaceRoot, ".claude") },
-    {
-      file: join(workspaceRoot, ".claude", "settings.local.json"),
-      root: join(workspaceRoot, ".claude"),
-    },
+    ...(project
+      ? [
+          {
+            file: join(workspaceRoot, ".claude", "settings.json"),
+            root: join(workspaceRoot, ".claude"),
+          },
+          {
+            file: join(workspaceRoot, ".claude", "settings.local.json"),
+            root: join(workspaceRoot, ".claude"),
+          },
+        ]
+      : []),
   ];
   for (const { file, root } of files) {
     const data = readJson(file, root) as { enabledPlugins?: Record<string, unknown> } | undefined;
@@ -58,13 +89,14 @@ export function enabledPluginIds(
 export function installedPlugins(
   workspaceRoot: string,
   home: string = homedir(),
+  opts: PluginOptions = {},
 ): InstalledPlugin[] {
   const base = join(home, ".claude", "plugins");
   const data = readJson(join(base, "installed_plugins.json"), base) as
     | { plugins?: Record<string, InstallEntry[] | InstallEntry> }
     | undefined;
   if (!data?.plugins) return [];
-  const enabled = enabledPluginIds(workspaceRoot, home);
+  const enabled = enabledPluginIds(workspaceRoot, home, opts);
   const out: InstalledPlugin[] = [];
   for (const [id, raw] of Object.entries(data.plugins)) {
     if (enabled.get(id) !== true) continue;
