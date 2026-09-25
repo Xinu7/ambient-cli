@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@amb/protocol": "workspace:*",
+    "@amb/tools-core": "workspace:*",
     "cross-spawn": "^7.0.6",
     "zod": "^4.4.3"
   },

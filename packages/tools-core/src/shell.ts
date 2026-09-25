@@ -101,14 +101,67 @@ export function isPosixShell(shell: ShellInfo): boolean {
   return shell.kind === "bash" || shell.kind === "sh";
 }
 
-/** Kill a process and everything it started: the process group on POSIX, `taskkill /T` on Windows. */
+/**
+ * Parse Git Bash's `ps` table and return the Windows pids of every process in the same Git Bash process group
+ * as the process whose Windows pid is `winpid` (background jobs of a non-interactive bash share its group).
+ */
+export function msysGroupWinPids(psOutput: string, winpid: number): number[] {
+  const lines = psOutput.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  const header = (lines[0] ?? "").trim().split(/\s+/);
+  const iPgid = header.indexOf("PGID");
+  const iWin = header.indexOf("WINPID");
+  if (iPgid < 0 || iWin < 0) return [];
+  // Rows may start with a one-letter status column (S/I) that has no header; drop it so columns line up.
+  const rows = lines.slice(1).map((l) =>
+    l
+      .trim()
+      .replace(/^[A-Z]\s+(?=\d)/, "")
+      .split(/\s+/),
+  );
+  const self = rows.find((r) => Number(r[iWin]) === winpid);
+  if (!self) return [];
+  const pgid = self[iPgid];
+  return rows
+    .filter((r) => r[iPgid] === pgid)
+    .map((r) => Number(r[iWin]))
+    .filter((n) => Number.isInteger(n) && n > 0);
+}
+
+/** Git's `ps.exe` next to the Git Bash in use, if any. */
+function gitPs(): string | undefined {
+  const sh = machineShell();
+  if (sh.kind !== "bash" || !/[\\/]usr[\\/]bin[\\/]/i.test(sh.path)) return undefined;
+  const ps = path.win32.join(path.win32.dirname(sh.path), "ps.exe");
+  return existsSync(ps) ? ps : undefined;
+}
+
+/**
+ * Kill a process and everything it started: the process group on POSIX; on Windows `taskkill /T` plus, for
+ * Git Bash, every process in the command's Git Bash process group — its background jobs are re-parented in a
+ * way Windows' own process tree doesn't track, and would otherwise survive holding the output pipe.
+ */
 export function killProcessTree(pid: number, platform: NodeJS.Platform = process.platform): void {
   try {
     if (platform === "win32") {
+      const ps = gitPs();
+      const group = ps
+        ? msysGroupWinPids(
+            spawnSync(ps, ["-a"], { encoding: "utf8", windowsHide: true, timeout: 5_000 }).stdout ??
+              "",
+            pid,
+          )
+        : [];
       spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
         stdio: "ignore",
         windowsHide: true,
       });
+      const rest = group.filter((p) => p !== pid);
+      if (rest.length > 0) {
+        spawnSync("taskkill", [...rest.flatMap((p) => ["/pid", String(p)]), "/F"], {
+          stdio: "ignore",
+          windowsHide: true,
+        });
+      }
     } else {
       process.kill(-pid, "SIGKILL"); // negative pid = the whole group (the child is its own group leader)
     }

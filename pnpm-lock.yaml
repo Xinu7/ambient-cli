@@ -138,6 +138,9 @@ importers:
       '@amb/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@amb/tools-core':
+        specifier: workspace:*
+        version: link:../tools-core
       cross-spawn:
         specifier: ^7.0.6
         version: 7.0.6

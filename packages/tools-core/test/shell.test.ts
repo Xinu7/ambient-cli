@@ -71,3 +71,17 @@ describe("cleanTerminalOutput", () => {
     expect(cleanTerminalOutput("\x1b[32mPASS\x1b[0m ok")).toBe("PASS ok");
   });
 });
+
+describe("msysGroupWinPids (Git Bash background jobs on Windows)", () => {
+  it("finds every Windows pid in the command's Git Bash process group", async () => {
+    const { msysGroupWinPids } = await import("../src/shell.js");
+    const ps = [
+      "      PID    PPID    PGID     WINPID   TTY         UID    STIME COMMAND",
+      "     1872       1    1872      10688  ?         197609 19:04:43 /usr/bin/bash",
+      "     1905    1872    1872       7710  ?         197609 19:04:43 /usr/bin/sleep",
+      "     2001       1    2001       9900  ?         197609 19:04:44 /usr/bin/other",
+    ].join("\n");
+    expect(msysGroupWinPids(ps, 10688).sort()).toEqual([10688, 7710].sort());
+    expect(msysGroupWinPids(ps, 4242)).toEqual([]);
+  });
+});

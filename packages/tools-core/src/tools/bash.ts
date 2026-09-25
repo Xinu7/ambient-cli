@@ -57,10 +57,34 @@ export const bashTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
       const errCap = new BoundedCapture(MAX_OUTPUT);
       let timedOut = false;
 
+      let killed = false;
+      let settled = false;
       const killTree = () => {
+        killed = true;
         if (typeof child.pid === "number") killProcessTree(child.pid);
         else child.kill("SIGKILL");
       };
+      const finish = (code: number | null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        ctx.signal.removeEventListener("abort", onAbort);
+        child.stdout.destroy();
+        child.stderr.destroy();
+        resolve({
+          command: input.command,
+          exitCode: code,
+          stdout: cleanTerminalOutput(outCap.text()),
+          stderr: cleanTerminalOutput(errCap.text()),
+          truncated: outCap.truncated || errCap.truncated,
+          timedOut,
+        });
+      };
+      // After a kill, don't wait forever for the output pipes: a stray process that escaped the kill could
+      // hold them open. Once the shell itself has exited, give output a moment to drain, then return.
+      child.on("exit", (code) => {
+        if (killed) setTimeout(() => finish(code), 750);
+      });
 
       const timer = setTimeout(() => {
         timedOut = true;
@@ -81,18 +105,7 @@ export const bashTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
         ctx.signal.removeEventListener("abort", onAbort);
         reject(err);
       });
-      child.on("close", (code) => {
-        clearTimeout(timer);
-        ctx.signal.removeEventListener("abort", onAbort);
-        resolve({
-          command: input.command,
-          exitCode: code,
-          stdout: cleanTerminalOutput(outCap.text()),
-          stderr: cleanTerminalOutput(errCap.text()),
-          truncated: outCap.truncated || errCap.truncated,
-          timedOut,
-        });
-      });
+      child.on("close", (code) => finish(code));
     });
   },
 };

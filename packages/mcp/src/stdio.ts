@@ -1,4 +1,5 @@
-import { type ChildProcess, spawnSync } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import { killProcessTree } from "@amb/tools-core";
 import crossSpawn from "cross-spawn";
 import { LineFramer, type Transport } from "./jsonrpc.js";
 
@@ -74,21 +75,9 @@ export function spawnStdioTransport(cfg: StdioServerConfig): {
       // Kill the whole process GROUP (negative pid) so wrapper-launched grandchildren die too — then destroy
       // our ends of the pipes so no stream ref keeps the event loop alive. Runs even if `exit` already fired,
       // to reap any group member that outlived the leader. Best-effort: ESRCH (already gone) is fine.
-      try {
-        if (typeof child.pid !== "number") child.kill("SIGKILL");
-        else if (process.platform === "win32")
-          spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-            stdio: "ignore",
-            windowsHide: true,
-          });
-        else process.kill(-child.pid, "SIGKILL");
-      } catch {
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          /* already gone */
-        }
-      }
+      // The whole tree (Windows: including Git Bash background jobs), so no orphan keeps our pipes open.
+      if (typeof child.pid === "number") killProcessTree(child.pid);
+      else child.kill("SIGKILL");
       child.stdout?.destroy();
       child.stderr?.destroy();
       child.stdin?.destroy();
