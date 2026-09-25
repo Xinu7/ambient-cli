@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { IMAGE_EDGE_HIGH, discoverCommands, expandCommand } from "@amb/context";
+import { IMAGE_EDGE_HIGH, discoverAgents, discoverCommands, expandCommand } from "@amb/context";
 import {
   type AskRequest,
   type AskResponse,
@@ -822,6 +822,7 @@ export function App(deps: AppDeps): ReactNode {
         const registry = buildRegistry({
           ...(mcpTools && mcpTools.length > 0 ? { mcpTools } : {}),
           subagent: makeSubagentTool({
+            presets: discoverAgents(deps.workspaceRoot),
             client: deps.client,
             workspace: opts.workspace,
             approve,

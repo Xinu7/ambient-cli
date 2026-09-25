@@ -11,3 +11,4 @@ export * from "./mcp-config.js";
 export * from "./fs-safe.js";
 export * from "./repo-map.js";
 export * from "./images.js";
+export * from "./frontmatter.js";

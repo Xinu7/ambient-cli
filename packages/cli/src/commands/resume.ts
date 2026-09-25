@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { resolveConfig } from "@amb/ambient-api";
-import { readTextCappedSafe } from "@amb/context";
+import { discoverAgents, readTextCappedSafe } from "@amb/context";
 import { AmbError, type Mode, type NewEvent, newSessionId } from "@amb/protocol";
 import { AUTO_MODEL } from "@amb/reliability";
 import { Agent, type RunOptions } from "@amb/runtime";
@@ -279,6 +279,7 @@ export async function runResume(args: string[]): Promise<void> {
     const registry = buildRegistry({
       mcpTools: mcp.tools,
       subagent: makeSubagentTool({
+        presets: discoverAgents(opts.workspaceRoot),
         client,
         workspace: opts.workspace,
         approve: opts.approve,

@@ -1,5 +1,5 @@
 import { resolveConfig } from "@amb/ambient-api";
-import { IMAGE_EDGE_HIGH } from "@amb/context";
+import { IMAGE_EDGE_HIGH, discoverAgents } from "@amb/context";
 import {
   AmbError,
   type ImageAttachment,
@@ -283,6 +283,7 @@ export async function runAgent(args: string[]): Promise<void> {
     const registry = buildRegistry({
       mcpTools: mcp.tools,
       subagent: makeSubagentTool({
+        presets: discoverAgents(opts.workspaceRoot),
         client,
         workspace: opts.workspace,
         approve: opts.approve,

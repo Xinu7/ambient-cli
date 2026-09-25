@@ -113,3 +113,22 @@ export function isRealFile(path: string): boolean {
     return false;
   }
 }
+
+/**
+ * Read a Markdown file from the user's OWN config folder (e.g. `~/.claude/agents`), following a symlink the
+ * user made (agents and skills are often linked in from a repo). Only a regular `.md` target is followed;
+ * project folders keep using `readTextCappedSafe`, which never follows links (a cloned repo can't plant one).
+ */
+export function readUserMarkdown(path: string, opts: { maxBytes?: number } = {}): string | null {
+  let target: string;
+  try {
+    target = realpathSync(path);
+  } catch {
+    return null;
+  }
+  if (!target.toLowerCase().endsWith(".md")) return null;
+  return readTextCappedSafe(target, {
+    ...(opts.maxBytes ? { maxBytes: opts.maxBytes } : {}),
+    root: dirname(target),
+  });
+}

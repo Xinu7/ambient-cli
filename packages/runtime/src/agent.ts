@@ -359,7 +359,17 @@ export class Agent {
     // the tool cost so the anchor leaves headroom for the tools/assisted schemas that ride alongside it.
     // Rebuildable so a downward failover / learned-lower ceiling can RE-FIT it to the smaller served window
     // — the blocks are captured, so a rebuild is a cheap re-fit (no fs re-read).
-    const injectedBlocks = [baseInstructions, memoryBlock, repoMapBlock, skillsBlock, resumeBlock];
+    const runInstructions = opts.instructions?.trim()
+      ? `## Instructions for this task\n${opts.instructions.trim()}`
+      : "";
+    const injectedBlocks = [
+      runInstructions,
+      baseInstructions,
+      memoryBlock,
+      repoMapBlock,
+      skillsBlock,
+      resumeBlock,
+    ];
     const buildBaseAnchor = (window: number): string => {
       const budget = Math.max(0, Math.floor(window * INJECTED_CONTEXT_FRACTION) - toolTokens);
       const combined = fitInjectedBlocks(injectedBlocks, budget).filter(Boolean).join("\n\n");

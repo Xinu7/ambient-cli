@@ -50,5 +50,5 @@ Third-party runtime dependencies
 ================================================================================
 
 At runtime this software depends only on ordinary open-source libraries (React,
-Ink, Zod, undici, string-width, smol-toml, and their transitive dependencies), each under its own
+Ink, Zod, undici, string-width, smol-toml, yaml, and their transitive dependencies), each under its own
 license. It ships no competitor runtime or binary.

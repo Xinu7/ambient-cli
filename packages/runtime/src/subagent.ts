@@ -25,6 +25,8 @@ export interface SubagentSpec {
   /** Ambient tool names a resolved preset restricts this child to (∩ the role's read/write constraint).
    *  Undefined ⇒ the role default (all read-only for scout/oracle, all builtins for builder). */
   allowedTools?: string[];
+  /** A preset's own prompt — the child's system-level instructions (the task stays in `prompt`). */
+  instructions?: string;
   /** Orchestrator-requested turn budget for THIS child, bounded by MAX_TURNS_CEILING. Undefined ⇒ the role
    *  default. Lets the parent grant a big-package scout more turns instead of fanning out a second wave. */
   maxTurns?: number;
@@ -307,6 +309,7 @@ function runOneChild(
     ...(deps.goal ? { goal: deps.goal } : {}),
     ...(role === "builder" && deps.verify ? { verify: deps.verify } : {}),
     ...(store ? { artifact: store.save, readArtifact: store.read } : {}),
+    ...(spec.instructions ? { instructions: spec.instructions } : {}),
     // Route by role when the model is on `auto` — including an explicit `spec.model === "auto"` that a Claude
     // preset produced (opus/sonnet/haiku map to "auto"); only a CONCRETE model id suppresses routing.
     ...(spec.model && spec.model !== "auto" ? {} : { routedRole: ROUTED_ROLE[role] }),

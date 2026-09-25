@@ -29,6 +29,9 @@ export default defineConfig({
     // cross-spawn (Windows-safe MCP server launch) is CJS with require()s of Node builtins — kept external
     // and declared in the published manifest, like undici.
     "cross-spawn",
+    // yaml (frontmatter parsing) is CJS with a dynamic require("process") — external, declared in the
+    // published manifest.
+    "yaml",
   ],
   banner: { js: "#!/usr/bin/env node" },
   // The TUI uses the automatic JSX runtime (no classic `import React`); tell esbuild to match.

@@ -1,7 +1,8 @@
 import { readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { MAX_DIR_ENTRIES, isRealDir, readTextCappedSafe } from "./fs-safe.js";
+import { listField, parseFrontmatter, textField } from "./frontmatter.js";
+import { MAX_DIR_ENTRIES, isRealDir, readTextCappedSafe, readUserMarkdown } from "./fs-safe.js";
 
 /**
  * Discover reusable SUBAGENT presets from a user's existing Claude Code setup (`.claude/agents/*.md`) plus
@@ -14,22 +15,45 @@ export interface AgentPreset {
   description: string;
   /** The system-prompt body for the subagent. */
   body: string;
-  /** Ambient tool names this preset restricts the child to (empty ⇒ role default). */
+  /** Ambient tool names this preset restricts the child to (absent ⇒ the role's default tools). */
   tools?: string[];
+  /** Tool names the file lists that ambient has no equivalent for (shown as a warning, never fatal). */
+  unknownTools?: string[];
   /** Ambient model id (or "auto"). */
   model?: string;
+  /** True when the preset may change files (it lists an editing or shell tool) — it runs as a builder. */
+  writes: boolean;
 }
 
+/** Claude Code tool names → ambient's. Tools that don't exist in ambient are reported, not silently dropped. */
 const CLAUDE_TO_AMBIENT_TOOL: Record<string, string> = {
-  Read: "read",
-  Write: "write",
-  Edit: "edit",
-  Grep: "grep",
-  Glob: "glob",
-  Bash: "bash",
-  WebFetch: "web_fetch",
-  Task: "subagent",
+  read: "read",
+  write: "write",
+  edit: "edit",
+  multiedit: "apply_patch",
+  grep: "grep",
+  glob: "glob",
+  ls: "list",
+  bash: "bash",
+  webfetch: "web_fetch",
+  websearch: "web_search",
+  task: "subagent",
+  agent: "subagent",
+  todowrite: "plan",
+  todoread: "plan",
+  skill: "skill",
+  notebookread: "read",
+  askuserquestion: "ask_user",
 };
+/** Ambient's own tool names, accepted as-is in `.ambient/agents`. */
+const AMBIENT_TOOLS = new Set([
+  ...Object.values(CLAUDE_TO_AMBIENT_TOOL),
+  "list",
+  "search_skills",
+  "read_artifact",
+  "remember",
+]);
+const WRITING_TOOLS = new Set(["write", "edit", "apply_patch", "bash"]);
 
 function flatten(s: string, max: number): string {
   const f = s
@@ -48,42 +72,55 @@ function mapModel(m: string | undefined): string | undefined {
   return m;
 }
 
-function parseAgent(text: string): AgentPreset | null {
-  const m = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
-  if (!m) return null;
-  const front = m[1] ?? "";
-  const body = (m[2] ?? "").trim();
-  const field = (key: string): string | undefined => {
-    const fm = front.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
-    return fm ? fm[1]?.trim().replace(/^["']|["']$/g, "") : undefined;
-  };
-  const name = field("name");
-  if (!name || !/^[a-zA-Z0-9_.-]+$/.test(name)) return null;
-  const toolsRaw = field("tools");
-  const tools = toolsRaw
-    ? toolsRaw
-        .split(",")
-        .map((t) => CLAUDE_TO_AMBIENT_TOOL[t.trim()] ?? t.trim().toLowerCase())
-        .filter((t) => t.length > 0)
-    : undefined;
+/** Map a tool list; `mcp__server__tool` names pass through (they're matched against connected servers). */
+function mapTools(listed: string[]): { tools: string[]; unknown: string[] } {
+  const tools: string[] = [];
+  const unknown: string[] = [];
+  for (const raw of listed) {
+    const name = raw.replace(/\(.*\)$/, "").trim(); // `Bash(git:*)` → Bash
+    const mapped = name.startsWith("mcp__")
+      ? name
+      : (CLAUDE_TO_AMBIENT_TOOL[name.toLowerCase()] ??
+        (AMBIENT_TOOLS.has(name.toLowerCase()) ? name.toLowerCase() : undefined));
+    if (mapped) {
+      if (!tools.includes(mapped)) tools.push(mapped);
+    } else if (!unknown.includes(name)) unknown.push(name);
+  }
+  return { tools, unknown };
+}
+
+export function parseAgent(text: string, fallbackName?: string): AgentPreset | null {
+  const fm = parseFrontmatter(text);
+  if (!fm) return null;
+  const name = textField(fm.data, "name") ?? fallbackName;
+  if (!name || !/^[a-zA-Z0-9_.:-]+$/.test(name)) return null;
+  const listed = listField(fm.data, "tools");
+  const mapped = listed ? mapTools(listed) : undefined;
+  // A list that names only tools ambient doesn't have falls back to the role's defaults (never zero tools).
+  const tools = mapped && mapped.tools.length > 0 ? mapped.tools : undefined;
+  const model = mapModel(textField(fm.data, "model"));
   return {
     name,
-    description: flatten(field("description") ?? name, 200),
-    body: body.length > 16_000 ? body.slice(0, 16_000) : body,
-    ...(tools && tools.length > 0 ? { tools } : {}),
-    ...(mapModel(field("model")) ? { model: mapModel(field("model")) } : {}),
+    description: flatten(textField(fm.data, "description") ?? name, 1_024),
+    body: fm.body.length > 16_000 ? fm.body.slice(0, 16_000) : fm.body,
+    ...(tools ? { tools } : {}),
+    ...(mapped && mapped.unknown.length > 0 ? { unknownTools: mapped.unknown } : {}),
+    ...(model ? { model } : {}),
+    // No list means "all tools", which includes editing.
+    writes: tools ? tools.some((t) => WRITING_TOOLS.has(t)) : true,
   };
 }
 
 /** Discover agent presets across roots (project > user), first-wins by name. */
 export function discoverAgents(workspaceRoot: string, home: string = homedir()): AgentPreset[] {
-  const roots = [
-    join(workspaceRoot, ".ambient", "agents"),
-    join(workspaceRoot, ".claude", "agents"),
-    join(home, ".claude", "agents"),
+  // Project folders never follow symlinks; the user's own ~/.claude/agents may link agents in from elsewhere.
+  const roots: Array<{ dir: string; user: boolean }> = [
+    { dir: join(workspaceRoot, ".ambient", "agents"), user: false },
+    { dir: join(workspaceRoot, ".claude", "agents"), user: false },
+    { dir: join(home, ".claude", "agents"), user: true },
   ];
   const byName = new Map<string, AgentPreset>();
-  for (const dir of roots) {
+  for (const { dir, user } of roots) {
     if (!isRealDir(dir)) continue;
     let files: string[];
     try {
@@ -95,9 +132,11 @@ export function discoverAgents(workspaceRoot: string, home: string = homedir()):
     }
     for (const f of files) {
       // no symlink follow (leaf or ancestor), contained under the agents root, size-bounded
-      const text = readTextCappedSafe(join(dir, f), { root: dir });
+      const text = user
+        ? readUserMarkdown(join(dir, f))
+        : readTextCappedSafe(join(dir, f), { root: dir });
       if (text === null) continue;
-      const preset = parseAgent(text);
+      const preset = parseAgent(text, f.replace(/\.md$/, ""));
       if (preset && !byName.has(preset.name)) byName.set(preset.name, preset);
     }
   }

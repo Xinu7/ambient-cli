@@ -236,6 +236,11 @@ export interface RunOptions {
    */
   resumeContext?: string;
   /**
+   * Extra instructions for this run, placed in the system prompt with the highest priority — a subagent
+   * preset's own prompt, or text appended with `--append-system-prompt`.
+   */
+  instructions?: string;
+  /**
    * The prior interactive conversation — the non-system messages returned by the LAST `run` in this same
    * live session. When present, the agent continues the REAL message array (`[freshSystem, ...priorMessages,
    * newUser]`) instead of rebuilding context from the lossy `resumeContext` reconstruction. This routes the
