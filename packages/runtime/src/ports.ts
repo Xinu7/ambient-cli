@@ -197,6 +197,9 @@ export interface RunOptions {
   effort?: EffortSetting;
   /** The level the previous run in this session used, so a short "continue" keeps it under `auto`. */
   priorEffort?: ReasoningLevel;
+  /** Polled at each turn boundary: true makes the NEXT turn the final, tool-free wrap-up (e.g. a subagent
+   *  past its soft deadline reports what it found instead of being killed mid-work). */
+  wrapUp?: () => boolean;
   /** Workspace fs/env context (instructions, memory, clock, platform) — REQUIRED so a run can never silently
    *  lose project instructions/memory. Tests pass an explicit inert or real-fs implementation. */
   workspace: WorkspaceContextPort;

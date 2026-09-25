@@ -83,8 +83,13 @@ export interface SubagentDeps {
   };
   maxConcurrent?: number;
   now?: () => number;
+  /** Override the per-role soft deadlines (ms). */
+  timeoutMs?: Partial<Record<SubagentRole, number>>;
+  /** Time after the soft deadline for the wrap-up turn before the child is hard-stopped (ms). */
+  wrapUpGraceMs?: number;
 }
 
+/** Per-role SOFT deadlines: past this, the child's next turn is a tool-free wrap-up (it reports what it found). */
 const TIMEOUT_MS: Record<SubagentRole, number> = {
   scout: 120_000,
   oracle: 180_000,
@@ -103,7 +108,11 @@ const ROUTED_ROLE: Record<SubagentRole, RoutedRole> = {
   oracle: "reviewer",
   builder: "executor",
 };
-const SUMMARY_CAP = 1200;
+/** Time a child gets to write its wrap-up after the soft deadline before it is hard-stopped. */
+const WRAP_UP_GRACE_MS = 90_000;
+/** Per-child summary cap. Generous on purpose: the parent's own tool-result budget still fits the whole wave
+ *  to the served window (offloading the rest to read_artifact), so a scout's findings aren't cut to a stub. */
+const SUMMARY_CAP = 8_000;
 
 /** A short, human target for a child's running tool row (path/pattern/query/name/url/command), from its args. */
 function childToolTarget(toolName: string, args: unknown): string | undefined {
@@ -252,12 +261,19 @@ function runOneChild(
     prompt: capToolResult(spec.prompt, 500),
   });
 
-  // Linked cancellation: the parent signal OR a per-role wall-clock timeout aborts the child.
+  // Linked cancellation: the parent signal aborts the child. The per-role deadline is SOFT: it flips the child
+  // into a tool-free wrap-up turn so it returns partial findings; a hard stop follows after a grace period.
   const ac = new AbortController();
   const onAbort = () => ac.abort();
   ctx.signal.addEventListener("abort", onAbort);
   if (ctx.signal.aborted) ac.abort();
-  const timer = setTimeout(() => ac.abort(), TIMEOUT_MS[role]);
+  let pastDeadline = false;
+  const softMs = deps.timeoutMs?.[role] ?? TIMEOUT_MS[role];
+  const graceMs = deps.wrapUpGraceMs ?? WRAP_UP_GRACE_MS;
+  const softTimer = setTimeout(() => {
+    pastDeadline = true;
+  }, softMs);
+  const timer = setTimeout(() => ac.abort(), softMs + graceMs);
 
   // Bind the child's artifact ports to its OWN session's blob store, so read_artifact resolves and a
   // subagent's truncated outputs aren't lost. Absent factory → the ports stay undefined (offload is a no-op).
@@ -272,6 +288,7 @@ function runOneChild(
     cwd: ctx.cwd,
     workspaceRoot: ctx.workspaceRoot,
     signal: ac.signal,
+    wrapUp: () => pastDeadline,
     emit: childEmit,
     approve: deps.approve,
     workspace: childWorkspace(deps.workspace),
@@ -294,6 +311,7 @@ function runOneChild(
     }))
     .then((result) => {
       clearTimeout(timer);
+      clearTimeout(softTimer);
       ctx.signal.removeEventListener("abort", onAbort);
       const summary = capToolResult(result.finalText || "(no output)", SUMMARY_CAP);
       ctx.emit({

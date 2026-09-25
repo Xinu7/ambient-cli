@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
+import { clipText } from "../clip.js";
 import { mmss } from "../format.js";
 import { globeFrame } from "../logo.js";
 import { renderMarkdown } from "../markdown.js";
@@ -7,16 +8,15 @@ import type { TranscriptItem } from "../state.js";
 import { AmbientTheme } from "../theme.js";
 import { hardWrap } from "../wrap.js";
 
-/** Flatten newlines + truncate one line to `max` cols so nothing wraps the borderless column (Approval bar). */
-function clip(text: string, max: number): string {
-  const t = text.replace(/\s*\n\s*/g, " ");
-  if (max <= 1) return t.length > 0 ? "…" : "";
-  return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
-}
+/** One line clipped to `max` display columns (width-correct for CJK/emoji). */
+const clip = clipText;
 
 // `hardWrap` moved to ../wrap.js (shared with the markdown renderer without a cycle); re-exported for callers
 // (and the render test) that import it from here.
 export { hardWrap };
+
+/** A notice never grows taller than this in the live region (the full text is in the session log). */
+const NOTICE_MAX_LINES = 24;
 
 /** Cap an already-wrapped string to at most `n` lines with an honest elision — so a long error/output the user
  *  WANTS to read still wraps and stays readable, but a giant one can't grow the live region past the screen. */
@@ -316,11 +316,14 @@ export function TranscriptRow({
           : item.level === "warn"
             ? AmbientTheme.signal
             : AmbientTheme.dim;
-      const mark = item.level === "info" ? "·" : "⚠";
+      // A notice that already leads with its own glyph (⚠ ◆ ✓ ↪ …) keeps it — never "⚠ ⚠". Multi-line notices
+      // (/help, verify diagnostics) wrap and keep their lines instead of being flattened into one clipped row.
+      const hasGlyph = /^[⚠◆✓✗↪·▲◉∴]/u.test(item.text);
+      const mark = hasGlyph ? "" : item.level === "info" ? "· " : "⚠ ";
       return (
         <Box marginTop={1}>
-          <Text color={color} wrap="truncate">
-            {clip(`${mark} ${item.text}`, width)}
+          <Text color={color} wrap="wrap">
+            {capLines(hardWrap(`${mark}${item.text}`, Math.max(8, width - 1)), NOTICE_MAX_LINES)}
           </Text>
         </Box>
       );
@@ -334,25 +337,20 @@ export function TranscriptRow({
 /**
  * The transcript — a calm, borderless column. Used for the LIVE tail (in-flight items); the settled history
  * is printed once into terminal scrollback via <Static> in App. `width` is threaded down so every volatile
- * line truncates/wraps within the interior. An optional `window` caps how many items render (a safety bound
- * for the rare case the live tail grows large); by default it renders all of them.
+ * line truncates/wraps within the interior.
  */
 export function Transcript({
   items,
-  window,
   width = 80,
   maxStreamLines = STREAM_MAX_LINES,
 }: {
   items: TranscriptItem[];
-  window?: number;
   width?: number;
   maxStreamLines?: number;
 }): ReactNode {
-  const shown =
-    window !== undefined && items.length > window ? items.slice(items.length - window) : items;
   return (
     <Box flexDirection="column">
-      {shown.map((item) => (
+      {items.map((item) => (
         <TranscriptRow key={item.id} item={item} width={width} maxStreamLines={maxStreamLines} />
       ))}
     </Box>

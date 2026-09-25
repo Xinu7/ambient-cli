@@ -126,8 +126,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     process.stdout.write(PASTE_OFF);
   };
   process.once("exit", restore);
-  // An EXTERNAL signal (kill, terminal close) terminates Node WITHOUT firing `exit`, which would strand
-  // the shell inside the alternate screen AND re-deliver the signal before `waitUntilExit().finally` runs —
+  // An EXTERNAL signal (kill, terminal close) terminates Node WITHOUT firing `exit`, which would leave the
+  // terminal in bracketed-paste mode AND re-deliver the signal before `waitUntilExit().finally` runs —
   // so the MCP servers must be shut down HERE (idempotent), else their child processes leak on a signal exit.
   for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
     process.once(sig, () => {

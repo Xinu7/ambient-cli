@@ -809,14 +809,19 @@ describe("tui reducer", () => {
       argsHash: "h",
     } as NewEvent);
     expect(s.plan).toEqual([{ text: "ok", status: "pending" }]);
-    // a new session clears the plan
-    s = reduce(s, {
+    const started = {
       kind: "session.started",
       schemaVersion: 1,
       sessionId: "ses_b",
       cwd: "/w",
       workspaceRoot: "/w",
-    } as NewEvent);
+    } as NewEvent;
+    // an UNFINISHED plan carries into the next run (the agent is seeded with it, so the panel must show it)
+    s = reduce(s, started);
+    expect(s.plan).toEqual([{ text: "ok", status: "pending" }]);
+    // a FINISHED plan is retired when the next run starts
+    s = { ...s, plan: [{ text: "ok", status: "done" }] };
+    s = reduce(s, started);
     expect(s.plan).toEqual([]);
   });
 

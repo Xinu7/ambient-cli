@@ -239,6 +239,8 @@ export function App(deps: AppDeps): ReactNode {
   const [runActive, setRunActive] = useState(false);
   const [queued, setQueued] = useState<string[]>([]);
   const [slashSel, setSlashSel] = useState(0);
+  // Bumped by /clear to remount <Static> after the screen + scrollback are wiped.
+  const [staticEpoch, setStaticEpoch] = useState(0);
   // Discover the user's existing Claude/Codex slash commands ONCE — their names join the palette, their
   // bodies (with $ARGUMENTS/$1 expansion) run as a task on dispatch.
   const customCommands = useMemo(() => {
@@ -1009,6 +1011,10 @@ export function App(deps: AppDeps): ReactNode {
         // silently execute a stale plan in the fresh session.
         setPlanReview(false);
         dispatch({ t: "clear" });
+        // Scrollback printed by <Static> is outside React's control: clear the screen + scrollback and remount
+        // <Static> (its internal cursor would otherwise skip the first items of the fresh transcript).
+        stdout?.write("\x1b[2J\x1b[3J\x1b[H");
+        setStaticEpoch((n) => n + 1);
         break;
       case "/quit":
         // Never quit with work still flying — abort the run first so nothing runs on invisibly.
@@ -1086,9 +1092,10 @@ export function App(deps: AppDeps): ReactNode {
           setQuestionState({ ...q, text: q.text.slice(0, -1) });
           return;
         }
-        // A single printable character → append to the note (control keys / arrows / tab have ch="" or <0x20).
-        if (ch.length === 1 && ch >= " " && !key.ctrl && !key.meta) {
-          setQuestionState({ ...q, text: q.text + ch });
+        // Printable text → append to the note: a keystroke OR a paste (a multi-char chunk). Control keys /
+        // arrows / tab arrive as "" or control characters and are ignored; pasted newlines become spaces.
+        if (ch.length > 0 && !key.ctrl && !key.meta && !isAllControl(ch)) {
+          setQuestionState({ ...q, text: q.text + ch.replace(/\r?\n/g, " ") });
           return;
         }
       }
@@ -1278,9 +1285,8 @@ export function App(deps: AppDeps): ReactNode {
     const slashMatches = matchSlash(inputRef.current, customCommands.palette);
     if (inputRef.current.startsWith("/") && slashMatches.length > 0) {
       if (key.escape) {
-        // Esc closes the palette; if a run is in flight, it ALSO cancels it (the hint promises esc cancels).
+        // Esc closes the menu only. Dismissing a menu must never kill a run in flight (a second Esc does).
         setBuffer("");
-        if (busyRef.current) abortRun();
         return;
       }
       if (key.upArrow) {
@@ -1327,7 +1333,7 @@ export function App(deps: AppDeps): ReactNode {
       const task = inputRef.current.trim();
       // A slash-prefixed input that matched no command is a typo (e.g. `/modle`) — report it, don't
       // silently run it as a (paid) agent task.
-      if (task.startsWith("/")) {
+      if (looksLikeSlashCommand(task)) {
         dispatch({ t: "notice", level: "warn", text: `unknown command: ${task.split(/\s/)[0]}` });
         setBuffer("");
         return;
@@ -1499,7 +1505,7 @@ export function App(deps: AppDeps): ReactNode {
     <Box flexDirection="column" width={width} paddingX={1}>
       {/* SETTLED turns print ONCE into the terminal's REAL scrollback via <Static> — scroll up (trackpad/
           wheel) to see history. Never re-rendered, so each turn commits cleanly instead of repainting. */}
-      <Static items={settledItems}>
+      <Static key={staticEpoch} items={settledItems}>
         {(item) => <TranscriptRow key={item.id} item={item} width={interior} />}
       </Static>
 
@@ -1669,4 +1675,22 @@ export function App(deps: AppDeps): ReactNode {
       </Box>
     </Box>
   );
+}
+
+/**
+ * Whether submitted text is meant as a slash command. A prompt that merely starts with a path
+ * ("/Users/me/app.ts is broken") is a task, not an unknown command: a command name has no further slash.
+ */
+export function looksLikeSlashCommand(text: string): boolean {
+  const first = text.trim().split(/\s/)[0] ?? "";
+  return /^\/[A-Za-z][\w:.-]*$/.test(first);
+}
+
+/** True when every character is a control character (C0 or DEL) — a keypress with nothing printable. */
+function isAllControl(text: string): boolean {
+  for (const c of text) {
+    const code = c.codePointAt(0) ?? 0;
+    if (code >= 0x20 && code !== 0x7f) return false;
+  }
+  return true;
 }

@@ -134,7 +134,9 @@ export function makeSubagentTool(deps: SubagentToolDeps): ToolDefinition {
       idempotency: "non-idempotent",
       parallelSafe: false,
       resumability: "inspect",
-      timeoutPolicy: { idleMs: 320_000, maximumMs: 330_000 },
+      // No whole-wave hard cap: each child bounds itself (soft deadline → wrap-up → hard stop), so a wave
+      // larger than the concurrency limit isn't aborted wholesale. Parent cancel still stops everything.
+      timeoutPolicy: { idleMs: 320_000 },
     },
     inputSchema: Input,
     outputSchema: Output,

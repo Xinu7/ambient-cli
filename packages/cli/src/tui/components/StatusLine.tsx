@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
+import { sliceToWidth, stringWidth } from "../clip.js";
 import type { AgentMode, Effort, Permission, Status } from "../state.js";
 import { AmbientTheme } from "../theme.js";
 
@@ -74,21 +75,22 @@ interface Seg {
 }
 
 function segWidth(segs: Seg[]): number {
-  return segs.reduce((n, s) => n + s.t.length, 0);
+  return segs.reduce((n, s) => n + stringWidth(s.t), 0);
 }
 
-/** Clip a segment list to `max` display columns (all glyphs are width-1). */
+/** Clip a segment list to `max` display columns (measured, so a wide model name can't overflow). */
 function clip(segs: Seg[], max: number): Seg[] {
   const out: Seg[] = [];
   let used = 0;
   for (const s of segs) {
     if (used >= max) break;
     const room = max - used;
-    if (s.t.length <= room) {
+    const w = stringWidth(s.t);
+    if (w <= room) {
       out.push(s);
-      used += s.t.length;
+      used += w;
     } else {
-      out.push({ ...s, t: room <= 1 ? "…" : `${s.t.slice(0, room - 1)}…` });
+      out.push({ ...s, t: room <= 1 ? "…" : `${sliceToWidth(s.t, room - 1)}…` });
       used = max;
     }
   }

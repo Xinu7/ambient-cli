@@ -49,10 +49,9 @@ export const AMBIENT_BANNER = blockWordmark("AMBIENT");
 export const LOCKUP_COMPACT = "◉ AMBIENT";
 
 /**
- * The Ambient globe, SPINNING — rendered in the SAME braille medium as the brand globe (BRAILLE_GLOBE), so
- * the live indicator reads as the orbital sphere turning, not a generic moon-phase circle. Each frame rotates
- * the lit arc around the orb; on the activity line it advances on a steady timer, and after a streamed token
- * in the transcript. Freeze to GLOBE_IDLE (the resting logomark) when nothing flows / NO_COLOR.
+ * The compact streaming spinner (braille dots) used where a single cell is available — the streaming tail and
+ * the wave header — advancing once per streamed chunk so its motion tracks real output. GLOBE_IDLE (the
+ * resting logomark) shows when nothing flows. The full rotating globe for the activity line is in globe.ts.
  */
 export const GLOBE_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 export const GLOBE_IDLE = "◉";

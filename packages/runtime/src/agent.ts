@@ -62,6 +62,7 @@ import {
   INJECTED_CONTEXT_FRACTION,
   MALFORMED_STRIKES_TO_DEMOTE,
   MAX_COMPACTIONS,
+  MAX_FINAL_CONTINUATIONS,
   MAX_IDENTICAL_TOOL_BATCHES,
   MAX_VERIFY_ATTEMPTS,
   REPO_MAP_FRACTION,
@@ -405,6 +406,8 @@ export class Agent {
     let batchRepeat = 0;
     let malformedStrikes = 0;
     let failedBatches = 0;
+    let finalContinuations = 0;
+    let stitchedPrefix = "";
 
     // ── Turn budget ──────────────────────────────────────────────────────────────────────────────────────
     // `maxTurns` is a SEGMENT, not a hard cap. When a segment fills while the task is still progressing,
@@ -433,7 +436,7 @@ export class Agent {
       }
       turns += 1;
       // The final allowed turn is a forced, tool-free WRAP-UP (no more investigation — report now).
-      const finalWrapUp = turns >= ceiling;
+      const finalWrapUp = turns >= ceiling || (opts.wrapUp?.() ?? false);
       let compactions = 0;
 
       // ── mid-run STEER: inject any user messages the human sent while this run was in flight, so the model
@@ -824,7 +827,27 @@ export class Agent {
           attemptId: lastAttemptId,
           text: displayText,
         });
-        finalText = displayText;
+        finalText = `${stitchedPrefix}${displayText}`;
+      }
+
+      // A prose answer cut off at the output limit is not a finished answer: ask the model to continue from
+      // exactly where it stopped and stitch the parts (bounded, so a model that always hits the cap can't loop).
+      if (
+        completion.finishReason === "length" &&
+        toolCalls.length === 0 &&
+        displayText.trim().length > 0 &&
+        !finalWrapUp &&
+        finalContinuations < MAX_FINAL_CONTINUATIONS
+      ) {
+        finalContinuations += 1;
+        stitchedPrefix = finalText;
+        messages.push({ role: "assistant", content: displayText });
+        messages.push({
+          role: "user",
+          content:
+            "Your previous answer was cut off at the output limit. Continue exactly where you stopped — do not repeat anything you already wrote.",
+        });
+        continue;
       }
 
       // A genuinely empty (or whitespace-only) response with no tool calls is NOT success — EXCEPT on the forced

@@ -12,10 +12,10 @@ export interface SlashCommand {
 export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/help", desc: "Show what ambient can do" },
   { name: "/tools", desc: "List the tools the agent can use" },
-  { name: "/model", desc: "Pick a live model (opens a picker)" },
+  { name: "/model", args: "[id]", desc: "Switch model (opens a picker)" },
   {
     name: "/effort",
-    args: "[auto|off|low|medium|high]",
+    args: "[auto|off|high|max]",
     desc: "Reasoning effort (opens a picker)",
   },
   { name: "/plan", desc: "Plan mode — explore + build a task list, no changes" },
@@ -31,7 +31,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
   { name: "/attach", args: "<path>", desc: "Attach an image (or press Ctrl+V to paste one)" },
   { name: "/skills", desc: "Show your skills + how the agent uses them" },
-  { name: "/clear", desc: "Clear the screen" },
+  { name: "/clear", desc: "Clear the screen and start a fresh conversation" },
   { name: "/quit", desc: "Exit ambient" },
 ];
 

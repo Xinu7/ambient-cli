@@ -298,3 +298,39 @@ describe("childWorkspace", () => {
     expect(child.readMemory("/ws")).toBe("parent memory");
   });
 });
+
+describe("subagent budgets", () => {
+  it("a child past its soft deadline gets a tool-free WRAP-UP turn and returns partial findings", async () => {
+    let calls = 0;
+    const slow: ChatClient = {
+      fetchCatalog: async () => catalog,
+      chat: async (p: ChatParams): Promise<TurnCompletion> => {
+        calls += 1;
+        await new Promise((r) => setTimeout(r, 40));
+        if (p.tools.length === 0)
+          return { content: "PARTIAL: auth lives in src/auth.ts", toolCalls: [] };
+        return {
+          content: "",
+          toolCalls: [{ id: `tc_${calls}`, name: "list", args: { path: "." }, rawArgs: "{}" }],
+        };
+      },
+    };
+    const out = await runSubagents([{ label: "s", role: "scout", prompt: "look" }], ctx(), {
+      ...deps(),
+      client: slow,
+      timeoutMs: { scout: 60 },
+      wrapUpGraceMs: 2_000,
+    });
+    expect(out.results[0]?.summary).toContain("PARTIAL: auth lives in src/auth.ts");
+    expect(out.results[0]?.stopReason).toBe("max_turns");
+  });
+
+  it("keeps a substantial summary (not cut to a few lines)", async () => {
+    const long = `FINDINGS ${"detail ".repeat(700)}END`; // ~4.9 KB
+    const out = await runSubagents([{ label: "s", role: "scout", prompt: "look" }], ctx(), {
+      ...deps(),
+      client: new MockClient([{ content: long, toolCalls: [] }]),
+    });
+    expect(out.results[0]?.summary.length ?? 0).toBeGreaterThanOrEqual(long.length);
+  });
+});

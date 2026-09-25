@@ -2,6 +2,7 @@ import type { Effect, PermissionDecision } from "@amb/protocol";
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
 import { type PreviewKind, toolPreviewBody } from "../../presentation/tool-preview.js";
+import { clipText } from "../clip.js";
 import { AmbientTheme as T } from "../theme.js";
 
 export interface ApprovalRequest {
@@ -66,12 +67,8 @@ export function resolveApprovalKey(
   return { t: "none" };
 }
 
-/** One preview line: newlines flattened, then truncated to `max` so nothing wraps the modal. */
-function line(text: string, max: number): string {
-  const t = text.replace(/\s*\n\s*/g, " ");
-  if (max <= 1) return t.length > 0 ? "…" : "";
-  return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
-}
+/** One preview line: newlines flattened, then truncated to `max` columns so nothing wraps the modal. */
+const line = clipText;
 
 const colorFor = (kind: PreviewKind): string =>
   kind === "add" ? T.add : kind === "del" ? T.bad : T.dim;
@@ -148,9 +145,7 @@ export function Approval({
   const boxW = Math.max(0, Math.min(width - 2, 120));
   const inner = Math.max(1, boxW - 6); // interior inside border + paddingX:2
   // Supported minimum ≈ 21 cols (inner ≥ 13): the header + choice grid fit without wrapping there and up. Below
-  // that the modal degrades gracefully (Ink truncates), and — like the rest of the TUI (StatusLine etc.) —
-  // widths are counted in UTF-16 units, so a line of wide CJK/emoji may under-budget on tiny terminals. Both
-  // are accepted limits, not per-component special-casing.
+  // that the modal degrades gracefully (Ink truncates). Preview lines are clipped by display width.
 
   const effects = req.effects.join(" · ");
   const showEffects = inner > "Permission needed".length + effects.length + 2;

@@ -1,6 +1,7 @@
 import type { AskRequest } from "@amb/protocol";
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
+import { clipText } from "../clip.js";
 import { AmbientTheme } from "../theme.js";
 
 /** The live state of an open questionnaire — the App owns it (refs for synchronous key handling). */
@@ -14,12 +15,8 @@ export interface QuestionState {
   text: string;
 }
 
-/** One line clipped to `max` cols so nothing wraps the framed panel. */
-function clip(text: string, max: number): string {
-  const t = text.replace(/\s*\n\s*/g, " ");
-  if (max <= 1) return t.length > 0 ? "…" : "";
-  return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
-}
+/** One line clipped to `max` display columns (width-correct for CJK/emoji). */
+const clip = clipText;
 
 /**
  * The interactive questionnaire (backs the `ask_user` tool) — the agent pushes a real decision to the human

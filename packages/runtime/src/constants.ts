@@ -39,3 +39,6 @@ export const MALFORMED_STRIKES_TO_DEMOTE = 3;
 
 /** Consecutive turns where every tool call failed before `auto` effort escalates to max. */
 export const FAILED_BATCHES_TO_ESCALATE = 2;
+
+/** How many times a prose answer cut off at the output limit is continued and stitched. */
+export const MAX_FINAL_CONTINUATIONS = 2;

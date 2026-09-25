@@ -158,10 +158,9 @@ function pluralizeRole(role: string | undefined): string {
 }
 
 /**
- * The FLIGHTLINE's state — deliberately minimal: what model is running and how much context remains.
- * Only fields the StatusLine actually renders live here; run telemetry
- * (tokens/tools/±lines/files) was removed rather than accumulated-but-never-shown. The durable event log
- * (not this view-state) remains the source of truth for those records.
+ * The FLIGHTLINE's state — deliberately minimal: what model is running, how hard it reasons, how much
+ * context remains, and the session's token total. Only fields the StatusLine actually renders live here;
+ * the durable event log (not this view-state) is the source of truth for everything else.
  */
 /** What the agent is doing RIGHT NOW — surfaced as the single live activity line while a run is active. */
 export interface Activity {
@@ -411,7 +410,9 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
       // flicker off during the catalog fetch (session.started → [fetch] → turn.started).
       return {
         ...state,
-        plan: [],
+        // An unfinished plan carries into the next run (the App seeds it into the agent too), so the panel
+        // keeps showing what the agent is executing; a fully finished plan is retired.
+        plan: state.plan.some((t) => t.status !== "done") ? state.plan : [],
         pending: {},
         active: {},
         thinking: "",
@@ -933,7 +934,7 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
             kind: "notice",
             id,
             level: "info",
-            text: `◆ Checkpoint ${ev.segment}/${ev.of} — compacted, continuing…`,
+            text: `◆ Checkpoint ${ev.segment}/${ev.of} — continuing…`,
           }))
         : state;
 

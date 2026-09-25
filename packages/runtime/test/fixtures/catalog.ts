@@ -84,7 +84,8 @@ export class FixtureClient implements ChatClient {
     return this.catalog;
   }
   async chat(params: ChatParams): Promise<TurnCompletion> {
-    this.calls.push(params);
+    // Snapshot the message list: the agent keeps appending to its array after the call returns.
+    this.calls.push({ ...params, messages: [...params.messages] });
     const next = this.script.shift();
     if (!next) throw new Error("fixture script exhausted");
     return typeof next === "function" ? next(params) : next;

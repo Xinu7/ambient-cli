@@ -575,7 +575,7 @@ describe("tui render", () => {
     );
     const frame = lastFrame() ?? "";
     expect(frame).toContain("/model");
-    expect(frame).toContain("Pick a live model"); // the description is shown
+    expect(frame).toContain("Switch model"); // the description is shown
     expect(frame).toContain("▸"); // selection carried by a cursor GLYPH, not color alone (NO_COLOR-safe)
     expect(frame).toContain("Commands"); // the header, consistent with the other pickers
     unmount();
@@ -757,5 +757,33 @@ describe("splash readiness line", () => {
     });
     expect(readyLine({ ready: 0, total: 0 }).rest).toBe("no models available");
     expect(readyLine({ ready: 2, total: 4 })).toEqual({ count: "2", rest: " models ready" });
+  });
+});
+
+describe("notices", () => {
+  it("never double the warning glyph and keep multi-line text (e.g. /help, verify diagnostics)", () => {
+    const { lastFrame, unmount } = render(
+      <Transcript
+        items={[
+          {
+            kind: "notice",
+            id: "a",
+            level: "warn",
+            text: "⚠ Reached the turn limit — type continue.",
+          },
+          { kind: "notice", id: "b", level: "info", text: "line one\nline two\nline three" },
+        ]}
+        width={60}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("⚠ ⚠");
+    expect(frame).toContain("⚠ Reached the turn limit");
+    expect(frame).toContain("line one");
+    expect(frame).toContain("line three");
+    expect(frame.split("\n").some((l) => l.includes("line two") && !l.includes("line one"))).toBe(
+      true,
+    );
+    unmount();
   });
 });
