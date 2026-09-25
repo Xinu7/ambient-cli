@@ -3,6 +3,7 @@ import { runConfig } from "./commands/config-show.js";
 import { runDoctor } from "./commands/doctor.js";
 import { runEval } from "./commands/eval.js";
 import { runGitHub } from "./commands/github.js";
+import { runHooks } from "./commands/hooks.js";
 import { runLogin, runLogout } from "./commands/login.js";
 import { runModels } from "./commands/models.js";
 import { runProbe } from "./commands/probe.js";
@@ -30,6 +31,7 @@ Usage:
   ambient skills [--json]                Scrape Claude + Codex + plugin skills the agent can use
   ambient skills show "<name>"           Print a discovered skill's full instructions
   ambient skills pin|unpin "<name>"      Pin a skill so it ALWAYS auto-loads (or unpin it)
+  ambient hooks [trust]                  List the hooks that run here; trust this project's own
   ambient probe <model-id>               Test a model's native tool-calling (records the result)
   ambient route explain [model-id]       Explain which model + lane a task would use
   ambient sessions [show <id>]           List / inspect past sessions
@@ -80,6 +82,9 @@ async function main(): Promise<void> {
       break;
     case "skills":
       await runSkills(rest);
+      break;
+    case "hooks":
+      await runHooks(rest);
       break;
     case "probe":
       await runProbe(rest);

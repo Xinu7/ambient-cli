@@ -45,16 +45,26 @@ export const AmbConfigSchema = z
      *  lets the agent run ANY shell command unprompted. Your file, your choice; empty/omitted ⇒ prompt as
      *  usual. Seeded as session-scoped grants at run start. */
     allow: z.array(z.string().min(1)).optional(),
+    /** Hooks in Claude Code's format (`{"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command",
+     *  "command": "…"}]}]}`). These always run. */
+    hooks: z.record(z.string(), z.array(z.unknown())).optional(),
+    /** Also run the hooks from ~/.claude/settings.json and enabled Claude Code plugins. Off by default: those
+     *  are written for Claude Code and may not suit ambient. */
+    claudeHooks: z.boolean().optional(),
   })
   // Unknown keys are stripped (default) rather than rejected, so a future field in an older binary is tolerated.
   .strip();
 
 export type AmbConfig = z.infer<typeof AmbConfigSchema>;
 
+/** The folder ambient's config lives in (the config file, trusted hooks). */
+export function configDir(env: Record<string, string | undefined> = process.env): string {
+  return join(env.AMB_CONFIG_HOME ?? env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "amb");
+}
+
 /** The config file path, honoring $AMB_CONFIG_HOME then $XDG_CONFIG_HOME then ~/.config. */
 export function configPath(env: Record<string, string | undefined> = process.env): string {
-  const base = env.AMB_CONFIG_HOME ?? env.XDG_CONFIG_HOME ?? join(homedir(), ".config");
-  return join(base, "amb", "config.json");
+  return join(configDir(env), "config.json");
 }
 
 /**

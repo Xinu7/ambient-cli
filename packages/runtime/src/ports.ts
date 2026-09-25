@@ -240,6 +240,8 @@ export interface RunOptions {
    * preset's own prompt, or text appended with `--append-system-prompt`.
    */
   instructions?: string;
+  /** User-configured hooks (scripts run on tool calls, prompts and finishing). Absent ⇒ none. */
+  hooks?: HooksPort;
   /**
    * The prior interactive conversation — the non-system messages returned by the LAST `run` in this same
    * live session. When present, the agent continues the REAL message array (`[freshSystem, ...priorMessages,
@@ -269,4 +271,37 @@ export interface RunOptions {
    * builder→executor); an explicit `--model`/preset model always wins (this is ignored unless model is auto).
    */
   routedRole?: RoutedRole;
+}
+
+/** What a hook asked for. Every field is optional; an empty outcome means "carry on". */
+export interface HookOutcome {
+  /** Stop this action (the tool call, the prompt, finishing the run) — the reason is shown to the model. */
+  block?: string;
+  /** Skip the approval prompt for this tool call. Never overrides a denial. */
+  allow?: boolean;
+  /** Ask before this tool call even where it would otherwise run without asking. */
+  ask?: boolean;
+  /** Replacement arguments for the tool call (validated like the model's own). */
+  updatedInput?: Record<string, unknown>;
+  /** Extra context for the model. */
+  context?: string;
+}
+
+export type HookEventName =
+  | "PreToolUse"
+  | "PostToolUse"
+  | "UserPromptSubmit"
+  | "Stop"
+  | "SubagentStop"
+  | "SessionStart"
+  | "SessionEnd"
+  | "PreCompact"
+  | "Notification";
+
+export interface HooksPort {
+  run(
+    event: HookEventName,
+    payload: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<HookOutcome>;
 }

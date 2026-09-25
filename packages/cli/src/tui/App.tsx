@@ -33,6 +33,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import type { ReactNode } from "react";
 import { compactNow } from "../agent/compact-now.js";
 import { createDurableEventSink } from "../agent/event-sink.js";
+import { type HooksControl, fireAndForget } from "../agent/hooks.js";
 import { buildRegistry } from "../agent/registry.js";
 import { makeSubagentTool } from "../agent/subagent-tool.js";
 import { makeVerifyPort } from "../agent/verify-port.js";
@@ -175,6 +176,8 @@ export interface AppDeps {
   history?: HistoryPort;
   /** The workspace's files for the `@` picker (listed at the edge, on first use). */
   listFiles?: () => Promise<string[]>;
+  /** Hook commands (Claude Code format) for this workspace: run per run, listed and trusted by /hooks. */
+  hooks?: HooksControl;
 }
 
 type Action =
@@ -576,6 +579,7 @@ export function App(deps: AppDeps): ReactNode {
     setApprovalSelState(n);
   };
 
+  const hooksRef = useRef(deps.hooks);
   const approve = useCallback<RunOptions["approve"]>((req) => {
     return new Promise((resolve) => {
       // "Bypass session" (chosen from an earlier approval, or /bypass) auto-allows the rest of THIS run without
@@ -586,6 +590,13 @@ export function App(deps: AppDeps): ReactNode {
       }
       approvalResolver.current = resolve;
       ring(); // the agent is waiting on you
+      void fireAndForget(
+        hooksRef.current?.port(() => sessionIdRef.current ?? ""),
+        "Notification",
+        {
+          message: `ambient needs your permission to use ${req.toolName}`,
+        },
+      );
       // Pre-arm the selection: allow-once for a normal ask, but DENY when the request was escalated for risk —
       // a muscle-memory Enter must never approve something we flagged as dangerous. (ref + state, no closure.)
       const seed = defaultApprovalSel(req.decision.reason);
@@ -784,6 +795,8 @@ export function App(deps: AppDeps): ReactNode {
         // This run's images join the session's numbered list only if the run is kept (below) — a run cancelled
         // before it starts, or retried after a key problem, must not shift the numbers ask_vision uses.
         const sessionImages = [...sessionImagesRef.current, ...sized];
+        // Hooks are re-read per run, so an edited settings file or a newly trusted project applies right away.
+        const hooks = deps.hooks?.port(() => sessionId);
         const opts: RunOptions = {
           sessionId,
           mode: runtimeMode,
@@ -825,6 +838,7 @@ export function App(deps: AppDeps): ReactNode {
           readArtifact: (handle) => readObject(sessionId, handle),
           effort: effortRef.current,
           ...(lastEffortRef.current ? { priorEffort: lastEffortRef.current } : {}),
+          ...(hooks ? { hooks } : {}),
           nextModel: () => {
             const m = pendingSwitchRef.current;
             pendingSwitchRef.current = undefined;
@@ -847,6 +861,7 @@ export function App(deps: AppDeps): ReactNode {
             ...(deps.capabilities ? { capabilities: deps.capabilities } : {}),
             ...(opts.verify ? { verify: opts.verify } : {}),
             ...(goalRef.current ? { goal: goalRef.current } : {}), // children inherit the north-star
+            ...(hooks ? { hooks } : {}),
             effort: effortRef.current,
           }),
         });
@@ -1255,6 +1270,16 @@ export function App(deps: AppDeps): ReactNode {
       case "/usage":
         dispatch({ t: "notice", level: "info", text: usageReport(state.status.usage) });
         break;
+      case "/hooks": {
+        if (!deps.hooks) {
+          dispatch({ t: "notice", level: "info", text: "No hooks will run." });
+        } else if (arg.trim().toLowerCase() === "trust") {
+          dispatch({ t: "notice", level: "info", text: deps.hooks.trust() });
+        } else {
+          dispatch({ t: "notice", level: "info", text: deps.hooks.summary().join("\n") });
+        }
+        break;
+      }
       case "/goal": {
         const a = arg.trim();
         // `/goal` (no arg) or `/goal show` → report the current goal into the transcript.

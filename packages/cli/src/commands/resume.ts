@@ -27,6 +27,7 @@ import { makeInteractiveApprover } from "../agent/approver.js";
 import { makeInteractiveAsker } from "../agent/asker.js";
 import { makeCapabilityPort } from "../agent/capability-port.js";
 import { createDurableEventSink } from "../agent/event-sink.js";
+import { fireAndForget, untrustedNote, workspaceHooks } from "../agent/hooks.js";
 import { connectMcp } from "../agent/mcp-connect.js";
 import { buildRegistry } from "../agent/registry.js";
 import { EventRenderer } from "../agent/render-events.js";
@@ -35,7 +36,7 @@ import { makeSubagentTool } from "../agent/subagent-tool.js";
 import { makeVerifyPort } from "../agent/verify-port.js";
 import { resolveWorkingApiKey } from "../agent/working-key.js";
 import { makeWorkspaceContextPort } from "../agent/workspace-context-port.js";
-import { loadConfig } from "../config.js";
+import { configDir, loadConfig } from "../config.js";
 import { bold, dim } from "../render/color.js";
 import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
 import { signInInteractive } from "./login.js";
@@ -245,6 +246,11 @@ export async function runResume(args: string[]): Promise<void> {
     `${bold("amb resume")} ${dim(`· from ${sessionId0} · ${parsed.model} · ${sessionId}`)}\n`,
   );
 
+  const hooksControl = workspaceHooks(cwd, userConfig, configDir());
+  const hooks = hooksControl.port(() => sessionId);
+  const hooksNote = untrustedNote(hooksControl);
+  if (hooksNote) process.stderr.write(dim(`  ${hooksNote}\n`));
+
   const opts: RunOptions = {
     sessionId,
     mode: parsed.mode,
@@ -267,6 +273,7 @@ export async function runResume(args: string[]): Promise<void> {
     readArtifact: (handle) => readObject(sessionId, handle),
     resumeContext,
     ...(resumedGoal ? { goal: resumedGoal } : {}),
+    ...(hooks ? { hooks } : {}),
   };
 
   const mcp = await connectMcp(cwd, {
@@ -286,6 +293,7 @@ export async function runResume(args: string[]): Promise<void> {
         parentMode: opts.mode,
         ...(opts.capabilities ? { capabilities: opts.capabilities } : {}),
         ...(opts.verify ? { verify: opts.verify } : {}),
+        ...(hooks ? { hooks } : {}),
       }),
     });
     const result = await new Agent(client, registry).run(parsed.instruction, opts);
@@ -298,6 +306,7 @@ export async function runResume(args: string[]): Promise<void> {
     );
     process.exitCode = 1;
   } finally {
+    await fireAndForget(hooks, "SessionEnd", { reason: "exit" });
     mcp.close();
     process.removeListener("SIGINT", onSigint);
   }

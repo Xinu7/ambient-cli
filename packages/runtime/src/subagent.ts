@@ -9,6 +9,7 @@ import type {
   CapabilityPort,
   ChatClient,
   EffortSetting,
+  HooksPort,
   RunOptions,
   VerifyPort,
   WorkspaceContextPort,
@@ -73,6 +74,8 @@ export interface SubagentDeps {
   /** The parent run's north-star goal — inherited so a child stays aligned to the same objective. */
   goal?: string;
   verify?: VerifyPort;
+  /** The session's hooks: a child's tool calls run the tool hooks, and SubagentStop fires when it finishes. */
+  hooks?: HooksPort;
   /** Build a child's registry for a role — MUST NOT include the `subagent` tool (structural depth cap).
    *  `allowedTools` (from a resolved preset) further restricts the registry to that intersection. */
   buildChildRegistry: (role: SubagentRole, allowedTools?: string[]) => ToolRegistry;
@@ -310,6 +313,7 @@ function runOneChild(
     ...(role === "builder" && deps.verify ? { verify: deps.verify } : {}),
     ...(store ? { artifact: store.save, readArtifact: store.read } : {}),
     ...(spec.instructions ? { instructions: spec.instructions } : {}),
+    ...(deps.hooks ? { hooks: childHooks(deps.hooks) } : {}),
     // Route by role when the model is on `auto` — including an explicit `spec.model === "auto"` that a Claude
     // preset produced (opus/sonnet/haiku map to "auto"); only a CONCRETE model id suppresses routing.
     ...(spec.model && spec.model !== "auto" ? {} : { routedRole: ROUTED_ROLE[role] }),
@@ -346,6 +350,21 @@ function runOneChild(
         ...(filesMutated.length > 0 ? { files: filesMutated } : {}),
       };
     });
+}
+
+/**
+ * The hooks a child runs: its tool calls go through the tool hooks, and its finishing is a SubagentStop (which,
+ * like Stop, may send it back to work). Session and prompt hooks belong to the parent session only.
+ */
+export function childHooks(hooks: HooksPort): HooksPort {
+  return {
+    run(event, payload, signal) {
+      if (event === "PreToolUse" || event === "PostToolUse")
+        return hooks.run(event, payload, signal);
+      if (event === "Stop") return hooks.run("SubagentStop", payload, signal);
+      return Promise.resolve({});
+    },
+  };
 }
 
 /**

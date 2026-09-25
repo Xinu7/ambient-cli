@@ -939,6 +939,9 @@ export function reduce(state: ViewState, ev: NewEvent, now = 0): ViewState {
       }));
     }
 
+    case "notice":
+      return pushItem(state, (id) => ({ kind: "notice", id, level: ev.level, text: ev.text }));
+
     case "context.overflow":
       return pushItem(state, (id) => ({
         kind: "notice",

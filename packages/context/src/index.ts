@@ -13,3 +13,4 @@ export * from "./repo-map.js";
 export * from "./images.js";
 export * from "./frontmatter.js";
 export * from "./plugins.js";
+export * from "./hooks-config.js";

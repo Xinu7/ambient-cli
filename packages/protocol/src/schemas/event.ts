@@ -74,6 +74,8 @@ export const EventSchema = z.discriminatedUnion("kind", [
   // a CLEAR (the /goal clear command). The latest goal.set in the log wins.
   sev("goal.set", { text: z.string() }),
   sev("catalog.snapshot", { hash: z.string(), modelCount: z.number().int().nonnegative() }),
+  // Something the run wants the user to know (e.g. a hook stopped a message) — shown as a calm note.
+  sev("notice", { level: z.enum(["info", "warn"]), text: z.string() }),
   sev("error", {
     errorKind: AmbErrorKindSchema,
     message: z.string(),

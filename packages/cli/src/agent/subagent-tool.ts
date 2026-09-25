@@ -11,6 +11,7 @@ import {
   type CapabilityPort,
   type ChatClient,
   type EffortSetting,
+  type HooksPort,
   type SubagentRole,
   type VerifyPort,
   type WorkspaceContextPort,
@@ -32,6 +33,8 @@ export interface SubagentToolDeps {
   /** The parent run's north-star goal, inherited by spawned children. */
   goal?: string;
   verify?: VerifyPort;
+  /** The session's hooks, applied to children's tool calls (and SubagentStop). */
+  hooks?: HooksPort;
   /** Injectable clock (test hook); defaults to real time. */
   now?: () => number;
   /** The user's agent presets, listed in the tool description so the model can pick one by name. */
@@ -213,6 +216,7 @@ export function makeSubagentTool(deps: SubagentToolDeps): ToolDefinition {
           ...(deps.effort ? { effort: deps.effort } : {}),
           ...(deps.goal ? { goal: deps.goal } : {}),
           ...(deps.verify ? { verify: deps.verify } : {}),
+          ...(deps.hooks ? { hooks: deps.hooks } : {}),
           buildChildRegistry: childRegistry,
           childSink: childSink(now),
           artifactStore: childArtifactStore,

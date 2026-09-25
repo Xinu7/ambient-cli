@@ -15,6 +15,7 @@ import { makeInteractiveApprover } from "../agent/approver.js";
 import { makeInteractiveAsker } from "../agent/asker.js";
 import { makeCapabilityPort } from "../agent/capability-port.js";
 import { createDurableEventSink } from "../agent/event-sink.js";
+import { fireAndForget, untrustedNote, workspaceHooks } from "../agent/hooks.js";
 import { connectMcp } from "../agent/mcp-connect.js";
 import { buildRegistry } from "../agent/registry.js";
 import { EventRenderer } from "../agent/render-events.js";
@@ -22,7 +23,7 @@ import { makeSubagentTool } from "../agent/subagent-tool.js";
 import { makeVerifyPort } from "../agent/verify-port.js";
 import { resolveWorkingApiKey } from "../agent/working-key.js";
 import { makeWorkspaceContextPort } from "../agent/workspace-context-port.js";
-import { type AmbConfig, grantsFromConfig, loadConfig } from "../config.js";
+import { type AmbConfig, configDir, grantsFromConfig, loadConfig } from "../config.js";
 import { bold, dim } from "../render/color.js";
 import { KEY_REJECTED, NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
 import { attachImageFile, downscaleForWindow } from "../tui/capture.js";
@@ -237,6 +238,11 @@ export async function runAgent(args: string[]): Promise<void> {
     if (!jsonl) process.stderr.write(dim(`  ◎ goal: ${goal}\n`));
   }
 
+  const hooksControl = workspaceHooks(cwd, userConfig, configDir());
+  const hooks = hooksControl.port(() => sessionId);
+  const hooksNote = untrustedNote(hooksControl);
+  if (hooksNote && !jsonl) process.stderr.write(dim(`  ${hooksNote}\n`));
+
   const opts: RunOptions = {
     sessionId,
     mode,
@@ -262,6 +268,7 @@ export async function runAgent(args: string[]): Promise<void> {
     readArtifact: (handle) => readObject(sessionId, handle),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(goal ? { goal } : {}),
+    ...(hooks ? { hooks } : {}),
     effort,
   };
 
@@ -292,6 +299,7 @@ export async function runAgent(args: string[]): Promise<void> {
         ...(opts.effort ? { effort: opts.effort } : {}),
         ...(opts.goal ? { goal: opts.goal } : {}),
         ...(opts.verify ? { verify: opts.verify } : {}),
+        ...(hooks ? { hooks } : {}),
       }),
     });
     // Kick the update check off CONCURRENTLY with the run (which takes far longer than the 2.5s check) so the
@@ -323,6 +331,7 @@ export async function runAgent(args: string[]): Promise<void> {
     else process.stderr.write(`\namb: ${message}\n`);
     process.exitCode = 1;
   } finally {
+    await fireAndForget(hooks, "SessionEnd", { reason: "exit" });
     mcp.close();
     process.removeListener("SIGINT", onSigint);
   }

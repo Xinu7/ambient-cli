@@ -78,6 +78,7 @@ import {
   MAX_COMPACTIONS,
   MAX_FINAL_CONTINUATIONS,
   MAX_IDENTICAL_TOOL_BATCHES,
+  MAX_STOP_HOOK_CONTINUES,
   MAX_VERIFY_ATTEMPTS,
   REPO_MAP_FRACTION,
   REPO_MAP_MIN_TOKENS,
@@ -151,6 +152,7 @@ export class Agent {
     // re-asked it to fix a failing verification (bounded), and did we already record this run's first outcome?
     let mutatedSinceVerify = false;
     let verifyAttempts = 0;
+    let stopHookContinues = 0;
     let verifyRecorded = false;
     let verifyPassed: boolean | undefined; // undefined = never verified; drives an honest stop reason
     let mutatingModel = ""; // the model that produced the changes being verified (survives a later failover)
@@ -215,6 +217,28 @@ export class Agent {
         ? { attachments: opts.attachments.map(toAttachmentRef) }
         : {}),
     });
+
+    // UserPromptSubmit hooks can stop the message or add context; SessionStart hooks add context to the first
+    // message of a conversation.
+    const promptHook = opts.hooks
+      ? await opts.hooks.run("UserPromptSubmit", { prompt: userInput }, opts.signal)
+      : {};
+    if (promptHook.block) {
+      emit({
+        schemaVersion: 1,
+        kind: "notice",
+        sessionId,
+        level: "warn",
+        text: `A hook stopped this message: ${promptHook.block}`,
+      });
+      emit({ schemaVersion: 1, kind: "turn.finished", sessionId, turnId, stopReason: "blocked" });
+      return { stopReason: "blocked", turns: 0, finalText: "" };
+    }
+    const sessionHook =
+      opts.hooks && (opts.priorMessages?.length ?? 0) === 0
+        ? await opts.hooks.run("SessionStart", { source: "startup" }, opts.signal)
+        : {};
+    const hookContext = [sessionHook.context, promptHook.context].filter(Boolean).join("\n\n");
 
     let target = this.resolveModel(
       opts.requestedModel,
@@ -501,6 +525,7 @@ export class Agent {
           ? `<repository_state note="at the start of this request — re-check with git as you go">\n${gitBlock}\n</repository_state>`
           : "",
         relevantSkills,
+        hookContext ? `<hook_context>\n${hookContext}\n</hook_context>` : "",
       ].filter(Boolean);
       if (parts.length === 0) return content;
       const note = `\n\n${parts.join("\n\n")}`;
@@ -683,6 +708,7 @@ export class Agent {
           opts.capabilities?.bytesPerToken?.(target), // learned tokenizer accuracy
         )
       ) {
+        if (opts.hooks) await opts.hooks.run("PreCompact", { trigger: "auto" }, opts.signal);
         const compacted = await compact(
           this.client,
           messages,
@@ -1130,6 +1156,24 @@ export class Agent {
             }
           }
         }
+        // Stop hooks may send the agent back to work with a reason (bounded, so a hook can't loop forever).
+        if (opts.hooks && !finalWrapUp && stopHookContinues < MAX_STOP_HOOK_CONTINUES) {
+          const stop = await opts.hooks.run(
+            "Stop",
+            { last_assistant_message: displayText, stop_hook_active: stopHookContinues > 0 },
+            opts.signal,
+          );
+          if (stop.block && !opts.signal.aborted) {
+            stopHookContinues++;
+            if (displayText.trim().length > 0)
+              messages.push({ role: "assistant", content: displayText });
+            messages.push({
+              role: "user",
+              content: `A hook asked you to keep going: ${stop.block}`,
+            });
+            continue;
+          }
+        }
         // Record the model's final answer in the conversation itself so a carried-forward interactive session
         // keeps it — the next message must see what the agent last said. Only on the actual stop (the verify
         // re-ask above `continue`s, so this isn't reached until the run truly finishes). The tool-call turns
@@ -1273,7 +1317,9 @@ export class Agent {
         Math.floor(batchCharBudget / Math.max(1, outcomes.length)),
       );
       for (const o of outcomes) {
-        const fullText = o.ok ? stringifyResult(o.result) : `ERROR: ${o.error}`;
+        const fullText = `${o.ok ? stringifyResult(o.result) : `ERROR: ${o.error}`}${
+          o.hookNote ? `\n\n[from a hook] ${o.hookNote}` : ""
+        }`;
         const capped = capToolResult(fullText, perResultCharBudget);
         // Truncation signal must be IDENTITY, not a UTF-16 length compare: capToolResult works in UTF-8 bytes
         // and inserts a "…[N bytes truncated]…" marker, so for multi-byte text (CJK/emoji) the capped string

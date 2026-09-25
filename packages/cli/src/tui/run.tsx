@@ -14,8 +14,10 @@ import { createElement } from "react";
 import { AmbientChatClient } from "../agent/ambient-client.js";
 import { makeCapabilityPort } from "../agent/capability-port.js";
 import { listWorkspaceFiles } from "../agent/file-list.js";
+import { fireAndForget, workspaceHooks } from "../agent/hooks.js";
 import { type McpConnection, connectMcp } from "../agent/mcp-connect.js";
 import { openBrowser, signInInteractive } from "../commands/login.js";
+import { configDir } from "../config.js";
 import { type FleetRow, formatFleetRows, laneResolver } from "../render/fleet.js";
 import {
   KEY_SOURCE_LABEL,
@@ -64,6 +66,8 @@ export interface TuiOptions {
   initialGoal?: string;
   /** Check for a newer published version and show an upgrade hint in the splash (config `checkUpdates`). */
   checkUpdates?: boolean;
+  /** The hook settings from ambient's config. */
+  hooksConfig?: { hooks?: unknown; claudeHooks?: boolean };
 }
 
 /** Fetch the live fleet (sorted rows) for the splash count + the model picker — best-effort, never blocks long. */
@@ -202,11 +206,17 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const restoreGlyphs = needsAsciiFallback() ? installAsciiFallback(process.stdout) : () => {};
   process.once("exit", restoreGlyphs);
 
+  const hooks = workspaceHooks(cwd, opts.hooksConfig ?? {}, configDir());
+  // The session in use (a /clear starts a new one) — for the SessionEnd hook when the TUI closes.
+  let currentSession = "";
   const instance = render(
     createElement(App, {
       client,
-      makeWriter: (sessionId: string) =>
-        new SessionWriter(sessionId, () => new Date().toISOString()),
+      makeWriter: (sessionId: string) => {
+        currentSession = sessionId;
+        return new SessionWriter(sessionId, () => new Date().toISOString());
+      },
+      hooks,
       capabilities: makeCapabilityPort(),
       agentMode: opts.agentMode,
       permission: opts.permission,
@@ -265,6 +275,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     await instance.waitUntilExit();
   } finally {
     done = true;
+    await fireAndForget(
+      hooks.port(() => currentSession),
+      "SessionEnd",
+      { reason: "exit" },
+    );
     mcpConn.current?.close();
     restore();
   }

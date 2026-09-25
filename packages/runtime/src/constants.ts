@@ -10,6 +10,8 @@ export const MAX_SAME_MODEL_RETRIES = 2;
 export const MAX_COMPACTIONS = 4;
 /** How many times the verify gate re-asks the model to fix a failing verification before giving up. */
 export const MAX_VERIFY_ATTEMPTS = 3;
+/** How many times Stop hooks may send the agent back to work in one run. */
+export const MAX_STOP_HOOK_CONTINUES = 3;
 
 /** Identical tool-call batches in a row before the doom-loop guard stops the run (going in circles). */
 export const MAX_IDENTICAL_TOOL_BATCHES = 3;

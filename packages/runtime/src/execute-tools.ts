@@ -22,6 +22,8 @@ export interface ToolOutcome {
   result: unknown;
   error?: string;
   durationMs: number;
+  /** Something a hook added after the tool ran (feedback or context for the model). */
+  hookNote?: string;
 }
 
 /** IDs that scope the attempt these tool calls belong to. */
@@ -61,7 +63,7 @@ async function runOne(
   const wireId = call.id;
 
   // 1. validate args
-  const parsed = tool.inputSchema.safeParse(call.args);
+  let parsed = tool.inputSchema.safeParse(call.args);
   emit({
     schemaVersion: 1,
     kind: "tool.validated",
@@ -82,6 +84,30 @@ async function runOne(
       error: argumentRepairHint(call, parsed.error.issues),
       durationMs: dur(),
     };
+  }
+
+  // 1b. PreToolUse hooks: may block the call, replace its arguments, or change whether it asks.
+  const pre = opts.hooks
+    ? await opts.hooks.run(
+        "PreToolUse",
+        { tool_name: tool.manifest.name, tool_input: parsed.data },
+        opts.signal,
+      )
+    : {};
+  if (pre.block) {
+    return {
+      toolCallId,
+      wireId,
+      toolName: call.name,
+      ok: false,
+      result: null,
+      error: `blocked by a hook: ${pre.block}`,
+      durationMs: dur(),
+    };
+  }
+  if (pre.updatedInput) {
+    const replaced = tool.inputSchema.safeParse(pre.updatedInput);
+    if (replaced.success) parsed = replaced;
   }
 
   // 2. permission — honors existing session/project grants
@@ -108,7 +134,14 @@ async function runOne(
     autoApprovalStreak: autoApproval.streak,
     ...(autoApproval.cap !== undefined ? { autoApprovalCap: autoApproval.cap } : {}),
   };
-  const decision = decide(permInput);
+  const base = decide(permInput);
+  // A hook can turn a prompt into an automatic allow, or an automatic allow into a prompt — never undo a denial.
+  const decision =
+    base.effect === "ask" && pre.allow && !pre.ask
+      ? { ...base, effect: "allow" as const, reason: "allowed by a hook" }
+      : base.effect === "allow" && pre.ask
+        ? { ...base, effect: "ask" as const, reason: "a hook asked to confirm this" }
+        : base;
   let effect = decision.effect;
   let scopeGranted: "session" | undefined;
   if (effect === "ask") {
@@ -190,12 +223,23 @@ async function runOne(
   }
   try {
     const result = await runBounded(tool, parsed.data, makeToolCtx(toolCallId), opts.signal);
+    // PostToolUse hooks see the result; what they return (feedback or context) rides along to the model.
+    const afterHooks = async (o: ToolOutcome): Promise<ToolOutcome> => {
+      if (!opts.hooks) return o;
+      const r = await opts.hooks.run(
+        "PostToolUse",
+        { tool_name: tool.manifest.name, tool_input: parsed.data, tool_response: o.result },
+        opts.signal,
+      );
+      const note = [r.block, r.context].filter(Boolean).join("\n");
+      return note ? { ...o, hookNote: note } : o;
+    };
     // Validate the tool's OWN output for shape. A mismatch is OUR bug, not the model's — the side
     // effect ALREADY happened, so we must NOT report ok:false (that would invite a duplicate mutation).
     // We keep ok:true, surface the raw result, and note the mismatch.
     const outParsed = tool.outputSchema.safeParse(result);
     if (!outParsed.success) {
-      return {
+      return afterHooks({
         toolCallId,
         wireId,
         toolName: call.name,
@@ -203,16 +247,16 @@ async function runOne(
         result,
         error: `note: tool result did not match its output schema (${outParsed.error.message})`,
         durationMs: dur(),
-      };
+      });
     }
-    return {
+    return afterHooks({
       toolCallId,
       wireId,
       toolName: call.name,
       ok: true,
       result: outParsed.data,
       durationMs: dur(),
-    };
+    });
   } catch (err) {
     return {
       toolCallId,

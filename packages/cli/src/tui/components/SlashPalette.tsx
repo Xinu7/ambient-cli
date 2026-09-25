@@ -39,6 +39,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
   { name: "/context", desc: "How full the model's context is and when it compacts" },
   { name: "/usage", desc: "Tokens sent and received this session" },
+  {
+    name: "/hooks",
+    args: "[trust]",
+    desc: "Hooks that run on this project (trust the project's own)",
+  },
   { name: "/login", desc: "Add or change your Ambient API key (checked before saving)" },
   { name: "/logout", desc: "Remove the saved API key from this machine" },
   { name: "/clear", desc: "Clear the screen and start a fresh conversation" },
