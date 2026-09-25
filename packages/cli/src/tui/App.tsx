@@ -221,13 +221,27 @@ function appReducer(state: ViewState, action: Action): ViewState {
     case "clear":
       // A fresh conversation (idle /clear) also retires the plan; a mid-run clear only wipes the screen.
       return action.fresh
-        ? { ...clearTranscript(state), plan: [], status: { ...state.status, usage: undefined } }
+        ? {
+            ...clearTranscript(state),
+            plan: [],
+            contextWarned: undefined,
+            status: { ...state.status, usage: undefined },
+          }
         : clearTranscript(state);
   }
 }
 
 /** Most lines of launch notes that may sit under the splash banner. */
 const SPLASH_NOTE_LINES = 4;
+
+/** Runs at least this long ring the terminal bell when they finish. */
+const BELL_AFTER_MS = 30_000;
+
+/** The terminal bell (most terminals badge the tab or notify when unfocused). AMBIENT_BELL=0 silences it. */
+function ring(): void {
+  if (process.env.AMBIENT_BELL === "0" || !process.stdout.isTTY) return;
+  process.stdout.write("\x07");
+}
 
 /** The instruction that executes the SAVED plan ("adhere to it"). Called only for an explicit empty-Enter
  *  in BUILD mode; the steps are one-line labels (sanitized in parsePlan) referenced back to the model. */
@@ -502,6 +516,7 @@ export function App(deps: AppDeps): ReactNode {
         return;
       }
       approvalResolver.current = resolve;
+      ring(); // the agent is waiting on you
       // Pre-arm the selection: allow-once for a normal ask, but DENY when the request was escalated for risk —
       // a muscle-memory Enter must never approve something we flagged as dangerous. (ref + state, no closure.)
       const seed = defaultApprovalSel(req.decision.reason);
@@ -776,6 +791,8 @@ export function App(deps: AppDeps): ReactNode {
           sessionImagesRef.current = sessionImages;
         }
         dispatch({ t: "stop", stopReason: result.stopReason });
+        // A long run finishing is worth a heads-up if you've switched to another window.
+        if (Date.now() - runStartRef.current >= BELL_AFTER_MS) ring();
       } catch (err) {
         // An UNEXPECTED throw (classified errors return a result and carry forward normally): we didn't get
         // this run's messages, so the carried conversation is now behind the durable log. Reset it to [] so the

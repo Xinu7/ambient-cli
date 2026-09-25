@@ -231,6 +231,8 @@ export interface ViewState {
   showThinking: boolean;
   /** When the model started reasoning in the current step (wall clock ms), until it answers or acts. */
   thinkingSince?: number;
+  /** The highest context-fill warning already shown (70/85/95%), so each is said once until compaction. */
+  contextWarned?: number;
   /** Immutable monotonic counter for reducer-created item ids (keeps `reduce` pure). */
   seq: number;
   /** The LIVE subagent wave, if one is running — a small bounded panel (NOT a transcript item), so a wave can
@@ -463,6 +465,24 @@ function settleThought(state: ViewState, now: number): ViewState {
   }));
 }
 
+/** Context-fill levels that earn a one-time heads-up. */
+export const CONTEXT_WARN_LEVELS = [70, 85, 95] as const;
+
+/** Say once when the conversation crosses 70 / 85 / 95% of the model's window. */
+function contextWarning(state: ViewState, used: number, window: number): ViewState {
+  if (!(window > 0)) return state;
+  const pct = (used / window) * 100;
+  const level = [...CONTEXT_WARN_LEVELS].reverse().find((l) => pct >= l);
+  if (level === undefined || level <= (state.contextWarned ?? 0)) return state;
+  const text = `context ${Math.round(pct)}% full — it compacts automatically when needed · /compact [focus] to choose what's kept`;
+  return pushItem({ ...state, contextWarned: level }, (id) => ({
+    kind: "notice",
+    id,
+    level: level >= 85 ? "warn" : "info",
+    text,
+  }));
+}
+
 /** Fold one response's token counts into the session totals. */
 function addUsage(
   usage: SessionUsage | undefined,
@@ -558,8 +578,8 @@ export function reduce(state: ViewState, ev: NewEvent, now = 0): ViewState {
       return { ...state, status };
     }
 
-    case "context.preflight":
-      return {
+    case "context.preflight": {
+      const next: ViewState = {
         ...state,
         status: {
           ...state.status,
@@ -567,6 +587,10 @@ export function reduce(state: ViewState, ev: NewEvent, now = 0): ViewState {
           promptEstimate: ev.promptEstimate,
         },
       };
+      return ev.promptEstimate !== undefined && ev.contextWindow !== undefined
+        ? contextWarning(next, ev.promptEstimate, ev.contextWindow)
+        : next;
+    }
 
     case "inference.request":
       // A new model call: its live token count starts from zero, and the effort it was sent with is known
@@ -899,7 +923,11 @@ export function reduce(state: ViewState, ev: NewEvent, now = 0): ViewState {
 
     case "context.compacted":
       return pushItem(
-        { ...state, status: { ...state.status, activity: { verb: "Compacting context" } } },
+        {
+          ...state,
+          contextWarned: undefined, // room again — warn afresh if it fills back up
+          status: { ...state.status, activity: { verb: "Compacting context" } },
+        },
         (id) => ({
           kind: "notice",
           id,

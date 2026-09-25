@@ -72,3 +72,39 @@ describe("/context", () => {
     ]);
   });
 });
+
+describe("context-fill warnings", () => {
+  const preflight = (used: number): NewEvent =>
+    ({
+      ...base,
+      kind: "context.preflight",
+      model: "m",
+      contextWindow: 100_000,
+      promptEstimate: used,
+      reserve: 1_000,
+      requestedOutput: 8_000,
+      sentOutput: 8_000,
+      remainingShared: 0,
+      overflow: false,
+    }) as unknown as NewEvent;
+  const notices = (s: ReturnType<typeof initialState>) =>
+    s.transcript.filter((t) => t.kind === "notice").map((t) => (t as { text: string }).text);
+  it("says each level once, in order, and again after compaction frees room", () => {
+    let s = initialState({
+      agentMode: "build",
+      permission: "ask",
+      effort: "auto",
+      requestedModel: "m",
+    });
+    for (const used of [50_000, 71_000, 72_000, 86_000, 96_000, 97_000])
+      s = reduce(s, preflight(used));
+    expect(notices(s).map((t) => t.slice(0, 12))).toEqual([
+      "context 71% ",
+      "context 86% ",
+      "context 96% ",
+    ]);
+    s = reduce(s, { ...base, kind: "context.compacted", keptTokens: 30_000, summarizedPhases: 4 });
+    s = reduce(s, preflight(75_000));
+    expect(notices(s).at(-1)).toMatch(/^context 75% full/);
+  });
+});
