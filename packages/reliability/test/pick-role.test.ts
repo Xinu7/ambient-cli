@@ -17,24 +17,25 @@ function m(id: string, over: Partial<CatalogModel> = {}): CatalogModel {
 }
 
 // A representative live fleet: a coding flagship, a reasoning flagship, and a cheap flash model.
+// A representative fleet described ONLY by catalog capabilities (names are never interpreted).
 const fleet: CatalogModel[] = [
-  m("moonshotai/kimi-k2.7-code"), // coding-specialized
-  m("z-ai/glm-5.2-large", { supportedFeatures: ["tools", "reasoning"] }), // reasoning flagship
-  m("openai/gpt-oss-flash", { supportedFeatures: ["tools"] }), // cheap/fast
+  m("a/big", { contextLength: 262_144, maxOutputLength: 65_536 }), // biggest, no reasoning
+  m("b/reasoner", { contextLength: 131_072, supportedFeatures: ["tools", "reasoning"] }), // reasoning
+  m("c/small", { contextLength: 32_768, maxOutputLength: 4_096 }), // smallest
 ];
 
 describe("pickForRole", () => {
-  it("executor keeps the current default (coding model)", () => {
-    expect(pickForRole("executor", fleet)).toBe("moonshotai/kimi-k2.7-code");
+  it("executor takes the most capable model by declared capabilities", () => {
+    expect(pickForRole("executor", fleet)).toBe("b/reasoner"); // reasoning outweighs a 2× window
   });
 
-  it("planner and reviewer prefer the reasoning flagship over the code tier", () => {
-    expect(pickForRole("planner", fleet)).toBe("z-ai/glm-5.2-large");
-    expect(pickForRole("reviewer", fleet)).toBe("z-ai/glm-5.2-large");
+  it("planner and reviewer prefer the reasoning model", () => {
+    expect(pickForRole("planner", fleet)).toBe("b/reasoner");
+    expect(pickForRole("reviewer", fleet)).toBe("b/reasoner");
   });
 
-  it("compactor prefers the cheap/fast model (don't burn the flagship on summarization)", () => {
-    expect(pickForRole("compactor", fleet)).toBe("openai/gpt-oss-flash");
+  it("compactor (no pricing) prefers the smallest model — don't spend the biggest one on summarization", () => {
+    expect(pickForRole("compactor", fleet)).toBe("c/small");
   });
 
   it("compactor ranks by PRICING when the catalog has it (a cheap generic beats an expensive `flash`)", () => {

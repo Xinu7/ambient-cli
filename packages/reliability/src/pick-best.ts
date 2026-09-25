@@ -9,12 +9,10 @@ import { type CatalogModel, supportsVision } from "@amb/protocol";
  *      excluded (unless NONE advertise tools, in which case we don't exclude everything).
  *   2. Ready first — prefer `isReady === true`; if nothing is ready (cold start) keep the cold ones so we
  *      still resolve to SOMETHING rather than returning undefined.
- *   3. Capability TIER from the id — coding-specialized (`code`) > flagship (`large`/`max`/`opus`) > generic,
- *      and speed/cheap tiers (`flash`/`mini`/`nano`/`lite`/`small`/`tiny`/`turbo`) are down-ranked so a huge-
- *      context FLASH model doesn't beat a coding flagship. Reasoning support is a small bonus.
- *   4. Context length is a mild (log-scaled) secondary signal, then id order breaks ties deterministically.
- *
- * The heuristics are SOFT (scoring, not hard rules) so an unfamiliar future model still resolves sensibly.
+ *   3. Capabilities the catalog declares: reasoning support, then context window and output cap
+ *      (log-scaled, so a bigger window helps without dominating). Model NAMES are never interpreted — a
+ *      model called "code", "flash" or "large" is ranked only by what the catalog says it can do, so a new
+ *      model needs no code change. Id order breaks ties deterministically.
  */
 export function pickBestModel(catalog: CatalogModel[]): string | undefined {
   if (catalog.length === 0) return undefined;
@@ -27,9 +25,6 @@ export function pickBestModel(catalog: CatalogModel[]): string | undefined {
     .map((m) => ({ id: m.id, score: scoreModel(m) }))
     .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))[0]?.id;
 }
-
-const FLAGSHIP = ["large", "max", "opus", "ultra", "flagship"];
-const SMALL_TIER = ["flash", "mini", "nano", "lite", "small", "tiny", "turbo"];
 
 /**
  * A PHASE role the fleet can route to (feature #27). Each maps to a per-role scoring overlay on the shared
@@ -52,26 +47,16 @@ function priceOf(m: CatalogModel): number {
   );
 }
 
-/** Per-role score = the shared base score + a role overlay (soft, so an unfamiliar model still resolves). */
+/** Per-role score = the shared capability score + a role overlay (all from catalog fields, never names). */
 function roleScore(role: RoutedRole, m: CatalogModel): number {
-  const name = (m.id.split("/").pop() ?? m.id).toLowerCase();
   const base = scoreModel(m);
-  if (role === "executor") return base; // the current default — behavior unchanged where it matters
-  if (role === "planner" || role === "reviewer") {
-    // Planning/reviewing rewards reasoning + flagship tier more than raw coding specialization.
-    let bonus = 0;
-    if (m.supportedFeatures.includes("reasoning")) bonus += 25;
-    if (FLAGSHIP.some((w) => name.includes(w))) bonus += 20;
-    return base + bonus;
-  }
-  // compactor: a cheap/fast, WARM model is ideal for mechanical summarization — invert the small-tier penalty
-  // and de-prefer the expensive flagship/coding tiers (spending them on summarization is the cost leak we fix).
-  let bonus = 0;
-  if (SMALL_TIER.some((w) => name.includes(w))) bonus += 45;
-  if (FLAGSHIP.some((w) => name.includes(w))) bonus -= 30;
-  if (name.includes("code")) bonus -= 40;
-  if (m.isReady) bonus += 10;
-  return base + bonus;
+  if (role === "executor") return base;
+  // Planning and reviewing lean harder on reasoning.
+  if (role === "planner" || role === "reviewer")
+    return base + (m.supportedFeatures.includes("reasoning") ? 25 : 0);
+  // Compaction is mechanical: with no pricing to go on, a smaller model (smaller window/output) is the
+  // cheaper proxy, and a warm one avoids a cold start.
+  return -capacityScore(m) + (m.isReady ? 10 : 0);
 }
 
 /**
@@ -93,9 +78,8 @@ export function pickForRole(
   const pool = ready.length > 0 ? ready : base;
 
   // Compaction is pure cost minimization: when the catalog carries PRICING, pick the genuinely cheapest warm
-  // model (an expensive `vendor/flash` shouldn't beat a cheap generically-named one). Name tiers are only the
-  // fallback when no pricing is advertised. the model-facts fallback appends authoritative facts, so a weak-but-
-  // cheap summarizer is safe.
+  // model; capability size is only the fallback when no pricing is advertised. The summary always gets the
+  // authoritative facts appended, so a weak-but-cheap summarizer is safe.
   if (role === "compactor") {
     const priced = pool.filter((m) => hasPricing(m));
     if (priced.length > 0) {
@@ -158,31 +142,23 @@ export function rankVisionModels(
     .map((m) => m.id);
 }
 
-/** Score a vision model for the relay: flagship up, small-tier mildly down (a small VLM is still fine for a
- *  one-shot description), reasoning + context as gentle bonuses. NO coding bonus (describing an image ≠ coding). */
+/** Score a vision model for the relay from its catalog capabilities (window, output cap, reasoning). */
 export function scoreVisionModel(m: CatalogModel): number {
-  const name = (m.id.split("/").pop() ?? m.id).toLowerCase();
-  let s = 0;
-  if (FLAGSHIP.some((w) => name.includes(w))) s += 20;
-  if (SMALL_TIER.some((w) => name.includes(w))) s -= 15;
-  if (m.supportedFeatures.includes("reasoning")) s += 5;
-  s += Math.min(10, Math.log10(Math.max(1, m.contextLength ?? 0)));
-  return s;
+  return capacityScore(m) + (m.supportedFeatures.includes("reasoning") ? 5 : 0);
 }
 
-/**
- * Capability-tier score for one model (higher = a better default). Pure; see pickBestModel for the rationale.
- * Tier words are matched against the MODEL NAME only (the part after the last `/`), never the vendor — so a
- * vendor id like `smallco/pro` or `code-labs/x` isn't accidentally up/down-ranked by its vendor name.
- */
+/** Size signals the catalog declares: context window and output cap, log-scaled so they help without
+ *  dominating (32K ≈ 8, 200K ≈ 18, 1M ≈ 28; output adds up to 6). Missing fields count as small. */
+export function capacityScore(m: CatalogModel): number {
+  const ctx = m.contextLength ?? 8_192;
+  const out = m.maxOutputLength ?? 4_096;
+  return (
+    Math.min(28, Math.max(0, Math.log2(ctx / 8_192) * 4)) +
+    Math.min(6, Math.max(0, Math.log2(out / 4_096) * 1.5))
+  );
+}
+
+/** Capability score for one model as a default (higher = better): reasoning support + capacity. Pure. */
 export function scoreModel(m: CatalogModel): number {
-  const name = (m.id.split("/").pop() ?? m.id).toLowerCase();
-  let s = 0;
-  if (name.includes("code")) s += 40; // coding-specialized — ideal for a coding agent
-  if (FLAGSHIP.some((w) => name.includes(w))) s += 20; // flagship tier
-  if (SMALL_TIER.some((w) => name.includes(w))) s -= 25; // speed/cheap tier — a poor default for coding
-  if (m.supportedFeatures.includes("reasoning")) s += 5;
-  // Context as a MILD secondary signal (log-scaled + capped) — never enough to make a flash model the default.
-  s += Math.min(10, Math.log10(Math.max(1, m.contextLength ?? 0)));
-  return s;
+  return (m.supportedFeatures.includes("reasoning") ? 15 : 0) + capacityScore(m);
 }

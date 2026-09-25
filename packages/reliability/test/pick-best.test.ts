@@ -31,18 +31,26 @@ describe("pickBestModel", () => {
     expect(pickBestModel([])).toBeUndefined();
   });
 
-  it("prefers the coding-specialized model over a bigger-context FLASH model", () => {
-    // deepseek-flash has 4x the context but is a speed tier; kimi-*-code is coding-specialized → best default.
-    expect(pickBestModel(FLEET)).toBe("moonshotai/kimi-k2.7-code");
+  it("ranks by declared capabilities: reasoning + a bigger window beat a small non-reasoning model", () => {
+    const fleet = [
+      m("x/small", { contextLength: 32_768, supportedFeatures: ["tools"] }),
+      m("y/big-reasoner", { contextLength: 202_752, supportedFeatures: ["tools", "reasoning"] }),
+    ];
+    expect(pickBestModel(fleet)).toBe("y/big-reasoner");
   });
 
-  it("self-heals: when the coding model is gone, falls back to the flagship tier, not the flash model", () => {
-    const gone = FLEET.filter((x) => x.id !== "moonshotai/kimi-k2.7-code");
-    expect(pickBestModel(gone)).toBe("ambient/large"); // 'large' flagship beats glm and the flash model
+  it("a new 1M-context model is preferred automatically — no code change", () => {
+    const withNew = [
+      ...FLEET,
+      m("newco/brand-new", { contextLength: 1_048_576, maxOutputLength: 65_536 }),
+    ];
+    expect(["newco/brand-new", "deepseek/deepseek-v4-flash-0731"]).toContain(
+      pickBestModel(withNew),
+    );
   });
 
   it("only ever returns a READY model when any ready model exists", () => {
-    // Make the two strong models cold; the best READY (glm) must win over cold kimi/ambient-large.
+    // Make two models cold; the most capable READY one must win over any cold model.
     const cat = FLEET.map((x) =>
       x.id === "moonshotai/kimi-k2.7-code" || x.id === "ambient/large"
         ? { ...x, isReady: false }
@@ -50,12 +58,12 @@ describe("pickBestModel", () => {
     );
     const pick = pickBestModel(cat);
     expect(cat.find((x) => x.id === pick)?.isReady).toBe(true);
-    expect(pick).toBe("z-ai/glm-5.2"); // best ready after the two strong ones went cold (flash still down-ranked)
+    expect(pick).toBe("deepseek/deepseek-v4-flash-0731"); // the most capable READY model (1M window)
   });
 
   it("falls back to a COLD model when nothing is ready (cold-start still resolves)", () => {
     const allCold = FLEET.map((x) => ({ ...x, isReady: false }));
-    expect(pickBestModel(allCold)).toBe("moonshotai/kimi-k2.7-code"); // best by tier, even though cold
+    expect(pickBestModel(allCold)).toBe("deepseek/deepseek-v4-flash-0731"); // most capable, even though cold
   });
 
   it("prefers a tool-capable model (a coding agent needs native tool-calls)", () => {
@@ -66,16 +74,10 @@ describe("pickBestModel", () => {
     expect(pickBestModel(cat)).toBe("vendor/tools-small");
   });
 
-  it("scores the model NAME, not the vendor (a 'smallco/' or 'code-labs/' vendor isn't mis-ranked)", () => {
-    // If the vendor were scored, 'bigvendor-small/pro' would be down-ranked and 'code-labs/plain' up-ranked.
-    const small = m("smallco/pro-262k", { contextLength: 262_144 }); // vendor has "small", model does not
-    const plain = m("code-labs/plain-262k", { contextLength: 262_144 }); // vendor has "code", model does not
-    // Neither has a tier word in its MODEL name → they tie on features+ctx → deterministic id order.
-    expect(pickBestModel([small, plain])).toBe(pickBestModel([plain, small]));
-    // A model whose NAME says small IS down-ranked, even against a vendor that merely looks big.
-    const named = m("x/mini-fast", { contextLength: 262_144 });
-    const big = m("mini-corp/pro", { contextLength: 262_144 }); // vendor "mini", model "pro"
-    expect(pickBestModel([named, big])).toBe("mini-corp/pro");
+  it("never interprets model names: 'code'/'flash'/'large' in an id changes nothing", () => {
+    const same = { contextLength: 131_072, maxOutputLength: 8_192 };
+    const fleet = [m("z/super-code-large", same), m("a/plain", same), m("m/tiny-flash", same)];
+    expect(pickBestModel(fleet)).toBe("a/plain"); // an exact capability tie → deterministic id order
   });
 
   it("is deterministic on a tie (stable id order)", () => {

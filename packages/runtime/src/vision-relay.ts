@@ -1,5 +1,5 @@
 import { AmbError, type CatalogModel, supportsVision } from "@amb/protocol";
-import { rankVisionModels, streamTimeouts } from "@amb/reliability";
+import { UNKNOWN_WINDOW, rankVisionModels, streamTimeouts } from "@amb/reliability";
 import type { ChatClient } from "./ports.js";
 
 /**
@@ -69,7 +69,7 @@ export async function relayImageToText(deps: RelayDeps): Promise<RelayResult> {
     if (signal.aborted) return { outcome: "failed", tried };
     tried.push(id);
     const model = catalog.find((m) => m.id === id);
-    const window = model?.contextLength ?? 128_000;
+    const window = model?.contextLength ?? UNKNOWN_WINDOW;
     const descTokens = Math.max(256, Math.min(1500, Math.floor(window * 0.15)));
 
     // Link the run's signal to a per-attempt timeout so a hung vision call can't stall the run forever.

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { planCompaction } from "@amb/context";
 import type { CatalogModel } from "@amb/protocol";
+import { UNKNOWN_WINDOW } from "@amb/reliability";
 import type { Msg } from "./ports.js";
 
 /**
@@ -346,7 +347,7 @@ export function fallbackModel(id: string): CatalogModel {
     outputModalities: [],
     supportedFeatures: [],
     supportedSamplingParameters: [],
-    contextLength: 128_000,
+    contextLength: UNKNOWN_WINDOW, // unknown model → conservative (same default as ModelProfile)
     maxOutputLength: 8192,
   };
 }

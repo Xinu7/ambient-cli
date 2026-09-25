@@ -1,6 +1,5 @@
 import { type CatalogModel, supportsVision } from "@amb/protocol";
 import { effectiveWindow } from "./ceiling.js";
-import { SAFE_MAX_OUTPUT_TOKENS } from "./floors.js";
 
 /**
  * ModelProfile — everything the agent needs to know about a model, derived ONLY from its live catalog entry
@@ -15,6 +14,10 @@ import { SAFE_MAX_OUTPUT_TOKENS } from "./floors.js";
 export const UNKNOWN_WINDOW = 32_768;
 /** Output cap assumed when the catalog doesn't publish one. */
 export const UNKNOWN_OUTPUT = 8_192;
+/** Hard safety ceiling on any single request's output budget, whatever a model advertises. */
+export const SAFE_MAX_OUTPUT_TOKENS = 65_536;
+/** At or above this window, attached images are sent at full detail (smaller windows get a lighter plan). */
+export const HIGH_DETAIL_IMAGE_WINDOW = 200_000;
 /** Chars per token for converting token budgets to character budgets (matches the estimator's default). */
 const CHARS_PER_TOKEN = 3.5;
 

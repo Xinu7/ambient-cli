@@ -6,7 +6,7 @@ import {
   planCompaction,
 } from "@amb/context";
 import type { CatalogModel } from "@amb/protocol";
-import { pickForRole, streamTimeouts } from "@amb/reliability";
+import { UNKNOWN_WINDOW, pickForRole, streamTimeouts } from "@amb/reliability";
 import { SPILL_NOTE, SUMMARY_MARKER, deterministicSummary, planSpill } from "./agent-support.js";
 import { MAX_COMPACTIONS } from "./constants.js";
 import { summaryEffort } from "./effort.js";
@@ -125,9 +125,6 @@ export async function compact(
   return next;
 }
 
-/** Window assumed for a compactor model that publishes no context length. */
-const UNKNOWN_COMPACTOR_WINDOW = 32_768;
-
 /** Most summarizer calls one compaction may spend; older overflow is folded in deterministically instead. */
 const MAX_SUMMARY_CHUNKS = 8;
 
@@ -156,7 +153,7 @@ async function rollingSummary(
 ): Promise<string | undefined> {
   // When the compactor IS the served model, the caller's window already includes its learned ceiling; a
   // different compactor uses its own catalog window, or a conservative default when it doesn't publish one.
-  const window = sameAsTarget ? fallbackWindow : (model?.contextLength ?? UNKNOWN_COMPACTOR_WINDOW);
+  const window = sameAsTarget ? fallbackWindow : (model?.contextLength ?? UNKNOWN_WINDOW);
   const maxTokens = summaryOutputTokens(model, window);
   const inputBudget = Math.floor(window * 0.9) - maxTokens;
   if (inputBudget < 1024) return undefined;

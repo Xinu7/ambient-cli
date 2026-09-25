@@ -11,8 +11,8 @@ export const REASONING_MIN_OUTPUT_TOKENS = 2048;
 export const NON_REASONING_MIN_OUTPUT_TOKENS = 256;
 /** Unknown reasoning-ness ⇒ assume reasoning (the safer, higher floor). */
 export const DEFAULT_MIN_OUTPUT_TOKENS = 2048;
-/** Hard safety ceiling on any single request's output budget. */
-export const SAFE_MAX_OUTPUT_TOKENS = 65_536;
+import { SAFE_MAX_OUTPUT_TOKENS } from "./profile.js";
+export { SAFE_MAX_OUTPUT_TOKENS };
 
 export function minOutputFloor(opts: { reasoning?: boolean; measuredMin?: number }): number {
   if (opts.measuredMin !== undefined) return opts.measuredMin;

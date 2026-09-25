@@ -1141,13 +1141,21 @@ describe("Agent loop", () => {
   it("compaction routes the summary to a cheap fleet model with a visible handoff (cost win)", async () => {
     const win = 40_000; // small enough that a few big turns cross the compaction threshold
     const fleet: CatalogModel[] = [
-      { ...(catalog[0] as CatalogModel), id: "big/kimi-code", contextLength: win, isReady: true },
+      // Cost comes from the catalog's pricing (names are never interpreted).
+      {
+        ...(catalog[0] as CatalogModel),
+        id: "big/kimi-code",
+        contextLength: win,
+        isReady: true,
+        pricing: { input: 2, output: 8 },
+      },
       {
         ...(catalog[0] as CatalogModel),
         id: "cheap/gpt-flash",
         contextLength: win,
         isReady: true,
         supportedFeatures: ["tools"],
+        pricing: { input: 0.1, output: 0.2 },
       },
     ];
     const chatModels: string[] = [];

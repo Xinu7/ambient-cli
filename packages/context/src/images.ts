@@ -1,3 +1,5 @@
+import { HIGH_DETAIL_IMAGE_WINDOW } from "@amb/reliability";
+
 /**
  * ADAPTIVE image planning — pure, no I/O. Decides, from the SERVED model's context window, how detailed an
  * image may be (downscale edge + token cost) and how many images fit alongside the prompt, so a pasted
@@ -18,7 +20,7 @@ export const IMAGE_EDGE_LOW = 768;
 export const IMAGE_EDGE_MED = 1024;
 export const IMAGE_EDGE_HIGH = 1568;
 export const WINDOW_LOW_DETAIL = 40_000; // below this → low detail, 1 image
-export const WINDOW_HIGH_DETAIL = 200_000; // at/above this → full detail, up to HARD_MAX_IMAGES
+export const WINDOW_HIGH_DETAIL = HIGH_DETAIL_IMAGE_WINDOW; // at/above this → full detail, up to HARD_MAX_IMAGES
 export const HARD_MAX_IMAGES = 6;
 
 export interface ImagePlan {
