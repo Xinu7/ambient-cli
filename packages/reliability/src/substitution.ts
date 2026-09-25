@@ -20,6 +20,14 @@ export interface SubstitutionPrefs {
    * full warm set so a failover never fails just because no lane-matched model is warm.
    */
   prefer?: (modelId: string) => boolean;
+  /** Models never to return (e.g. ones that already failed this turn). */
+  exclude?: ReadonlySet<string>;
+  /**
+   * The catalog's readiness flag is a HINT: flagged-cold models have been observed serving normally. When set
+   * (failover — the current model already failed) and nothing is warm, fall back to the best non-excluded
+   * flagged model instead of giving up; a real "no workers" 429 still fails over from it.
+   */
+  attemptCold?: boolean;
 }
 
 function vendorOf(id: string): string {
@@ -31,12 +39,19 @@ export function readySubstitute(
   catalog: CatalogModel[],
   prefs: SubstitutionPrefs = {},
 ): string | null {
+  const excluded = prefs.exclude ?? new Set<string>();
   const entry = catalog.find((m) => m.id === modelId);
-  // Warm (true) or unknown-readiness (undefined) ⇒ serve as-is. Only substitute for cold or vanished.
-  if (entry && entry.isReady !== false) return null;
+  // Warm (true) or unknown-readiness (undefined) ⇒ serve as-is. Only substitute for cold, vanished or excluded.
+  if (entry && entry.isReady !== false && !excluded.has(modelId)) return null;
 
-  const warmAll = catalog.filter((m) => m.isReady === true);
-  if (warmAll.length === 0) return null; // nothing warm — let the request go and fail honestly
+  const eligible = catalog.filter((m) => m.id !== modelId && !excluded.has(m.id));
+  let warmAll = eligible.filter((m) => m.isReady === true);
+  if (warmAll.length === 0) {
+    // Nothing warm. Initial resolution serves the request as-is; failover tries the flagged-cold rest.
+    if (!prefs.attemptCold) return null;
+    warmAll = eligible;
+    if (warmAll.length === 0) return null;
+  }
 
   // Restrict to lane-matched candidates when the caller asked and any exist; otherwise use all warm.
   const preferred = prefs.prefer ? warmAll.filter((m) => prefs.prefer?.(m.id)) : [];

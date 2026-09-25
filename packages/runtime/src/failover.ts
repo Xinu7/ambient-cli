@@ -155,7 +155,11 @@ export async function runChatWithFailover(
         maxTokens: sentOutput,
         reasoningEffort: reqEffort,
         // Bound the stream: a worker that accepts the request then goes silent must not hang the turn.
-        timeouts: streamTimeouts({ promptTokens, ...(reqEffort ? { effort: reqEffort } : {}) }),
+        timeouts: streamTimeouts({
+          promptTokens,
+          ...(reqEffort ? { effort: reqEffort } : {}),
+          flaggedCold: model?.isReady === false,
+        }),
         onContent: stream
           ? (t) =>
               ctx.emit({
@@ -266,7 +270,7 @@ export async function runChatWithFailover(
         throw err;
       }
       ctx.onCatalog(live);
-      const masked = live.map((m) => (failed.has(m.id) ? { ...m, isReady: false } : m));
+      const masked = live;
       // Prefer a substitute whose transport lane MATCHES the request we already built: a direct-lane
       // request has native `tools` on the wire, so a native-incapable (assisted-only) substitute would
       // silently ignore them and reply with prose. Fall back to any warm model if none match the lane.
@@ -275,6 +279,10 @@ export async function runChatWithFailover(
       const next = readySubstitute(current, masked, {
         // A substitute must match the request's lane AND (when the message carries images) be vision-capable.
         prefer: (id) => deps.laneOf(id, masked, ctx.capabilities) === ctx.lane && visionOk(id),
+        // Never retry a model that already failed this turn; if the catalog flags everything cold, still
+        // try the rest (the flag is a hint — a real "no workers" 429 fails over again).
+        exclude: failed,
+        attemptCold: true,
       });
       if (!next || failed.has(next)) throw err;
       // Vision SAFETY: never ship image parts to a blind model (it 400s). If no warm vision-capable substitute

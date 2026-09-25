@@ -11,10 +11,20 @@ const TAGLINE = "A terminal coding agent for the Ambient network.";
  *  (measured, not a magic number) so the wordmark can never be forced to wrap on the very first screen. */
 const LOCKUP_W = (BRAILLE_GLOBE[0]?.length ?? 20) + 3 + (AMBIENT_BANNER[0]?.length ?? 30);
 
-/** The count of models ready to serve right now — the number is the point; the total is noise. */
-function readyLine(fleet?: { ready: number }): { count: string; rest: string } {
+/**
+ * The count of models ready to serve right now. The catalog's readiness flag can lag reality (flagged models
+ * have been seen serving), so when none is marked ready but models exist, say exactly that — not "no models".
+ */
+export function readyLine(fleet?: { ready: number; total?: number }): {
+  count: string;
+  rest: string;
+} {
   if (!fleet) return { count: "", rest: "connecting…" };
-  if (fleet.ready === 0) return { count: "", rest: "no models ready" };
+  if (fleet.ready === 0 && (fleet.total ?? 0) > 0) {
+    const t = fleet.total ?? 0;
+    return { count: String(t), rest: ` model${t === 1 ? "" : "s"} · none marked ready` };
+  }
+  if (fleet.ready === 0) return { count: "", rest: "no models available" };
   return { count: String(fleet.ready), rest: ` model${fleet.ready === 1 ? "" : "s"} ready` };
 }
 
@@ -30,7 +40,7 @@ export function Banner({
   update,
 }: {
   width: number;
-  fleet?: { ready: number };
+  fleet?: { ready: number; total?: number };
   version?: string;
   update?: { latest: string; command: string };
 }): ReactNode {

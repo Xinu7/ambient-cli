@@ -230,9 +230,12 @@ export function App(deps: AppDeps): ReactNode {
   // Images pending on the NEXT message (Ctrl+V / drag-drop / /attach). Ref mirror for synchronous key handling.
   const [attachments, setAttachmentsState] = useState<ImageAttachment[]>([]);
   const [fleet] = useState(deps.fleet);
-  // The model picker only offers LIVE models — a cold model 429s ("no workers") and would just be substituted,
-  // so listing it is noise. (The runtime still substitutes if a chosen model goes cold between pick and run.)
-  const readyFleet = useMemo(() => (fleet ?? []).filter((r) => r.avail === "ready"), [fleet]);
+  // The picker lists EVERY model, ready ones first. The catalog's readiness flag is a hint (flagged models
+  // have been seen serving), so a flagged one stays selectable and is marked; a truly down one fails over.
+  const pickerFleet = useMemo(() => {
+    const rank = (a: FleetRow["avail"]) => (a === "ready" ? 0 : a === "unknown" ? 1 : 2);
+    return [...(fleet ?? [])].sort((a, b) => rank(a.avail) - rank(b.avail));
+  }, [fleet]);
   const [runActive, setRunActive] = useState(false);
   const [queued, setQueued] = useState<string[]>([]);
   const [slashSel, setSlashSel] = useState(0);
@@ -785,7 +788,7 @@ export function App(deps: AppDeps): ReactNode {
   };
 
   const openModelPicker = (): void => {
-    const list = readyFleet;
+    const list = pickerFleet;
     // No LIVE models (fleet fetch failed, or every model is cold) → don't open an empty no-op box; point at
     // the manual path (a cold model can still be chosen by id — the runtime substitutes a warm one).
     if (list.length === 0) {
@@ -1169,7 +1172,7 @@ export function App(deps: AppDeps): ReactNode {
 
     // 3) The model picker owns ↑/↓/Enter/Esc while open.
     if (pickerRef.current === "model") {
-      const list = readyFleet;
+      const list = pickerFleet;
       if (key.escape) {
         setPicker(null);
         return;
@@ -1509,7 +1512,11 @@ export function App(deps: AppDeps): ReactNode {
           {onSplash ? (
             <Banner
               width={width}
-              fleet={readyCount !== undefined ? { ready: readyCount } : undefined}
+              fleet={
+                readyCount !== undefined
+                  ? { ready: readyCount, total: fleet?.length ?? 0 }
+                  : undefined
+              }
               version={deps.version}
               {...(deps.update ? { update: deps.update } : {})}
             />
@@ -1571,7 +1578,7 @@ export function App(deps: AppDeps): ReactNode {
             {picker === "model" ? (
               <Box marginTop={1}>
                 <ModelPicker
-                  rows={readyFleet}
+                  rows={pickerFleet}
                   selected={pickerSel}
                   current={state.status.requestedModel}
                   width={width}

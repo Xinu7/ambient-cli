@@ -1,5 +1,5 @@
-import { type CatalogModel, supportsVision } from "@amb/protocol";
-import { pickVisionModel, streamTimeouts } from "@amb/reliability";
+import { AmbError, type CatalogModel, supportsVision } from "@amb/protocol";
+import { rankVisionModels, streamTimeouts } from "@amb/reliability";
 import type { ChatClient } from "./ports.js";
 
 /**
@@ -26,6 +26,8 @@ export interface RelayResult {
   visionModel?: string;
   /** The description text — present only when outcome === "described". */
   description?: string;
+  /** Every vision model attempted, in order (for an honest "tried X, Y" message). */
+  tried?: string[];
 }
 
 export interface RelayDeps {
@@ -49,17 +51,24 @@ export function toVisionContent(userText: string, imageDataUris: readonly string
   ];
 }
 
-/** Describe the image(s) via a ready vision model, with a bounded timeout + one warm-peer failover. */
+/** Most vision peers one relay will try before giving up. */
+const MAX_RELAY_ATTEMPTS = 4;
+
+/**
+ * Describe the image(s) via a vision model from the live catalog, trying peers in order (ready first). The
+ * catalog's readiness flag is only a hint — a flagged model is still tried, and only a real "no workers"
+ * answer from every peer makes the outcome `cold`. Each attempt is bounded by a timeout.
+ */
 export async function relayImageToText(deps: RelayDeps): Promise<RelayResult> {
   const { client, catalog, imageDataUris, userText, signal } = deps;
-  const excluded = new Set<string>();
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const pick = pickVisionModel(catalog, { exclude: excluded });
-    if (!pick) return { outcome: "no-model" };
-    if (!pick.ready) return { outcome: "cold", visionModel: pick.id }; // a cold model 429s — never fire it
-    excluded.add(pick.id);
-
-    const model = catalog.find((m) => m.id === pick.id);
+  const candidates = rankVisionModels(catalog).slice(0, MAX_RELAY_ATTEMPTS);
+  if (candidates.length === 0) return { outcome: "no-model" };
+  const tried: string[] = [];
+  let allCold = true;
+  for (const id of candidates) {
+    if (signal.aborted) return { outcome: "failed", tried };
+    tried.push(id);
+    const model = catalog.find((m) => m.id === id);
     const window = model?.contextLength ?? 128_000;
     const descTokens = Math.max(256, Math.min(1500, Math.floor(window * 0.15)));
 
@@ -71,27 +80,31 @@ export async function relayImageToText(deps: RelayDeps): Promise<RelayResult> {
     const timer = setTimeout(() => linked.abort(), RELAY_TIMEOUT_MS);
     try {
       const res = await client.chat({
-        model: pick.id,
+        model: id,
         messages: [{ role: "user", content: toVisionContent(userText, imageDataUris) }],
         tools: [],
         maxTokens: descTokens,
         // Images are a large, slow prefill; the watchdog still catches a silent worker well before the cap.
-        timeouts: streamTimeouts({ promptTokens: 8_000 * imageDataUris.length }),
+        timeouts: streamTimeouts({
+          promptTokens: 8_000 * imageDataUris.length,
+          flaggedCold: model?.isReady === false,
+        }),
         signal: linked.signal,
         hasImage: true,
       });
       const desc = (res.content ?? "").trim();
-      if (desc.length > 0) return { outcome: "described", visionModel: pick.id, description: desc };
-      // Empty description → try one more warm peer, else fall through to "failed".
-    } catch {
-      if (signal.aborted) return { outcome: "failed", visionModel: pick.id }; // the run was cancelled
-      // A model error → try one more warm peer.
+      if (desc.length > 0)
+        return { outcome: "described", visionModel: id, description: desc, tried };
+      allCold = false; // it answered, just emptily → try the next peer
+    } catch (e) {
+      if (signal.aborted) return { outcome: "failed", visionModel: id, tried }; // the run was cancelled
+      if (!(e instanceof AmbError && e.kind === "cold")) allCold = false;
     } finally {
       clearTimeout(timer);
       signal.removeEventListener("abort", onAbort);
     }
   }
-  return { outcome: "failed" };
+  return { outcome: allCold ? "cold" : "failed", tried };
 }
 
 /**
@@ -108,7 +121,7 @@ export function injectDescription(userText: string, result: RelayResult): string
     result.outcome === "no-model"
       ? "no vision-capable model is available right now"
       : result.outcome === "cold"
-        ? "the only vision-capable model is cold right now"
+        ? "every vision-capable model is cold right now"
         : "the image could not be described";
   return `${base}\n\n[You were sent an image, but the model serving you can't see images and ${why}. Work from the text; if the image is essential, ask the user to describe it.]`;
 }

@@ -5,8 +5,8 @@ import { AmbientTheme } from "../theme.js";
 
 /**
  * An interactive model picker over the live fleet. ↑/↓ move the selection, Enter picks, Esc cancels.
- * Ready models show a green dot; cold ones a dim ring (still selectable — the runtime substitutes a warm
- * model and says so). The current model is marked.
+ * Ready models show a green dot; ones the catalog flags cold show a dim ring and "flagged" (still selectable:
+ * the flag is a hint, and a truly down model fails over). The current model is marked.
  */
 export function ModelPicker({
   rows,
@@ -49,7 +49,9 @@ export function ModelPicker({
         const ready = r.avail === "ready";
         // status marker FIRST so "current"/"cold" survives even when the metadata clips on a narrow terminal,
         // in a FIXED-width column so the ctx/lane that follow line up as a clean grid across ready + cold rows.
-        const status = (r.id === current ? "· current" : ready ? "" : "· cold").padEnd(9);
+        const status = (
+          r.id === current ? "· current" : ready ? "" : r.avail === "cold" ? "· flagged" : "· ?"
+        ).padEnd(9);
         const meta = `${status}  ${r.ctx.padEnd(5)} ${r.lane}`;
         return (
           <Box key={r.id}>

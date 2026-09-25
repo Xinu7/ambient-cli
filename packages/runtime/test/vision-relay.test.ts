@@ -1,4 +1,4 @@
-import type { CatalogModel } from "@amb/protocol";
+import { AmbError, type CatalogModel } from "@amb/protocol";
 import { describe, expect, it } from "vitest";
 import type { ChatClient, ChatParams, TurnCompletion } from "../src/ports.js";
 import { injectDescription, relayImageToText, toVisionContent } from "../src/vision-relay.js";
@@ -58,20 +58,48 @@ describe("vision relay (slice 6)", () => {
     expect(injectDescription("look", res).toLowerCase()).toContain("can't see images");
   });
 
-  it("only a COLD vision model → 'cold' (never fires a cold model)", async () => {
-    let called = false;
+  it("a vision model the catalog FLAGS cold is still tried — the flag is a hint (live: flagged models serve)", async () => {
     const res = await relayImageToText({
-      client: client(async () => {
-        called = true;
-        return { content: "x", toolCalls: [] };
-      }),
+      client: client(async () => ({ content: "A login form.", toolCalls: [] })),
       catalog: [m("kimi/code"), vision("google/gemma-vl", { isReady: false })],
       imageDataUris: URIS,
       userText: "look",
       signal: sig,
     });
+    expect(res.outcome).toBe("described");
+    expect(res.visionModel).toBe("google/gemma-vl");
+  });
+
+  it("only when every vision model REALLY answers 'no workers' is the outcome 'cold'", async () => {
+    const res = await relayImageToText({
+      client: client(async () => {
+        throw new AmbError({ kind: "cold", message: "no workers", retryable: false });
+      }),
+      catalog: [vision("a/vl", { isReady: false }), vision("b/vl", { isReady: false })],
+      imageDataUris: URIS,
+      userText: "look",
+      signal: sig,
+    });
     expect(res.outcome).toBe("cold");
-    expect(called).toBe(false); // did NOT fire the cold model
+    expect(res.tried).toEqual(expect.arrayContaining(["a/vl", "b/vl"]));
+  });
+
+  it("tries every vision peer in order (ready first) until one describes the image", async () => {
+    const seen: string[] = [];
+    const res = await relayImageToText({
+      client: client(async (p) => {
+        seen.push(p.model);
+        if (p.model !== "c/vl") throw new Error("socket hang up");
+        return { content: "a chart", toolCalls: [] };
+      }),
+      catalog: [vision("a/vl"), vision("b/vl"), vision("c/vl", { isReady: false })],
+      imageDataUris: URIS,
+      userText: "look",
+      signal: sig,
+    });
+    expect(res.outcome).toBe("described");
+    expect(seen.at(-1)).toBe("c/vl");
+    expect(seen.slice(0, 2).sort()).toEqual(["a/vl", "b/vl"]); // ready peers before the flagged-cold one
   });
 
   it("empty description → fails over to a warm peer, then degrades", async () => {

@@ -25,16 +25,22 @@ function envMs(v: string | undefined): number | undefined {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
 }
 
+/** First-byte cap when trying a model the catalog flags cold: a truly-down worker must fail fast. */
+const FLAGGED_COLD_FIRST_BYTE_MS = 30_000;
+
 export function streamTimeouts(
-  req: { promptTokens: number; effort?: string },
+  req: { promptTokens: number; effort?: string; flaggedCold?: boolean },
   env: Record<string, string | undefined> = process.env,
 ): StreamTimeouts {
   const deep = req.effort === "max" || req.effort === "xhigh";
   const factor = deep ? MAX_EFFORT_FACTOR : 1;
   const prefill = (Math.max(0, req.promptTokens) / 100_000) * FIRST_BYTE_PER_100K_MS;
   const firstByte = Math.min(FIRST_BYTE_CAP_MS, (FIRST_BYTE_BASE_MS + prefill) * (deep ? 1.5 : 1));
+  const firstByteMs = req.flaggedCold
+    ? Math.min(FLAGGED_COLD_FIRST_BYTE_MS, firstByte)
+    : Math.round(firstByte);
   return {
-    firstByteMs: envMs(env.AMBIENT_FIRST_BYTE_TIMEOUT_MS) ?? Math.round(firstByte),
+    firstByteMs: envMs(env.AMBIENT_FIRST_BYTE_TIMEOUT_MS) ?? firstByteMs,
     idleMs: envMs(env.AMBIENT_STREAM_IDLE_TIMEOUT_MS) ?? IDLE_BASE_MS * factor,
   };
 }

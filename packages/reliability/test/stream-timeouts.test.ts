@@ -14,6 +14,10 @@ describe("streamTimeouts", () => {
     expect(max.idleMs).toBeGreaterThan(none.idleMs);
     expect(max.firstByteMs).toBeGreaterThan(none.firstByteMs);
   });
+  it("a model the catalog flags cold gets a short first-byte leash (a down worker fails fast)", () => {
+    const t = streamTimeouts({ promptTokens: 50_000, flaggedCold: true }, {});
+    expect(t.firstByteMs).toBeLessThanOrEqual(30_000);
+  });
   it("honors env overrides", () => {
     const t = streamTimeouts(
       { promptTokens: 1 },

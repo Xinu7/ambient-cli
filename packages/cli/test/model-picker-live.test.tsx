@@ -39,7 +39,7 @@ const fleet: FleetRow[] = [
   },
 ];
 
-it("the /model picker lists only LIVE models — cold ones are hidden", async () => {
+it("the /model picker lists every model, ready first; catalog-flagged ones are marked, not hidden", async () => {
   const { lastFrame, stdin, unmount } = render(
     <App
       client={stubClient}
@@ -63,7 +63,10 @@ it("the /model picker lists only LIVE models — cold ones are hidden", async ()
   expect(frame).toContain("Pick a model"); // the picker is open
   expect(frame).toContain("kimi-k2.7-code"); // ready → shown
   expect(frame).toContain("glm-5.2"); // ready → shown
-  expect(frame).not.toContain("qwen3.6-27b"); // cold → hidden
-  expect(frame).not.toContain("cold"); // no cold marker at all
+  // The readiness flag is a hint (flagged models have served live), so a flagged model stays pickable…
+  expect(frame).toContain("qwen3.6-27b");
+  expect(frame).toContain("flagged");
+  // …and it sorts after the ready ones.
+  expect(frame.indexOf("qwen3.6-27b")).toBeGreaterThan(frame.indexOf("glm-5.2"));
   unmount();
 });

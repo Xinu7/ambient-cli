@@ -699,7 +699,7 @@ describe("tui render", () => {
     expect(frame).toContain("qwen/qwen3.6-27b");
     expect(frame).toContain("▸"); // selection marker on the first (selected) row
     expect(frame).toContain("current"); // the current model is marked
-    expect(frame).toContain("cold"); // the cold model is labeled
+    expect(frame).toContain("flagged"); // the catalog-flagged model is labeled
     expect(frame).toContain("↑/↓"); // the hint
     // The lane column lines up as a grid: the fixed-width status column keeps `direct`/`assisted` at the
     // SAME x on the ready row (blank status) and the cold row (`· cold`) — no ragged, status-shifted columns.
@@ -745,5 +745,17 @@ describe("tui render", () => {
     // a duplicate custom `/help` can't shadow/duplicate the builtin
     const withDupHelp = matchSlash("/help", [{ name: "/help", desc: "dup" }]);
     expect(withDupHelp.filter((c) => c.name === "/help")).toHaveLength(1);
+  });
+});
+
+describe("splash readiness line", () => {
+  it("says how many models exist when none is marked ready (never a false 'no models')", async () => {
+    const { readyLine } = await import("../src/tui/components/Banner.js");
+    expect(readyLine({ ready: 0, total: 4 })).toEqual({
+      count: "4",
+      rest: " models · none marked ready",
+    });
+    expect(readyLine({ ready: 0, total: 0 }).rest).toBe("no models available");
+    expect(readyLine({ ready: 2, total: 4 })).toEqual({ count: "2", rest: " models ready" });
   });
 });

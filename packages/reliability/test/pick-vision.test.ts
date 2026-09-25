@@ -55,3 +55,21 @@ describe("pickVisionModel (slice 5)", () => {
     expect(pick?.id).toBe("b/vl");
   });
 });
+
+describe("rankVisionModels (readiness is a hint, not a gate)", () => {
+  it("orders ready → unknown → flagged-cold and excludes non-vision + excluded ids", async () => {
+    const { rankVisionModels } = await import("../src/pick-best.js");
+    const fleet = [
+      m("vendor/coder"),
+      m("x/cold-vl", { inputModalities: ["text", "image"], isReady: false }),
+      m("x/unknown-vl", { inputModalities: ["text", "image"], isReady: undefined }),
+      m("x/ready-vl", { inputModalities: ["text", "image"], isReady: true }),
+      m("x/gone-vl", { inputModalities: ["text", "image"], isReady: true }),
+    ];
+    expect(rankVisionModels(fleet, { exclude: new Set(["x/gone-vl"]) })).toEqual([
+      "x/ready-vl",
+      "x/unknown-vl",
+      "x/cold-vl",
+    ]);
+  });
+});

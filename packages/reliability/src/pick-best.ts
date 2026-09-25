@@ -139,6 +139,25 @@ export function pickVisionModel(
   return best ? { id: best.id, ready: ready.length > 0 } : undefined;
 }
 
+/**
+ * Every vision-capable model, best first, for the relay to try in order: ready → unknown → flagged-cold (the
+ * readiness flag is a hint; flagged models have been observed serving), score-ordered within each group.
+ */
+export function rankVisionModels(
+  catalog: CatalogModel[],
+  opts: { exclude?: ReadonlySet<string> } = {},
+): string[] {
+  const exclude = opts.exclude ?? new Set<string>();
+  const tier = (m: CatalogModel) => (m.isReady === true ? 0 : m.isReady === undefined ? 1 : 2);
+  return catalog
+    .filter((m) => supportsVision(m) && !exclude.has(m.id))
+    .sort(
+      (a, b) =>
+        tier(a) - tier(b) || scoreVisionModel(b) - scoreVisionModel(a) || a.id.localeCompare(b.id),
+    )
+    .map((m) => m.id);
+}
+
 /** Score a vision model for the relay: flagship up, small-tier mildly down (a small VLM is still fine for a
  *  one-shot description), reasoning + context as gentle bonuses. NO coding bonus (describing an image ≠ coding). */
 export function scoreVisionModel(m: CatalogModel): number {

@@ -170,3 +170,31 @@ describe("learned ceiling (lower-only)", () => {
     expect(updateLearnedCeiling(undefined, 90_000)).toBe(90_000);
   });
 });
+
+describe("readySubstitute when the catalog flags EVERY model cold (live reality)", () => {
+  const fleet = [model("a/one", false), model("b/two", false), model("c/three", false)];
+  it("initial resolution serves the requested model as-is (the flag is a hint)", () => {
+    expect(readySubstitute("a/one", fleet)).toBeNull();
+  });
+  it("failover (attemptCold) picks another flagged model instead of giving up", () => {
+    const next = readySubstitute("a/one", fleet, {
+      exclude: new Set(["a/one"]),
+      attemptCold: true,
+    });
+    expect(next).not.toBeNull();
+    expect(next).not.toBe("a/one");
+  });
+  it("never returns an excluded (already-failed) model", () => {
+    const next = readySubstitute("a/one", fleet, {
+      exclude: new Set(["a/one", "b/two"]),
+      attemptCold: true,
+    });
+    expect(next).toBe("c/three");
+    expect(
+      readySubstitute("a/one", fleet, {
+        exclude: new Set(["a/one", "b/two", "c/three"]),
+        attemptCold: true,
+      }),
+    ).toBeNull();
+  });
+});

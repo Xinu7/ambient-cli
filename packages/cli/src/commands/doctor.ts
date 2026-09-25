@@ -47,6 +47,10 @@ export async function runDoctor(): Promise<void> {
     const models = await fetchCatalog({ baseUrl, apiKey: key });
     const ready = models.filter((m) => m.isReady === true).length;
     ok(`catalog reachable: ${models.length} models, ${ready} ready`);
+    if (ready === 0 && models.length > 0)
+      warn(
+        "the catalog marks no model ready — Ambient still tries them (the flag can lag) and fails over on a real 'no workers'",
+      );
   } catch (err) {
     warn(`catalog unreachable: ${(err as Error).message}`);
     process.exitCode = 1;
