@@ -95,12 +95,32 @@ export function listField(data: Record<string, unknown>, key: string): string[] 
   const items = Array.isArray(v)
     ? v.map((x) => (typeof x === "string" ? x : String(x)))
     : typeof v === "string"
-      ? v.split(/[,\s]+/)
+      ? splitList(v)
       : undefined;
   const clean = items
     ?.map((s) => s.trim().replace(/^[\s"'[]+|[\s"'\]]+$/g, ""))
     .filter((s) => s.length > 0);
   return clean && clean.length > 0 ? clean : undefined;
+}
+
+/**
+ * Split `a, b c` into items on commas or spaces — except inside parentheses, so a permission-style entry
+ * like `Bash(git add:*)` stays one item.
+ */
+export function splitList(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of text) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    if (depth === 0 && (ch === "," || /\s/.test(ch))) {
+      if (cur.trim()) out.push(cur.trim());
+      cur = "";
+    } else cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
 }
 
 /** A yes/no field (`true`, `yes`, `on`); undefined when absent. */

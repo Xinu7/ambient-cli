@@ -67,7 +67,16 @@ Eval flags:
 
 Everything runs on Ambient models only.`;
 
+/** A reader that stops early (`ambient -p … | head -1`) closes our stdout: finish quietly, like any CLI. */
+function exitQuietlyOnClosedPipe(stream: NodeJS.WriteStream): void {
+  stream.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EPIPE") process.exit(process.exitCode ?? 0);
+    throw err;
+  });
+}
+
 async function main(): Promise<void> {
+  exitQuietlyOnClosedPipe(process.stdout);
   const argv = process.argv.slice(2);
   const [cmd, ...rest] = argv;
   switch (cmd) {

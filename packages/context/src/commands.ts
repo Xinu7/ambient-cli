@@ -1,7 +1,7 @@
 import { readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { parseFrontmatter, textField } from "./frontmatter.js";
+import { listField, parseFrontmatter, textField } from "./frontmatter.js";
 import { MAX_DIR_ENTRIES, isRealDir, isRealFile, readTextCappedSafe } from "./fs-safe.js";
 import { installedPlugins } from "./plugins.js";
 
@@ -18,6 +18,8 @@ export interface SlashCommand {
   argumentHint?: string;
   /** The prompt template (frontmatter stripped). */
   body: string;
+  /** `allowed-tools` from the frontmatter — what the command's `!`cmd`` lines may run. */
+  allowedTools?: string[];
   source: "project" | "user";
 }
 
@@ -50,8 +52,10 @@ function parse(name: string, text: string, source: "project" | "user"): SlashCom
     return flat.length > 80 ? `${flat.slice(0, 79)}…` : flat;
   };
   const description = field("description") ?? descFromBody();
+  const allowed = fm ? listField(fm.data, "allowed-tools") : undefined;
   return {
     name,
+    ...(allowed && allowed.length > 0 ? { allowedTools: allowed } : {}),
     ...(description ? { description } : {}),
     ...(field("argument-hint") ? { argumentHint: field("argument-hint") } : {}),
     body: body.length > MAX_BODY ? body.slice(0, MAX_BODY) : body,

@@ -55,11 +55,15 @@ function previewFor(args: unknown): string[] {
  * `--yes` (autoAllow) auto-approves file edits/reads, but NOT shell/network — those are unbounded and
  * always require an explicit prompt (or deny with no TTY). Full `--bypass` is the way to auto-run shell.
  */
-export function makeInteractiveApprover(opts: { autoAllow: boolean }): Approver {
+export function makeInteractiveApprover(opts: {
+  autoAllow: boolean;
+  /** False for print mode: never prompt, even in a terminal. */
+  interactive?: boolean;
+}): Approver {
   return async (req) => {
     const unbounded = req.effects.some((e) => UNBOUNDED.has(e));
     if (opts.autoAllow && !unbounded) return "allow-session";
-    if (!process.stdin.isTTY) return "deny";
+    if (!process.stdin.isTTY || opts.interactive === false) return "deny";
 
     process.stderr.write(`\n${bold(`Approve ${req.toolName}?`)}\n`);
     // Surface WHY this call was escalated (risk annotation / checkpoint) before the choices — a human must

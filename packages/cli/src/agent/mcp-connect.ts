@@ -43,6 +43,10 @@ export interface ConnectOptions {
   plugins?: boolean;
   /** Stored sign-ins for servers that use OAuth. */
   auth?: McpAuthPort;
+  /** Servers given for this run (`--mcp-config`); they win over configured servers with the same name. */
+  extra?: McpServerSpec[];
+  /** Use only `extra` (`--strict-mcp-config`). */
+  strict?: boolean;
   /** Test seams — default to the real config loader + server starter. */
   load?: () => McpServerSpec[];
   start?: typeof startMcpServers;
@@ -59,9 +63,13 @@ export async function connectMcp(
   workspaceRoot: string,
   opts: ConnectOptions = {},
 ): Promise<McpConnection> {
-  const specs = opts.load
-    ? opts.load()
-    : loadMcpConfig(workspaceRoot, process.env, undefined, { plugins: opts.plugins === true });
+  const configured = opts.strict
+    ? []
+    : opts.load
+      ? opts.load()
+      : loadMcpConfig(workspaceRoot, process.env, undefined, { plugins: opts.plugins === true });
+  const extra = opts.extra ?? [];
+  const specs = [...extra, ...configured.filter((c) => !extra.some((e) => e.name === c.name))];
   if (specs.length === 0) return { ...NOTHING, notices: [], servers: [] };
 
   const notices: string[] = [];

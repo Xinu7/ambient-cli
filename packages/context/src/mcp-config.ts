@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { readTextCappedSafe } from "./fs-safe.js";
 import { installedPlugins } from "./plugins.js";
@@ -279,4 +279,38 @@ export function loadMcpConfig(
     }
   }
   return [...byName.values()];
+}
+
+/**
+ * Servers from a `--mcp-config` value: inline JSON, or a path to a `.mcp.json`-style file (wrapped or bare).
+ * They're the user's own for this run. Throws with a readable message when the value can't be used.
+ */
+export function mcpServersFromFlag(
+  value: string,
+  cwd: string,
+  env: Record<string, string | undefined> = process.env,
+): McpServerSpec[] {
+  let text = value.trim();
+  if (!text.startsWith("{")) {
+    const path = isAbsolute(text) ? text : join(cwd, text);
+    const read = readTextCappedSafe(path, { root: dirname(path) });
+    if (read === null) throw new Error(`can't read MCP config ${value}`);
+    text = read;
+  }
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    throw new Error(`MCP config ${value.length > 60 ? "value" : value} isn't valid JSON`);
+  }
+  const servers = isWrapperMap(parsed.mcpServers)
+    ? (parsed.mcpServers as Record<string, unknown>)
+    : parsed;
+  const out: McpServerSpec[] = [];
+  for (const [name, raw] of Object.entries(servers)) {
+    if (!/^[a-zA-Z0-9_.-]+$/.test(name)) continue;
+    const spec = toSpec(name, raw, "user", env);
+    if (spec) out.push(spec);
+  }
+  return out;
 }

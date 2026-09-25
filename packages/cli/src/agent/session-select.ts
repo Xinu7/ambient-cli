@@ -4,10 +4,13 @@ import { readSession, sessionsDir, turnCount } from "@amb/sessions";
 
 /**
  * Resolve a session id from a user argument. `"latest"` (or empty) picks the most-recently-modified session
- * that actually has a user turn; anything else must match an existing session id exactly. Shared by
- * `amb resume` and `amb rewind`. Returns undefined when nothing matches.
+ * that actually has a user turn (in `workspaceRoot`, when given); anything else must match an existing
+ * session id exactly. Shared by `amb resume`, `--continue` and `amb rewind`. Undefined when nothing matches.
  */
-export function resolveSessionId(idOrLatest: string): string | undefined {
+export function resolveSessionId(
+  idOrLatest: string,
+  opts: { workspaceRoot?: string } = {},
+): string | undefined {
   const dir = sessionsDir();
   if (!existsSync(dir)) return undefined;
   const files = readdirSync(dir)
@@ -16,7 +19,14 @@ export function resolveSessionId(idOrLatest: string): string | undefined {
     .sort((a, b) => b.mtime - a.mtime);
   if (idOrLatest && idOrLatest !== "latest") return files.find((f) => f.id === idOrLatest)?.id;
   for (const f of files) {
-    if (turnCount(readSession(f.id).events) > 0) return f.id;
+    const { events } = readSession(f.id);
+    if (turnCount(events) === 0) continue;
+    // `--continue` wants the latest conversation in THIS folder, not the latest anywhere.
+    if (opts.workspaceRoot) {
+      const root = events.find((e) => e.kind === "session.started")?.workspaceRoot;
+      if (root !== opts.workspaceRoot) continue;
+    }
+    return f.id;
   }
   return undefined;
 }

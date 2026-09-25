@@ -152,7 +152,7 @@ ambient models [--json]             Show the live model fleet with capability la
 ambient probe <id>                  Test a model's native tool-calling (records evidence)
 ambient route explain [id]          Explain which model + lane a task would use
 ambient sessions [show <id>]        List / inspect past sessions
-ambient resume [<id|latest> "<…>"]  Continue a prior session with a new instruction
+ambient resume [<id|latest> "<…>"]  Continue a prior session with a new instruction (any run flag works)
 ambient rewind [<id|latest>] [N]    Revert the workspace to before the last N file-changing turns
 ambient config [show|path]          Show your ~/.config/amb defaults
 ambient hooks                       List the hooks that run here
@@ -164,6 +164,24 @@ ambient login | logout | help
 ```
 
 Anything can be piped in as context: `cat error.log | ambient "explain this failure"`.
+
+### Scripts and CI
+
+The Claude Code headless flags work the same way:
+
+```
+ambient -p "why does the build fail?"                   print just the answer; never prompts
+ambient -p "..." --output-format json                   one result object (stream-json: one JSON line per step)
+ambient -p "fix the tests" --allowedTools "Bash(npm test:*) Edit"   run these without asking
+ambient -p "..." --disallowedTools "Bash(git push:*)"   refuse these
+ambient -p "..." --append-system-prompt "Answer tersely."
+ambient -c -p "and now add docs"                        continue the latest conversation in this folder
+ambient -r <session> -p "..."                           continue a specific session
+ambient -p "..." --mcp-config servers.json [--strict-mcp-config]
+ambient -p "/review 42"                                 your custom commands and skills work here too
+```
+
+In print mode anything that would ask for approval is refused instead, so allow what the job needs.
 
 ## Architecture
 

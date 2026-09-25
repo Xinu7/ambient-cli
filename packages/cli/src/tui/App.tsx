@@ -1,5 +1,11 @@
 import { existsSync } from "node:fs";
-import { IMAGE_EDGE_HIGH, discoverAgents, discoverCommands, expandCommand } from "@amb/context";
+import { homedir } from "node:os";
+import {
+  type SlashCommand as CustomCommand,
+  IMAGE_EDGE_HIGH,
+  discoverAgents,
+  discoverCommands,
+} from "@amb/context";
 import {
   type AskRequest,
   type AskResponse,
@@ -31,6 +37,7 @@ import { createBuiltinRegistry } from "@amb/tools-core";
 import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { expandSlashCommand } from "../agent/command-expand.js";
 import { compactNow } from "../agent/compact-now.js";
 import { createDurableEventSink } from "../agent/event-sink.js";
 import { fireAndForget } from "../agent/hooks.js";
@@ -408,7 +415,7 @@ export function App(deps: AppDeps): ReactNode {
   // bodies (with $ARGUMENTS/$1 expansion) run as a task on dispatch.
   const customCommands = useMemo(() => {
     const palette: SlashCommand[] = [];
-    const bodies = new Map<string, string>();
+    const bodies = new Map<string, CustomCommand>();
     try {
       for (const c of discoverCommands(deps.workspaceRoot)) {
         const name = `/${c.name}`;
@@ -417,7 +424,7 @@ export function App(deps: AppDeps): ReactNode {
           desc: c.description ?? "custom command",
           ...(c.argumentHint ? { args: c.argumentHint } : {}),
         });
-        bodies.set(name, c.body);
+        bodies.set(name, c);
       }
     } catch {
       /* best-effort — a bad command dir never breaks the TUI */
@@ -434,10 +441,11 @@ export function App(deps: AppDeps): ReactNode {
         desc: `skill · ${sk.description}`,
         ...(sk.argumentHint ? { args: sk.argumentHint } : {}),
       });
-      bodies.set(
-        name,
-        `Use the "${sk.name}" skill: load it with the skill tool and follow its instructions.\n\n$ARGUMENTS`,
-      );
+      bodies.set(name, {
+        name: sk.name,
+        body: `Use the "${sk.name}" skill: load it with the skill tool and follow its instructions.\n\n$ARGUMENTS`,
+        source: "user",
+      });
     }
     return { palette, bodies };
   }, [deps.workspaceRoot, deps.skills]);
@@ -1508,7 +1516,13 @@ export function App(deps: AppDeps): ReactNode {
           });
         } else {
           setBuffer("");
-          void runTaskRef.current?.(expandCommand(body, splitArgs(arg)));
+          void runTaskRef.current?.(
+            expandSlashCommand(body, splitArgs(arg), {
+              workspaceRoot: deps.workspaceRoot,
+              home: homedir(),
+              ...(deps.settings?.rules() ? { rules: deps.settings.rules() } : {}),
+            }),
+          );
         }
       }
     }

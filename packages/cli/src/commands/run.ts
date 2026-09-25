@@ -1,224 +1,106 @@
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { resolveConfig } from "@amb/ambient-api";
-import { IMAGE_EDGE_HIGH, discoverAgents } from "@amb/context";
 import {
-  AmbError,
-  type ImageAttachment,
-  type Mode,
-  type NewEvent,
-  newSessionId,
-} from "@amb/protocol";
-import { AUTO_MODEL } from "@amb/reliability";
-import { Agent, type EffortSetting, type RunOptions } from "@amb/runtime";
+  IMAGE_EDGE_HIGH,
+  discoverAgents,
+  discoverCommands,
+  discoverSkills,
+  mcpServersFromFlag,
+} from "@amb/context";
+import { type PermissionRules, parseRules } from "@amb/permissions";
+import { AmbError, type ImageAttachment, type NewEvent, newSessionId } from "@amb/protocol";
+import { Agent, type RunOptions } from "@amb/runtime";
 import { SessionWriter, readObject, saveObject } from "@amb/sessions";
 import { AmbientChatClient } from "../agent/ambient-client.js";
 import { makeInteractiveApprover } from "../agent/approver.js";
 import { makeInteractiveAsker } from "../agent/asker.js";
 import { makeCapabilityPort } from "../agent/capability-port.js";
+import { expandSlashCommand } from "../agent/command-expand.js";
 import { createDurableEventSink } from "../agent/event-sink.js";
+import { HeadlessOutput } from "../agent/headless-output.js";
 import { fireAndForget } from "../agent/hooks.js";
-import { connectMcp } from "../agent/mcp-connect.js";
+import { type McpConnection, connectMcp } from "../agent/mcp-connect.js";
 import { buildRegistry } from "../agent/registry.js";
 import { EventRenderer } from "../agent/render-events.js";
+import { type ResumeContext, loadResumeContext } from "../agent/resume-context.js";
 import { makeSubagentTool } from "../agent/subagent-tool.js";
 import { makeVerifyPort } from "../agent/verify-port.js";
 import { resolveWorkingApiKey } from "../agent/working-key.js";
 import { makeWorkspaceContextPort } from "../agent/workspace-context-port.js";
 import { untrustedNote, workspaceSettings } from "../agent/workspace-settings.js";
-import { type AmbConfig, configDir, grantsFromConfig, loadConfig } from "../config.js";
+import { configDir, grantsFromConfig, loadConfig } from "../config.js";
+import { makeMcpAuth } from "../mcp-auth/auth-port.js";
 import { bold, dim } from "../render/color.js";
 import { KEY_REJECTED, NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
 import { attachImageFile, downscaleForWindow } from "../tui/capture.js";
 import { checkForUpdate, updateHint } from "../update-check.js";
-import { effortAliasNote, isParseError, parseEffort, parseMaxTurns } from "./args.js";
 import { signInInteractive } from "./login.js";
+import { type RunArgs, USAGE, parseRunArgs } from "./run-args.js";
 import { mergeStdin, readPipedStdin } from "./stdin.js";
 
-interface RunArgs {
-  task: string;
-  model: string;
-  mode: Mode;
-  effort: EffortSetting;
-  autoAllow: boolean;
-  maxTurns: number;
-  autoContinue: boolean;
-  maxAutoContinues: number;
-  jsonl: boolean;
-  noMcp: boolean;
-  images: string[];
-  goal?: string;
-  help: boolean;
-  error?: string;
+/** How a run reports: the live line UI, native event lines (`--jsonl`), or quiet (`-p` / JSON formats). */
+type Reporting = "live" | "jsonl" | "quiet";
+
+function reportingFor(a: RunArgs): Reporting {
+  if (a.jsonl) return "jsonl";
+  return a.print || a.outputFormat !== "text" ? "quiet" : "live";
 }
 
-const USAGE =
-  'usage: ambient run "<task>" [--model <id>] [--image <path>]… [--goal "<objective>"] [--plan|--accept-edits|--bypass] [--effort auto|off|high|max] [--yes] [--no-mcp] [--jsonl]';
-
-function parseArgs(args: string[], config: AmbConfig = {}): RunArgs {
-  // Config sets the DEFAULTS; an explicit flag below always overrides.
-  let model = config.model ?? AUTO_MODEL;
-  let mode: Mode = config.mode ?? "ask";
-  let effort: EffortSetting = config.effort ?? "auto";
-  let autoAllow = false;
-  let maxTurns = config.maxTurns ?? 120;
-  let autoContinue = config.autoContinue ?? true;
-  const maxAutoContinues = config.maxAutoContinues ?? 3;
-  let jsonl = false;
-  let noMcp = config.noMcp ?? false;
-  let help = false;
-  let error: string | undefined;
-  const images: string[] = [];
-  let goal: string | undefined;
-  const parts: string[] = [];
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === "--model" || a === "-m") model = args[++i] ?? model;
-    else if (a === "--image" || a === "-i") {
-      const p = args[++i];
-      if (p) images.push(p);
-    } else if (a === "--goal" || a === "-g") {
-      const g = args[++i];
-      if (g) goal = g.trim().slice(0, 280); // a north-star is tiny (matches the TUI cap)
-    } else if (a === "--plan") mode = "plan";
-    else if (a === "--accept-edits") mode = "accept-edits";
-    else if (a === "--bypass" || a === "--yolo") mode = "bypass";
-    else if (a === "--yes" || a === "-y") autoAllow = true;
-    else if (a === "--jsonl") jsonl = true;
-    else if (a === "--no-mcp") noMcp = true;
-    else if (a === "--no-auto-continue") autoContinue = false;
-    else if (a === "--help" || a === "-h") help = true;
-    else if (a === "--effort") {
-      const raw = args[++i];
-      const r = parseEffort(raw);
-      if (isParseError(r)) error = r.error;
-      else {
-        effort = r.setting;
-        if (r.alias) process.stderr.write(`${effortAliasNote(raw ?? "", r.setting)}\n`);
-      }
-    } else if (a === "--max-turns") {
-      const r = parseMaxTurns(args[++i]);
-      if (isParseError(r)) error = r.error;
-      else maxTurns = r;
-    } else if (a?.startsWith("--")) {
-      // An unrecognized long flag is almost certainly a typo (`--modle`, `--bypas`) — reject it instead of
-      // silently folding it into the TASK and running a billed job in the wrong mode.
-      error = error ?? `unknown flag "${a}" — run \`ambient run --help\` for usage`;
-    } else if (a) parts.push(a);
+/**
+ * A task that starts with `/name` runs that custom command or skill, the same as typing it in the TUI.
+ * Returns the task unchanged when it isn't a command, or an error for an unknown one.
+ */
+export function expandTaskCommand(
+  task: string,
+  cwd: string,
+  rules: PermissionRules | undefined,
+): { task: string } | { error: string } {
+  const m = /^\/([A-Za-z][\w:.-]*)(?:\s+([\s\S]*))?$/.exec(task.trim());
+  if (!m?.[1]) return { task };
+  const name = m[1];
+  const args = m[2] ?? "";
+  const command = discoverCommands(cwd).find((c) => c.name === name);
+  const skill = command ? undefined : discoverSkills(cwd).find((s) => s.name === name);
+  if (!command && !skill) {
+    // "/tmp is full": a real path on disk is a task about that path, not a mistyped command.
+    return existsSync(`/${name}`) ? { task } : { error: `unknown command /${name}` };
   }
-  if (mode === "bypass") autoAllow = true;
+  const words = [...args.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map(
+    (w) => w[1] ?? w[2] ?? w[3] ?? "",
+  );
+  const def = command ?? {
+    name,
+    body: `Use the "${name}" skill: load it with the skill tool and follow its instructions.\n\n$ARGUMENTS`,
+    source: "user" as const,
+  };
   return {
-    task: parts.join(" ").trim(),
-    model,
-    mode,
-    effort,
-    autoAllow,
-    maxTurns,
-    autoContinue,
-    maxAutoContinues,
-    jsonl,
-    noMcp,
-    images,
-    ...(goal ? { goal } : {}),
-    help,
-    error,
+    task: expandSlashCommand(def, words, {
+      workspaceRoot: cwd,
+      home: homedir(),
+      ...(rules ? { rules } : {}),
+    }),
   };
 }
 
-/** `ambient run "<task>"` (also the bare `amb "<task>"`) — run the coding agent to completion. */
-export async function runAgent(args: string[]): Promise<void> {
-  const userConfig = loadConfig();
-  const {
-    task,
-    model,
-    mode,
-    effort,
-    autoAllow,
-    maxTurns,
-    autoContinue,
-    maxAutoContinues,
-    jsonl,
-    noMcp,
-    images,
-    goal,
-    help,
-    error,
-  } = parseArgs(args, userConfig);
-  // `--help` must print usage WITHOUT signing in, connecting MCP servers, or sending a billed request — it
-  // used to fall through as the TASK, spawning every MCP server and spending a real completion to echo "--help".
-  if (help) {
-    process.stdout.write(`${USAGE}\n`);
-    return;
-  }
-  if (error) {
-    process.stderr.write(`ambient: ${error}\n`);
-    process.exitCode = 1;
-    return;
-  }
-  // Fold PIPED stdin into the task so `cat err.log | amb "explain this"` works (a TTY is never read — that
-  // would hang waiting for a human's EOF). With only a pipe, it becomes the task (`echo "…" | amb`).
-  const finalTask = mergeStdin(task, await readPipedStdin());
-  if (!finalTask) {
-    process.stderr.write(`${USAGE}\n`);
-    process.exitCode = 1;
-    return;
-  }
-
-  // No key in an interactive terminal: sign in right here, then carry on with the task.
-  if (!resolveApiKey() && process.stdin.isTTY && process.stdout.isTTY) {
-    await signInInteractive({ firstRun: true });
-  }
-  // With more than one key on this machine, use one Ambient accepts (a revoked saved key falls back).
-  const working = await resolveWorkingApiKey(resolveConfig().baseUrl);
-  if (working?.note) process.stderr.write(`${working.note}\n`);
-  const apiKey = working?.key;
-  if (!apiKey) {
-    process.stderr.write(`${NOT_SIGNED_IN}\n`);
-    process.exitCode = 1;
-    return;
-  }
-
-  const config = { baseUrl: resolveConfig().baseUrl, apiKey };
-  const client = new AmbientChatClient(config);
-  const cwd = process.cwd();
-  // A UNIQUE session id per run — never reuse a cwd-derived file.
-  const sessionId = newSessionId();
-  const writer = new SessionWriter(sessionId, () => new Date().toISOString());
-  const renderer = new EventRenderer();
-
-  const controller = new AbortController();
-  const onSigint = () => {
-    process.stderr.write(dim("\n(cancelling — press Ctrl-C again to force quit)\n"));
-    controller.abort();
-    process.once("SIGINT", () => process.exit(130));
+/** The config's rules plus this run's `--allowedTools` / `--disallowedTools`. */
+export function withFlagRules(
+  rules: PermissionRules | undefined,
+  allowed: string[],
+  disallowed: string[],
+): PermissionRules | undefined {
+  if (allowed.length + disallowed.length === 0) return rules;
+  return {
+    allow: [...(rules?.allow ?? []), ...parseRules(allowed)],
+    deny: [...(rules?.deny ?? []), ...parseRules(disallowed)],
+    ask: rules?.ask ?? [],
   };
-  process.once("SIGINT", onSigint);
+}
 
-  // A persistence failure ABORTS the run: if we can't durably record intent, we must not keep executing
-  // mutations. The shared sink persists first, then delivers; in --jsonl mode durable events become JSON lines.
-  // Ambient rejecting the key (revoked or mistyped) gets one clear, actionable line at the end of the run.
-  let keyRejected = false;
-  const emit = createDurableEventSink({
-    writer,
-    consume: (ev: NewEvent) => {
-      if (ev.kind === "error" && ev.errorKind === "auth") keyRejected = true;
-      if (jsonl) {
-        if (ev.kind !== "assistant.delta" && ev.kind !== "reasoning.delta") {
-          process.stdout.write(`${JSON.stringify(ev)}\n`);
-        }
-      } else {
-        renderer.handle(ev);
-      }
-    },
-    onWriteError: (err) => {
-      if (!jsonl)
-        process.stderr.write(dim(`\n(session log write failed: ${err.message} — aborting)\n`));
-      controller.abort();
-    },
-  });
-
-  // `--image <path>` (repeatable): attach images to the initiating message. A vision-capable model sees them;
-  // a blind model gets the vision-relay description (same path as the TUI). Bad paths warn but don't abort.
-  const attachments: ImageAttachment[] = [];
-  for (const p of images) {
+async function attachImages(paths: string[], sessionId: string): Promise<ImageAttachment[]> {
+  // A vision-capable model sees them; a blind model gets the vision-relay description (same path as the TUI).
+  const out: ImageAttachment[] = [];
+  for (const p of paths) {
     const res = await attachImageFile(p, "file");
     if (!res.ok) {
       process.stderr.write(`ambient: skipping --image ${p}: ${res.reason}\n`);
@@ -226,42 +108,165 @@ export async function runAgent(args: string[]): Promise<void> {
     }
     const sized = await downscaleForWindow(res.attachment, IMAGE_EDGE_HIGH);
     saveObject(sessionId, sized.dataBase64); // offload bytes for resume; never in the event log
-    attachments.push(sized);
+    out.push(sized);
   }
+  return out;
+}
 
-  if (!jsonl)
-    process.stderr.write(
-      `${bold("ambient")} ${dim(`· ${mode} · ${model} · effort ${effort}${attachments.length ? ` · ${attachments.length} image(s)` : ""} · ${cwd} · ${sessionId}`)}\n`,
-    );
-  // A `--goal` sets the run's north-star: record it durably (so `amb resume` restores it) + surface it.
-  if (goal) {
-    emit({ schemaVersion: 1, kind: "goal.set", sessionId, text: goal });
-    if (!jsonl) process.stderr.write(dim(`  ◎ goal: ${goal}\n`));
+async function signedInKey(): Promise<string | undefined> {
+  // No key in an interactive terminal: sign in right here, then carry on with the task.
+  if (!resolveApiKey() && process.stdin.isTTY && process.stdout.isTTY) {
+    await signInInteractive({ firstRun: true });
+  }
+  // With more than one key on this machine, use one Ambient accepts (a revoked saved key falls back).
+  const working = await resolveWorkingApiKey(resolveConfig().baseUrl);
+  if (working?.note) process.stderr.write(`${working.note}\n`);
+  return working?.key;
+}
+
+function fail(message: string): void {
+  process.stderr.write(`ambient: ${message}\n`);
+  process.exitCode = 1;
+}
+
+/** `ambient run "<task>"` (also bare `ambient "<task>"` and `ambient -p "<task>"`) — run the agent to the end. */
+export async function runAgent(args: string[]): Promise<void> {
+  const userConfig = loadConfig();
+  const a = parseRunArgs(args, userConfig);
+  // `--help` must print usage WITHOUT signing in, connecting MCP servers, or sending a billed request.
+  if (a.help) {
+    process.stdout.write(`${USAGE}\n`);
+    return;
+  }
+  if (a.error) return fail(a.error);
+  const reporting = reportingFor(a);
+  const live = reporting === "live";
+  const cwd = process.cwd();
+
+  // Fold PIPED stdin into the task so `cat err.log | amb "explain this"` works (a TTY is never read).
+  const piped = mergeStdin(a.task, await readPipedStdin());
+  if (!piped) {
+    process.stderr.write(`${USAGE}\n`);
+    process.exitCode = 1;
+    return;
   }
 
   const settings = workspaceSettings(cwd, userConfig, configDir());
+  const permissionRules = withFlagRules(settings.rules(), a.allowedTools, a.disallowedTools);
+  const expanded = expandTaskCommand(piped, cwd, permissionRules);
+  if ("error" in expanded) return fail(expanded.error);
+  const finalTask = expanded.task;
+
+  let resumed: ResumeContext | undefined;
+  if (a.resume) {
+    const r = loadResumeContext(a.resume.from, a.resume.here ? { workspaceRoot: cwd } : {});
+    if ("error" in r) return fail(r.error);
+    resumed = r;
+  }
+
+  let extraMcp: ReturnType<typeof mcpServersFromFlag> = [];
+  try {
+    extraMcp = a.mcpConfigs.flatMap((v) => mcpServersFromFlag(v, cwd));
+  } catch (e) {
+    return fail((e as Error).message);
+  }
+
+  const apiKey = await signedInKey();
+  if (!apiKey) {
+    process.stderr.write(`${NOT_SIGNED_IN}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const client = new AmbientChatClient({ baseUrl: resolveConfig().baseUrl, apiKey });
+  const sessionId = newSessionId(); // a UNIQUE session per run; a resumed one never mutates the prior log
+  const writer = new SessionWriter(sessionId, () => new Date().toISOString());
+  const renderer = new EventRenderer();
+  const machine =
+    a.outputFormat === "json" || a.outputFormat === "stream-json"
+      ? new HeadlessOutput(a.outputFormat, sessionId)
+      : undefined;
+
+  const controller = new AbortController();
+  const onSigint = () => {
+    if (live) process.stderr.write(dim("\n(cancelling — press Ctrl-C again to force quit)\n"));
+    controller.abort();
+    process.once("SIGINT", () => process.exit(130));
+  };
+  process.once("SIGINT", onSigint);
+
+  // A persistence failure ABORTS the run: if we can't durably record intent, we must not keep executing
+  // mutations. Ambient rejecting the key gets one clear, actionable line at the end of the run.
+  let keyRejected = false;
+  const emit = createDurableEventSink({
+    writer,
+    consume: (ev: NewEvent) => {
+      if (ev.kind === "error" && ev.errorKind === "auth") keyRejected = true;
+      if (reporting === "jsonl") {
+        if (ev.kind !== "assistant.delta" && ev.kind !== "reasoning.delta") {
+          process.stdout.write(`${JSON.stringify(ev)}\n`);
+        }
+      } else if (live) renderer.handle(ev);
+      machine?.handle(ev);
+    },
+    onWriteError: (err) => {
+      if (live)
+        process.stderr.write(dim(`\n(session log write failed: ${err.message} — aborting)\n`));
+      controller.abort();
+    },
+  });
+
+  const attachments = await attachImages(a.images, sessionId);
+  if (live)
+    process.stderr.write(
+      `${bold("ambient")} ${dim(`· ${a.mode} · ${a.model} · effort ${a.effort}${attachments.length ? ` · ${attachments.length} image(s)` : ""} · ${cwd} · ${sessionId}`)}\n`,
+    );
+  if (resumed) {
+    emit({
+      schemaVersion: 1,
+      kind: "session.resumed",
+      sessionId,
+      ...(resumed.priorLastEventId ? { fromEventId: resumed.priorLastEventId } : {}),
+    });
+    if (live) {
+      process.stderr.write(dim(`  continuing ${resumed.fromSessionId}\n`));
+      if (resumed.droppedTail > 0)
+        process.stderr.write(
+          dim(
+            `  the prior session ended abruptly (${resumed.droppedTail} unfinished log line(s))\n`,
+          ),
+        );
+      for (const n of resumed.recoveryNotes) process.stderr.write(dim(`  recovery: ${n}\n`));
+    }
+  }
+  // A `--goal` (or the resumed session's) is the run's north-star: record it durably so a resume keeps it.
+  const goal = a.goal ?? resumed?.goal;
+  if (goal) {
+    emit({ schemaVersion: 1, kind: "goal.set", sessionId, text: goal });
+    if (live) process.stderr.write(dim(`  ◎ goal: ${goal}\n`));
+  }
+
   const hooks = settings.hooksPort(() => sessionId);
-  const permissionRules = settings.rules();
-  const hooksNote = untrustedNote(settings);
-  if (hooksNote && !jsonl) process.stderr.write(dim(`  ${hooksNote}\n`));
+  const note = untrustedNote(settings);
+  if (note && live) process.stderr.write(dim(`  ${note}\n`));
 
   const opts: RunOptions = {
     sessionId,
-    mode,
-    requestedModel: model,
-    maxTurns,
-    autoContinue,
-    maxAutoContinues,
+    mode: a.mode,
+    requestedModel: a.model,
+    maxTurns: a.maxTurns,
+    autoContinue: a.autoContinue,
+    maxAutoContinues: a.maxAutoContinues,
     cwd,
     workspaceRoot: cwd,
     signal: controller.signal,
     emit,
-    approve: makeInteractiveApprover({ autoAllow }),
+    // Print mode never prompts, even in a terminal: tools not allowed are refused.
+    approve: makeInteractiveApprover({ autoAllow: a.autoAllow, interactive: live }),
     // Seed the persistent allowlist (config `allow`) as session grants so those tools don't re-prompt.
     grants: grantsFromConfig(userConfig),
-    // A stdin questionnaire for `ask_user` — only when interactive; a piped/scripted run omits it so the
-    // tool returns its proceed-on-best-judgment note instead of blocking on a human who isn't there.
-    ...(process.stdin.isTTY ? { ask: makeInteractiveAsker() } : {}),
+    // `ask_user` opens a stdin questionnaire only when someone is there to answer it.
+    ...(process.stdin.isTTY && live ? { ask: makeInteractiveAsker() } : {}),
     capabilities: makeCapabilityPort(),
     workspace: makeWorkspaceContextPort(undefined, {
       userInstructions: userConfig.claudeSettings === true,
@@ -272,34 +277,35 @@ export async function runAgent(args: string[]): Promise<void> {
     readArtifact: (handle) => readObject(sessionId, handle),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(goal ? { goal } : {}),
+    ...(resumed ? { resumeContext: resumed.context } : {}),
+    ...(a.appendSystemPrompt ? { instructions: a.appendSystemPrompt } : {}),
     ...(hooks ? { hooks } : {}),
     ...(permissionRules ? { permissionRules } : {}),
-    effort,
+    effort: a.effort,
   };
 
-  // Connect the user's MCP servers (Claude + Codex config) so their tools reach the model. Project-scoped
-  // servers spawn only with an explicit opt-in (they run local processes); user-scoped ones auto-connect.
-  // `--no-mcp` (or AMBIENT_NO_MCP=1) skips the whole discovery+spawn — a lean, fast run with only the built-in
-  // tools (a big user MCP suite otherwise spawns ~10 processes + injects 100+ tools before turn 1).
-  const skipMcp = noMcp || process.env.AMBIENT_NO_MCP === "1";
-  const mcp = skipMcp
+  // `--no-mcp` (or AMBIENT_NO_MCP=1) skips discovery and spawning for a lean run with only built-in tools.
+  const skipMcp = a.noMcp || process.env.AMBIENT_NO_MCP === "1";
+  const mcp: Pick<McpConnection, "tools" | "notices" | "close"> = skipMcp
     ? { tools: [], notices: [], close: () => {} }
     : await connectMcp(cwd, {
-        // A project's own servers connect once the project's settings are trusted (/trust); the env switch
-        // remains for scripted runs.
+        // A project's own servers connect once the project's settings are trusted; the env switch remains
+        // for scripted runs.
         approveServer: async () =>
           process.env.AMBIENT_MCP_ALLOW_PROJECT === "1" || settings.projectTrusted(),
         plugins: userConfig.claudeSettings === true,
+        auth: makeMcpAuth(),
+        extra: extraMcp,
+        strict: a.strictMcp,
       });
-  if (!jsonl) for (const n of mcp.notices) process.stderr.write(dim(`  ${n}\n`));
+  if (live) for (const n of mcp.notices) process.stderr.write(dim(`  ${n}\n`));
 
   try {
-    // Build the registry INSIDE the try so a dup-tool-id throw still reaches `finally` → mcp.close() (no
-    // leaked server processes on a registry-composition failure).
+    // Build the registry INSIDE the try so a dup-tool-id throw still reaches `finally` → mcp.close().
     const registry = buildRegistry({
       mcpTools: mcp.tools,
       subagent: makeSubagentTool({
-        presets: discoverAgents(opts.workspaceRoot),
+        presets: discoverAgents(cwd),
         client,
         workspace: opts.workspace,
         approve: opts.approve,
@@ -312,32 +318,37 @@ export async function runAgent(args: string[]): Promise<void> {
         ...(permissionRules ? { permissionRules } : {}),
       }),
     });
-    // Kick the update check off CONCURRENTLY with the run (which takes far longer than the 2.5s check) so the
-    // end-of-run nudge adds zero exit latency. Never on --jsonl, which must stay machine-clean.
-    const updateCheck = jsonl ? null : checkForUpdate({ enabled: userConfig.checkUpdates });
+    machine?.init({
+      cwd,
+      model: a.model,
+      permissionMode: a.mode,
+      tools: registry.list().map((t) => t.manifest.name),
+    });
+    // The update check runs alongside the run so the end-of-run nudge adds no exit latency (live UI only).
+    const updateCheck = live ? checkForUpdate({ enabled: userConfig.checkUpdates }) : null;
     const result = await new Agent(client, registry).run(finalTask, opts);
-    if (jsonl) {
+    if (reporting === "jsonl") {
       process.stdout.write(
         `${JSON.stringify({ kind: "result", sessionId, stopReason: result.stopReason, turns: result.turns, finalText: result.finalText })}\n`,
       );
-    } else {
-      process.stdout.write(`\n${dim(`[${result.stopReason} · ${result.turns} turn(s)]`)}\n`);
-    }
-    if (keyRejected && !jsonl) process.stderr.write(`\n${KEY_REJECTED}\n`);
+    } else if (machine) machine.result(result);
+    else if (reporting === "quiet") process.stdout.write(`${result.finalText.trim()}\n`);
+    else process.stdout.write(`\n${dim(`[${result.stopReason} · ${result.turns} turn(s)]`)}\n`);
+    if (keyRejected && reporting !== "jsonl") process.stderr.write(`\n${KEY_REJECTED}\n`);
     // Non-success stop reasons must set a nonzero exit code for scripts/CI.
     if (result.stopReason !== "complete")
       process.exitCode = result.stopReason === "cancelled" ? 130 : 1;
-    // A subtle upgrade nudge after the run (the check was started before the run, so it's already resolved).
     if (updateCheck) {
       const upd = await updateCheck;
       if (upd?.updateAvailable) process.stderr.write(dim(`\n▲ ${updateHint(upd)}\n`));
     }
   } catch (err) {
     const message = err instanceof AmbError ? err.message : (err as Error).message;
-    if (jsonl)
+    if (reporting === "jsonl")
       process.stdout.write(
         `${JSON.stringify({ kind: "result", sessionId, stopReason: "error", message })}\n`,
       );
+    else if (machine) machine.result({ stopReason: "error", turns: 0, finalText: "" }, message);
     else process.stderr.write(`\namb: ${message}\n`);
     process.exitCode = 1;
   } finally {
