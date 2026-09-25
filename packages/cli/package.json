@@ -23,6 +23,7 @@
     "@amb/runtime": "workspace:*",
     "@amb/sessions": "workspace:*",
     "@amb/tools-core": "workspace:*",
+    "cross-spawn": "^7.0.6",
     "ink": "^7.1.1",
     "react": "^19.3.0",
     "string-width": "^8.2.2",

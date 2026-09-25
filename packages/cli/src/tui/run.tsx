@@ -1,3 +1,4 @@
+import os from "node:os";
 import {
   type AmbientConfig,
   KEYS_URL,
@@ -185,7 +186,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     process.once(sig, () => {
       mcpConn.current?.close();
       restore();
-      process.kill(process.pid, sig);
+      // Re-raise so the shell sees the real signal; Windows can't signal a process this way (it throws), so
+      // exit with the conventional 128 + signal number instead.
+      if (process.platform === "win32") process.exit(128 + (os.constants.signals[sig] ?? 1));
+      else process.kill(process.pid, sig);
     });
   }
 

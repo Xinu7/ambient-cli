@@ -1,4 +1,5 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawnSync } from "node:child_process";
+import crossSpawn from "cross-spawn";
 import { LineFramer, type Transport } from "./jsonrpc.js";
 
 /** Config for one stdio MCP server (the shape both Claude `.mcp.json` and Codex `[mcp_servers]` reduce to). */
@@ -17,15 +18,17 @@ export function spawnStdioTransport(cfg: StdioServerConfig): {
   transport: Transport;
   child: ChildProcess;
 } {
-  // `detached: true` makes the child its OWN process-group leader, so wrapper launchers (`npm exec`, `npx`,
-  // `uvx`) put the REAL server in the same group. On close we kill the whole group — otherwise SIGKILL hits
-  // only the wrapper and the reparented grandchild both (a) becomes an orphan and (b) keeps our inherited
-  // stdout pipe open, so the CLI's event loop never drains and `ambient run` HANGS after printing [complete].
-  const child = spawn(cfg.command, cfg.args ?? [], {
+  // cross-spawn resolves Windows launchers (`npx`, `uvx` are `.cmd` shims that plain spawn can't run) and
+  // quotes their arguments safely; on POSIX it is a plain spawn. `detached: true` (POSIX only — on Windows it
+  // opens a console window) makes the child its OWN process-group leader, so wrapper launchers put the REAL
+  // server in the same group. On close we kill the whole tree — otherwise only the wrapper dies and the
+  // orphaned server keeps our stdout pipe open, so `ambient run` HANGS after printing [complete].
+  const child = crossSpawn(cfg.command, cfg.args ?? [], {
     cwd: cfg.cwd,
     env: { ...process.env, ...cfg.env },
     stdio: ["pipe", "pipe", "pipe"],
-    detached: true,
+    detached: process.platform !== "win32",
+    windowsHide: true,
   });
 
   let onMsg: (m: unknown) => void = () => {};
@@ -72,7 +75,13 @@ export function spawnStdioTransport(cfg: StdioServerConfig): {
       // our ends of the pipes so no stream ref keeps the event loop alive. Runs even if `exit` already fired,
       // to reap any group member that outlived the leader. Best-effort: ESRCH (already gone) is fine.
       try {
-        if (typeof child.pid === "number") process.kill(-child.pid, "SIGKILL");
+        if (typeof child.pid !== "number") child.kill("SIGKILL");
+        else if (process.platform === "win32")
+          spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+            stdio: "ignore",
+            windowsHide: true,
+          });
+        else process.kill(-child.pid, "SIGKILL");
       } catch {
         try {
           child.kill("SIGKILL");
