@@ -105,7 +105,7 @@ describe("tui reducer — model.resolved receipt", () => {
     const receipts = s.transcript.filter((t) => t.kind === "receipt");
     expect(receipts).toHaveLength(1);
     // the receipt uses the short (vendor-stripped) name
-    expect((receipts[0] as { text: string }).text).toContain("you asked for legacy");
+    expect((receipts[0] as { text: string }).text).toMatch(/you asked for (\S+\/)?legacy/);
   });
 });
 

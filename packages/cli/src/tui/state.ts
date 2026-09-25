@@ -352,7 +352,9 @@ function previewArgs(toolName: string, args: unknown): string {
 export function shortName(id: string): string {
   const s = typeof id === "string" ? id : String(id ?? "");
   const i = s.lastIndexOf("/");
-  return i >= 0 ? s.slice(i + 1) : s;
+  const name = i >= 0 ? s.slice(i + 1) : s;
+  // A bare word with no version ("large") says nothing on its own — keep the vendor prefix for those.
+  return /\d/.test(name) ? name : s;
 }
 
 /** Append a tool item (id comes from the runtime's globally-unique tool-call id). */

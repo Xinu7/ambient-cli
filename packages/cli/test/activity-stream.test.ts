@@ -159,3 +159,13 @@ describe("effort shown after a failover", () => {
     expect(s.status.resolvedEffort).toBeUndefined();
   });
 });
+
+describe("model names in notes", () => {
+  it("drop the vendor for a versioned name but keep it for a bare alias", async () => {
+    const { shortName } = await import("../src/tui/state.js");
+    expect(shortName("z-ai/glm-5.2")).toBe("glm-5.2");
+    expect(shortName("qwen/qwen3.8-27b")).toBe("qwen3.8-27b");
+    expect(shortName("ambient/large")).toBe("ambient/large");
+    expect(shortName("m")).toBe("m");
+  });
+});
