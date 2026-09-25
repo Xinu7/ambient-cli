@@ -79,7 +79,7 @@ describe("classifyToolRisk — writes to sensitive files", () => {
     expect(classifyToolRisk("edit", { path: ".ambient/verify" }).level).toBe("elevated");
     expect(classifyToolRisk("write", { path: ".ambient\\verify.ps1" }).level).toBe("elevated");
     expect(classifyToolRisk("edit", { path: ".ambient//verify" }).level).toBe("elevated");
-    expect(classifyToolRisk("write", { path: "/Users/z/.gitconfig" }).level).toBe("elevated");
+    expect(classifyToolRisk("write", { path: "/Users/alice/.gitconfig" }).level).toBe("elevated");
     expect(classifyToolRisk("write", { path: ".envrc" }).level).toBe("elevated");
     expect(classifyToolRisk("write", { path: ".git/modules/lib/hooks/pre-commit" }).level).toBe(
       "elevated",
@@ -251,7 +251,7 @@ describe("classifyToolRisk — Windows destructive commands", () => {
     String.raw`rmdir /s/q C:\ `,
     String.raw`rd /q/s C:\ `,
     String.raw`Remove-Item -Rec -Fo C:\ `,
-    String.raw`Remove-Item -Recurse C:\Users\z`,
+    String.raw`Remove-Item -Recurse C:\Users\alice`,
     String.raw`rm -r -fo C:\ `,
     "rm -rf /c/",
     "rm -rf /c/Users",
@@ -274,7 +274,7 @@ describe("classifyToolRisk — Windows destructive commands", () => {
     ).toBe("critical");
   });
   it.each([
-    "rm -rf /c/Users/zach",
+    "rm -rf /c/Users/alice",
     String.raw`Remove-Item -Recurse:$true -Force C:\ `,
     String.raw`rd /s /q \\?\C:\ `,
     "rm -rf ~/*",
@@ -282,7 +282,7 @@ describe("classifyToolRisk — Windows destructive commands", () => {
   ])("also treats %s as critical", (cmd) => {
     expect(bash(cmd).level).toBe("critical");
   });
-  it.each(["rm -r -f dist", "rm -R -f build", "rm -rf /Users/z/proj/node_modules", "rm -rf dist"])(
+  it.each(["rm -r -f dist", "rm -R -f build", "rm -rf /Users/alice/proj/node_modules", "rm -rf dist"])(
     "does not escalate an ordinary cleanup: %s",
     (cmd) => {
       expect(bash(cmd).level).not.toBe("critical");
@@ -290,14 +290,14 @@ describe("classifyToolRisk — Windows destructive commands", () => {
     },
   );
   it.each([
-    String.raw`rm -r C:\Users\z`,
+    String.raw`rm -r C:\Users\alice`,
     String.raw`rm -r C:\ `,
     String.raw`rd -r C:\ `,
-    String.raw`powershell -c "rm -r C:\Users\z"`,
+    String.raw`powershell -c "rm -r C:\Users\alice"`,
     String.raw`powershell -ep bypass -c "ri -r -fo C:\"`,
     String.raw`powershell -w hidden -c "Remove-Item -Recurse -Force C:\"`,
-    "rm -rf /Users/z//*",
-    "rm -rf /Users/z/./*",
+    "rm -rf /Users/alice//*",
+    "rm -rf /Users/alice/./*",
     "rm -rf ~//*",
     "rm -rf /Library",
     "rm -rf /opt",

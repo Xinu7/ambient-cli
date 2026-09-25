@@ -132,8 +132,8 @@ describe("installKind / updateCommand", () => {
   });
 
   it("treats a repo/dev build path as a source install", () => {
-    expect(installKind("/Users/z/ambient-cli/packages/cli/dist/amb.js")).toBe("source");
-    expect(installKind("/Users/z/.local/bin/ambient")).toBe("source");
+    expect(installKind("/Users/alice/ambient-cli/packages/cli/dist/amb.js")).toBe("source");
+    expect(installKind("/Users/alice/.local/bin/ambient")).toBe("source");
   });
 
   it("updateCommand matches the install kind", () => {

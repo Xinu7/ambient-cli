@@ -24,7 +24,7 @@ const FORK_BOMB = /:\s*\(\s*\)\s*\{[^}]{0,60}[|][^}]{0,60}&[^}]{0,60}\}\s*;?\s*:
 
 /** Delete targets that are catastrophic regardless of intent: the root, home, or a top-level system dir. */
 function isCatastrophicTarget(raw: string): boolean {
-  // `/Users/z//*` and `/Users/z/./*` are the same place as `/Users/z/*`.
+  // `/Users/alice//*` and `/Users/alice/./*` are the same place as `/Users/alice/*`.
   const a =
     raw.startsWith("/") || raw.startsWith("~") || raw.startsWith("$")
       ? posix.normalize(raw).replace(/(.)\/$/, "$1")
