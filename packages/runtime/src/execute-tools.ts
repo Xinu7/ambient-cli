@@ -1,4 +1,4 @@
-import { decide, refineBashEffects } from "@amb/permissions";
+import { decide, refineBashEffects, resolveResource } from "@amb/permissions";
 import {
   type Grant,
   type NewEvent,
@@ -100,9 +100,9 @@ async function runOne(
     toolName: tool.manifest.name,
     effects: effectiveEffects,
     normalizedArgs: parsed.data as Record<string, unknown>,
-    resolvedResources: resourcesOf(parsed.data).map((r) =>
-      r.startsWith("/") ? r : `${opts.workspaceRoot}/${r}`,
-    ),
+    // Resolved with the host's path rules (normalizes `..`, absolute and drive-letter paths) so the
+    // outside-the-workspace check can't be walked around.
+    resolvedResources: resourcesOf(parsed.data).map((r) => resolveResource(opts.workspaceRoot, r)),
     workspaceRoot: opts.workspaceRoot,
     grants,
     autoApprovalStreak: autoApproval.streak,

@@ -1,5 +1,6 @@
 import type { Effect, Grant, Mode, PermissionDecision, PermissionInput } from "@amb/protocol";
 import { classifyToolRisk } from "./risk.js";
+import { isWithinWorkspace } from "./within.js";
 
 /**
  * The permission engine. Evaluated deny-first, then the mode ladder, then a local risk overlay.
@@ -20,13 +21,8 @@ function isReadOnly(effects: Effect[]): boolean {
   return effects.length > 0 && effects.every((e) => e === "read");
 }
 
-function withinWorkspace(root: string, p: string): boolean {
-  const nr = root.endsWith("/") ? root : `${root}/`;
-  return p === root || p.startsWith(nr);
-}
-
 function anyOutside(resources: string[], root: string): boolean {
-  return resources.some((r) => !withinWorkspace(root, r));
+  return resources.some((r) => !isWithinWorkspace(root, r));
 }
 
 function matchingGrant(input: PermissionInput): Grant | undefined {
