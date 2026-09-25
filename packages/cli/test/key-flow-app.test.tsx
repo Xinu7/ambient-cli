@@ -115,6 +115,33 @@ describe("a key rejected mid-session", () => {
     ui.unmount();
   });
 
+  it("after /clear, a retry on a new key never brings the cleared conversation back", async () => {
+    let good = true;
+    const { ui, requests } = harness({
+      keyWorks: () => good,
+      verify: async (k) => (k === "sk-new-key-0002" ? "valid" : "invalid"),
+    });
+    await settle(30);
+    for (const ch of "SECRET-OLD-TOPIC") ui.stdin.write(ch);
+    ui.stdin.write("\r");
+    await settle(250);
+    for (const ch of "/clear") ui.stdin.write(ch);
+    ui.stdin.write("\r");
+    await settle(60);
+    good = false; // the key is revoked before the next message
+    for (const ch of "fresh task") ui.stdin.write(ch);
+    ui.stdin.write("\r");
+    await settle(250);
+    good = true;
+    ui.stdin.write("sk-new-key-0002");
+    ui.stdin.write("\r");
+    await settle(300);
+    const retried = JSON.stringify(requests.at(-1)?.messages ?? []);
+    expect(retried).toContain("fresh task");
+    expect(retried).not.toContain("SECRET-OLD-TOPIC");
+    ui.unmount();
+  });
+
   it("/login opens the panel on demand and Esc keeps the current key", async () => {
     const { ui, saved } = harness({ keyWorks: () => true, verify: async () => "valid" });
     await settle(30);

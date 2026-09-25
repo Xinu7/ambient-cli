@@ -34,11 +34,10 @@ function isCatastrophicTarget(raw: string): boolean {
   if (/^\/(bin|boot|dev|etc|lib|lib64|proc|root|sbin|sys|usr|System|Applications)(\/|$)/.test(a)) {
     return true;
   }
-  // Folders that are only catastrophic near the top: the home folders and their users, and system trees
-  // whose deeper paths are ordinary scratch (e.g. /var/folders is macOS's temp area).
-  if (/^\/(Users|home|var|private|Library|opt|Volumes)(\/[^/]+)?(\/\*)?$/.test(a)) {
-    return !/^\/(var|private\/var)\/folders\//.test(a);
-  }
+  // The home folders and one user's home; other top-level system trees only at the top (their subfolders —
+  // /opt/homebrew, /var/tmp, /Volumes/Backup — are ordinary places to clean up).
+  if (/^\/(Users|home)(\/[^/]+)?(\/\*)?$/.test(a)) return true;
+  if (/^\/(var|private|Library|opt|Volumes)(\/\*)?$/.test(a)) return true;
   // Git Bash spellings of a Windows drive root, its system folders, or one user's profile.
   return (
     /^\/[a-z](\/(\*|windows|program files|programdata))?$/i.test(a) ||
@@ -158,7 +157,7 @@ function windowsRisk(base: string, argv: string[], risk: Risk, inPowerShell = fa
   // semantics too, where `-r` alone is -Recurse.
   const psSpelled =
     inPowerShell ||
-    targets.some((t) => /^[a-z]:|\\|^%|^\$env:/i.test(t)) ||
+    targets.some((t) => /^[a-z]:[\\/]?|^%|^\$env:/i.test(t)) ||
     opts.some((o) => psParam(o, "-recurse", 3) || psParam(o, "-force", 3));
   if ((base === "rd" || base === "rmdir") && has("/s")) {
     risk.add(

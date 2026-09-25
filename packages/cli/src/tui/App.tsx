@@ -575,10 +575,6 @@ export function App(deps: AppDeps): ReactNode {
       setPlanReview(false); // a run is starting — the previous plan (if any) is no longer awaiting review
       authRejectedRef.current = false;
       toolsRanRef.current = false;
-      // The conversation as it stood before this run — restored if the run dies on a rejected key before doing
-      // anything, so the retry sends the task once instead of twice.
-      const conversationBefore = conversationRef.current;
-      const imagesBefore = sessionImagesRef.current;
       // One session id + writer for the whole TUI launch (minted lazily on the first turn, reset by /clear).
       if (!sessionIdRef.current || !writerRef.current) {
         sessionIdRef.current = newSessionId();
@@ -588,6 +584,10 @@ export function App(deps: AppDeps): ReactNode {
         sessionImagesRef.current = []; // image numbers restart with the session
         workspacePortRef.current = makeWorkspaceContextPort(undefined, { stableRepoMap: true });
       }
+      // The conversation as it stood before this run (after any fresh-session reset above) — restored if the
+      // run dies on a rejected key before doing anything, so the retry sends the task once instead of twice.
+      const conversationBefore = conversationRef.current;
+      const imagesBefore = sessionImagesRef.current;
       const sessionId = sessionIdRef.current;
       const writer = writerRef.current;
       // Record the current north-star into THIS session's log if it changed since we last did, so `amb resume`
@@ -1124,6 +1124,8 @@ export function App(deps: AppDeps): ReactNode {
           planRef.current = [];
           lastEffortRef.current = undefined;
           skipLogReplayRef.current = false;
+          conversationRef.current = [];
+          sessionImagesRef.current = [];
         }
         // The kept plan is now from a cleared session — retire the review prompt/gesture so an empty Enter can't
         // silently execute a stale plan in the fresh session.

@@ -6,7 +6,7 @@ import {
   streamChatCompletion,
 } from "@amb/ambient-api";
 import { CapabilityStore, laneFor, probedRecord, resolveRecord } from "@amb/capabilities";
-import { AmbError, type CatalogModel, availability } from "@amb/protocol";
+import { AmbError, type CatalogModel } from "@amb/protocol";
 import { streamTimeouts } from "@amb/reliability";
 import { ambHome } from "@amb/sessions";
 import { bold, dim } from "../render/color.js";

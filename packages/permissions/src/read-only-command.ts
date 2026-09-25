@@ -115,6 +115,47 @@ const UNSAFE_OPTION: Record<string, (argv: string[]) => boolean> = {
 const UNSAFE_GIT_GREP = (argv: string[]) =>
   argv.some((t) => /^-[A-Za-z]*O/.test(t) || longOption(t, "open-files-in-pager"));
 
+/**
+ * Shell expansion the tokenizer doesn't model, outside single quotes: `$` (variables, `${X:=…}`, `$((…))`,
+ * command substitution — also inside double quotes), globs `* ? [` (a file named `--pre=sh` in the repo turns
+ * `rg foo *` into `rg --pre=sh …`), brace expansion `{`, a leading tilde `~` or comment `#`, and an `=` in a word that
+ * isn't an option (an assignment). With none of these, the words bash runs are exactly the words checked.
+ */
+export function hasUnmodeledExpansion(command: string): boolean {
+  let quote: "'" | '"' | undefined;
+  let wordStart = true;
+  let wordIsOption = false;
+  for (const ch of command) {
+    if (quote === "'") {
+      if (ch === "'") quote = undefined;
+      continue;
+    }
+    if (quote === '"') {
+      if (ch === '"') quote = undefined;
+      else if (ch === "$" || ch === "`") return true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      wordStart = true;
+      continue;
+    }
+    const atWordStart = wordStart;
+    if (wordStart) {
+      wordIsOption = ch === "-";
+      wordStart = false;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      continue;
+    }
+    // `~` and `#` only mean something at the start of a word (`HEAD~1`, `issue#4` are literal).
+    if (atWordStart && (ch === "~" || ch === "#")) return true;
+    if ("$*?[]{}`".includes(ch)) return true;
+    if (ch === "=" && !wordIsOption) return true;
+  }
+  return quote !== undefined; // an unterminated quote is something the shell would read differently
+}
+
 /** Metacharacters that write files or execute arbitrary commands, and which the segment tokenizer does not
  *  split on — their mere presence in the raw command disqualifies the read-only downgrade. */
 function hasDangerousMeta(command: string): boolean {
@@ -132,6 +173,7 @@ export function isReadOnlyCommand(command: string): boolean {
   // Escapes are where a simple tokenizer and the real shell disagree about quoting (`"\"'"` ends differently
   // for each), so a command with any backslash is never downgraded — it just asks.
   if (command.includes("\\")) return false;
+  if (hasUnmodeledExpansion(command)) return false;
   const segments = parseShellCommands(command);
   if (segments.length === 0) return false; // empty/whitespace — nothing to downgrade
 

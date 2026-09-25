@@ -161,3 +161,30 @@ describe("isReadOnlyCommand — commands hidden behind assignments, quoting or g
     },
   );
 });
+
+describe("isReadOnlyCommand — shell expansion is never auto-approved", () => {
+  it.each([
+    "rg foo *",
+    "ls *.ts",
+    "cat $HOME/.netrc",
+    'echo "${X:=$(touch p)}"',
+    "echo $((1+1))",
+    "ls {a,b}",
+    "cat ~/notes.txt",
+    "ls # comment; rm -rf x",
+    "ls a=b",
+    "ls 'unterminated",
+    "grep x [a]",
+  ])("%s asks first", (cmd) => {
+    expect(isReadOnlyCommand(cmd)).toBe(false);
+  });
+  it.each([
+    'grep -rn "a*b" src',
+    "grep -n 'x$' file.ts",
+    "git log --format=%H -3",
+    "ls -la src",
+    "rg --type=ts foo",
+  ])("%s stays read-only (quoted patterns and option values are fine)", (cmd) => {
+    expect(isReadOnlyCommand(cmd)).toBe(true);
+  });
+});
