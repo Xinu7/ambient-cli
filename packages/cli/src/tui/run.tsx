@@ -15,7 +15,7 @@ import { AmbientChatClient } from "../agent/ambient-client.js";
 import { makeCapabilityPort } from "../agent/capability-port.js";
 import { listWorkspaceFiles } from "../agent/file-list.js";
 import { fireAndForget } from "../agent/hooks.js";
-import { type McpConnection, connectMcp } from "../agent/mcp-connect.js";
+import { makeMcpControl } from "../agent/mcp-control.js";
 import { type SettingsConfig, workspaceSettings } from "../agent/workspace-settings.js";
 import { openBrowser, signInInteractive } from "../commands/login.js";
 import { configDir } from "../config.js";
@@ -174,10 +174,17 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // blocking ~30s while a big MCP suite (10+ servers) spawns. Tools attach to the next run once ready; the
   // holder is read live via getMcpTools. `--no-mcp` / AMBIENT_NO_MCP skips MCP entirely for the leanest start.
   const skipMcp = opts.noMcp || process.env.AMBIENT_NO_MCP === "1";
-  let mcpTools: ToolDefinition[] = [];
-  // A holder (not a bare `let`) so TS keeps the McpConnection|null type across the background callback that
-  // assigns it — the finally/ signal handlers read it live to close the servers on exit.
-  const mcpConn: { current: McpConnection | null } = { current: null };
+  const settings = workspaceSettings(cwd, opts.settingsConfig ?? {}, configDir());
+  const mcp = makeMcpControl({
+    workspaceRoot: cwd,
+    connect: {
+      // A project's own servers connect once the project's settings are trusted (/trust); the env switch
+      // remains for scripted runs.
+      approveServer: async () =>
+        process.env.AMBIENT_MCP_ALLOW_PROJECT === "1" || settings.projectTrusted(),
+      plugins: opts.settingsConfig?.claudeSettings === true,
+    },
+  });
 
   // Enable bracketed paste, and ALWAYS disable it (normal exit, Ctrl-C, or a crash) so we never leave the
   // user's shell in bracketed-paste mode.
@@ -194,7 +201,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // so the MCP servers must be shut down HERE (idempotent), else their child processes leak on a signal exit.
   for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
     process.once(sig, () => {
-      mcpConn.current?.close();
+      mcp.close();
       restore();
       // Re-raise so the shell sees the real signal; Windows can't signal a process this way (it throws), so
       // exit with the conventional 128 + signal number instead.
@@ -207,7 +214,6 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const restoreGlyphs = needsAsciiFallback() ? installAsciiFallback(process.stdout) : () => {};
   process.once("exit", restoreGlyphs);
 
-  const settings = workspaceSettings(cwd, opts.settingsConfig ?? {}, configDir());
   // The session in use (a /clear starts a new one) — for the SessionEnd hook when the TUI closes.
   let currentSession = "";
   const instance = render(
@@ -237,7 +243,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       ...(opts.initialGrants && opts.initialGrants.length > 0
         ? { initialGrants: opts.initialGrants }
         : {}),
-      getMcpTools: () => mcpTools,
+      getMcpTools: () => mcp.tools(),
+      ...(skipMcp ? {} : { mcp }),
       skillsInfo,
       skills: skillRows,
       onTogglePin,
@@ -255,38 +262,19 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     { exitOnCtrlC: false },
   );
 
-  // Now that the UI is on screen, connect MCP in the background and hand its tools to the live getter. A
-  // failure never breaks the session — the built-in tools always work; MCP just augments them when ready.
-  let done = false;
-  if (!skipMcp) {
-    void connectMcp(cwd, {
-      // A project's own servers connect once the project's settings are trusted (/trust); the env switch
-      // remains for scripted runs.
-      approveServer: async () =>
-        process.env.AMBIENT_MCP_ALLOW_PROJECT === "1" || settings.projectTrusted(),
-      plugins: opts.settingsConfig?.claudeSettings === true,
-    })
-      .then((m) => {
-        if (done) {
-          m.close(); // the session already ended while we were still connecting — don't leak the servers
-          return;
-        }
-        mcpConn.current = m;
-        mcpTools = m.tools;
-      })
-      .catch(() => {});
-  }
+  // Now that the UI is on screen, connect MCP in the background; runs read the tools live. A failure never
+  // breaks the session — the built-in tools always work; MCP just augments them when ready.
+  if (!skipMcp) void mcp.start();
 
   try {
     await instance.waitUntilExit();
   } finally {
-    done = true;
     await fireAndForget(
       settings.hooksPort(() => currentSession),
       "SessionEnd",
       { reason: "exit" },
     );
-    mcpConn.current?.close();
+    mcp.close();
     restore();
   }
 }

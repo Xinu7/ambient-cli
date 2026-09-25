@@ -34,6 +34,7 @@ import type { ReactNode } from "react";
 import { compactNow } from "../agent/compact-now.js";
 import { createDurableEventSink } from "../agent/event-sink.js";
 import { fireAndForget } from "../agent/hooks.js";
+import { type McpControl, mcpReport } from "../agent/mcp-control.js";
 import { buildRegistry } from "../agent/registry.js";
 import { makeSubagentTool } from "../agent/subagent-tool.js";
 import { makeVerifyPort } from "../agent/verify-port.js";
@@ -177,6 +178,8 @@ export interface AppDeps {
   history?: HistoryPort;
   /** The workspace's files for the `@` picker (listed at the edge, on first use). */
   listFiles?: () => Promise<string[]>;
+  /** The session's MCP servers: status for /mcp, and sign-in with /mcp login. */
+  mcp?: Pick<McpControl, "status" | "login">;
   /** Include the user's global Claude Code / Codex instruction files (config `claudeSettings`). */
   userInstructions?: boolean;
   /** This workspace's hooks and permission rules: applied per run, listed by /hooks and /permissions. */
@@ -1312,6 +1315,30 @@ export function App(deps: AppDeps): ReactNode {
                   : settings.trustSummary()
               ).join("\n");
         dispatch({ t: "notice", level: "info", text });
+        break;
+      }
+      case "/mcp": {
+        const [sub, name] = arg.trim().split(/\s+/);
+        if (!deps.mcp) {
+          dispatch({ t: "notice", level: "info", text: "MCP is off for this session (--no-mcp)." });
+        } else if (sub === "login") {
+          if (!name) {
+            dispatch({ t: "notice", level: "info", text: "usage: /mcp login <server>" });
+            break;
+          }
+          dispatch({
+            t: "notice",
+            level: "info",
+            text: `Opening your browser to sign in to ${name}…`,
+          });
+          void deps.mcp
+            .login(name, (url) =>
+              dispatch({ t: "notice", level: "info", text: `If it didn't open, visit:\n${url}` }),
+            )
+            .then((text) => dispatch({ t: "notice", level: "info", text }));
+        } else {
+          dispatch({ t: "notice", level: "info", text: mcpReport(deps.mcp.status()) });
+        }
         break;
       }
       case "/goal": {

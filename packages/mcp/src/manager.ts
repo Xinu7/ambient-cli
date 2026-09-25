@@ -19,9 +19,21 @@ function defaultSpawn(cfg: McpServerConfig): { transport: Transport } {
   return cfg.legacySse ? spawnSseTransport(cfg) : spawnHttpTransport(cfg);
 }
 
+/** How one server's start went. */
+export interface McpServerOutcome {
+  name: string;
+  ok: boolean;
+  /** Tools it contributed (0 when it failed). */
+  tools: number;
+  /** Why it failed. */
+  error?: Error;
+}
+
 export interface McpSession {
   /** All discovered tools across servers, as ambient ToolDefinitions (register these). */
   tools: ToolDefinition[];
+  /** Per-server results, in config order. */
+  servers: McpServerOutcome[];
   /** Shut every server down (kills the child processes). */
   close(): void;
 }
@@ -60,7 +72,7 @@ export async function startMcpServers(
           { ...(opts.callTimeoutMs ? { callTimeoutMs: opts.callTimeoutMs } : {}) },
         );
         await client.initialize();
-        return { spec, client, discovered: await client.listTools() };
+        return { ok: true as const, spec, client, discovered: await client.listTools() };
       } catch (e) {
         // The server spawned but failed to initialize/list — close it so we don't leak the child process.
         try {
@@ -69,16 +81,20 @@ export async function startMcpServers(
           /* already gone */
         }
         log(`mcp: ${spec.name} unavailable — skipped (${(e as Error).message})`);
-        return undefined;
+        return { ok: false as const, spec, error: e as Error };
       }
     }),
   );
 
   const clients: McpClient[] = [];
   const tools: ToolDefinition[] = [];
+  const servers: McpServerOutcome[] = [];
   const seen = new Set<string>(); // tool ids already claimed — a duplicate is skipped, never a crash
   for (const s of started) {
-    if (!s) continue;
+    if (!s.ok) {
+      servers.push({ name: s.spec.name, ok: false, tools: 0, error: s.error });
+      continue;
+    }
     let added = 0;
     for (const t of s.discovered) {
       const def = mcpToolToDefinition(s.spec.name, t, s.client);
@@ -94,11 +110,13 @@ export async function startMcpServers(
       added += 1;
     }
     clients.push(s.client);
+    servers.push({ name: s.spec.name, ok: true, tools: added });
     log(`mcp: ${s.spec.name} → ${added} tool(s)`);
   }
 
   return {
     tools,
+    servers,
     close: () => {
       for (const c of clients) {
         try {

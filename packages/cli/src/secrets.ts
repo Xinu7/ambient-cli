@@ -72,7 +72,7 @@ function defaultConfigDir(env: Record<string, string | undefined> = process.env)
   return join(base, "amb");
 }
 
-const resolveEnv = (e: SecretEnv) => ({
+export const resolveEnv = (e: SecretEnv) => ({
   platform: e.platform ?? process.platform,
   run: e.run ?? defaultRun,
   configDir: e.configDir ?? defaultConfigDir(),
@@ -88,7 +88,7 @@ function assertKeyShape(key: string): void {
 }
 
 /** Quote a value for the `security -i` command reader (double quotes, escaping `\` and `"`). */
-function securityQuote(v: string): string {
+export function securityQuote(v: string): string {
   return `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
@@ -145,7 +145,7 @@ const DPAPI_PROTECT =
 const DPAPI_UNPROTECT =
   "$b = [Console]::In.ReadLine(); $s = ConvertTo-SecureString -String $b; [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))";
 
-function dpapiProtect(key: string, run: SecretRunner): string {
+export function dpapiProtect(key: string, run: SecretRunner): string {
   const out = run(
     windowsPowerShellExe(),
     ["-NoProfile", "-NonInteractive", "-Command", DPAPI_PROTECT],
@@ -155,7 +155,7 @@ function dpapiProtect(key: string, run: SecretRunner): string {
   return out;
 }
 
-function dpapiUnprotect(blob: string, run: SecretRunner): string | undefined {
+export function dpapiUnprotect(blob: string, run: SecretRunner): string | undefined {
   const out = run(
     windowsPowerShellExe(),
     ["-NoProfile", "-NonInteractive", "-Command", DPAPI_UNPROTECT],

@@ -1,4 +1,4 @@
-import type { HttpServerConfig } from "./http.js";
+import { type HttpServerConfig, McpHttpError } from "./http.js";
 import type { Transport } from "./jsonrpc.js";
 
 /**
@@ -11,6 +11,7 @@ import type { Transport } from "./jsonrpc.js";
 interface StreamResponse {
   ok: boolean;
   status: number;
+  headers?: { get(name: string): string | null };
   body?: ReadableStream<Uint8Array> | null;
 }
 export type SseFetch = (url: string, init: Record<string, unknown>) => Promise<StreamResponse>;
@@ -116,7 +117,8 @@ export function spawnSseTransport(
     headers: { accept: "text/event-stream", ...cfg.headers },
   })
     .then(async (res) => {
-      if (!res.ok || !res.body) throw new Error(`MCP server returned HTTP ${res.status}`);
+      if (!res.ok || !res.body)
+        throw new McpHttpError(res.status, res.headers?.get("www-authenticate") ?? undefined);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       for (;;) {

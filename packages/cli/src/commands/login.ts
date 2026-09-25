@@ -12,13 +12,30 @@ import {
 } from "../secrets.js";
 import { readSecret } from "../terminal/read-secret.js";
 
+/** The command that opens a URL in the default browser, with no shell in between: on Windows `cmd /c start`
+ *  would read a `&` in the URL as a command separator, cutting the link and running the rest. */
+export function browserCommand(
+  url: string,
+  platform: NodeJS.Platform = process.platform,
+): [string, string[]] | undefined {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return undefined;
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return undefined;
+  if (platform === "darwin") return ["open", [u.toString()]];
+  if (platform === "win32") return ["rundll32", ["url.dll,FileProtocolHandler", u.toString()]];
+  return ["xdg-open", [u.toString()]];
+}
+
 /** Best-effort open the URL in the user's default browser. Returns false if it couldn't launch. */
 export function openBrowser(url: string): boolean {
+  const cmd = browserCommand(url);
+  if (!cmd) return false;
   try {
-    if (process.platform === "darwin") execFileSync("open", [url], { stdio: "ignore" });
-    else if (process.platform === "win32")
-      execFileSync("cmd", ["/c", "start", "", url], { stdio: "ignore" });
-    else execFileSync("xdg-open", [url], { stdio: "ignore" });
+    execFileSync(cmd[0], cmd[1], { stdio: "ignore", windowsHide: true });
     return true;
   } catch {
     return false;

@@ -46,6 +46,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
   { name: "/permissions", desc: "Your allow / ask / deny rules and where they come from" },
   {
+    name: "/mcp",
+    args: "[login <server>]",
+    desc: "Your MCP servers; sign in to one that needs it",
+  },
+  {
     name: "/trust",
     args: "[yes]",
     desc: "Review, then trust, this project's hooks, rules and MCP servers",

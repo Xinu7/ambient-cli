@@ -5,6 +5,7 @@ import { runEval } from "./commands/eval.js";
 import { runGitHub } from "./commands/github.js";
 import { runHooks, runTrust } from "./commands/hooks.js";
 import { runLogin, runLogout } from "./commands/login.js";
+import { runMcp } from "./commands/mcp.js";
 import { runModels } from "./commands/models.js";
 import { runProbe } from "./commands/probe.js";
 import { runResume } from "./commands/resume.js";
@@ -33,6 +34,7 @@ Usage:
   ambient skills pin|unpin "<name>"      Pin a skill so it ALWAYS auto-loads (or unpin it)
   ambient hooks                          List the hooks that run here
   ambient trust [yes]                    Review (then trust) this project's hooks, allow rules, MCP servers
+  ambient mcp [login|logout <name>]      List MCP servers; sign in to one that uses OAuth
   ambient probe <model-id>               Test a model's native tool-calling (records the result)
   ambient route explain [model-id]       Explain which model + lane a task would use
   ambient sessions [show <id>]           List / inspect past sessions
@@ -89,6 +91,9 @@ async function main(): Promise<void> {
       break;
     case "trust":
       await runTrust(rest);
+      break;
+    case "mcp":
+      await runMcp(rest);
       break;
     case "probe":
       await runProbe(rest);

@@ -6,6 +6,21 @@ export interface HttpServerConfig {
   headers?: Record<string, string>;
   /** The server speaks MCP's original HTTP+SSE binding (`"type": "sse"`), not Streamable HTTP. */
   legacySse?: boolean;
+  /** Called when the server answers 401: a fresh access token to retry with once, or undefined. */
+  reauthorize?: () => Promise<string | undefined>;
+}
+
+/** An HTTP failure from an MCP server — a 401 carries the header that says where to sign in. */
+export class McpHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly wwwAuthenticate?: string,
+  ) {
+    super(
+      status === 401 ? "the server needs you to sign in" : `MCP server returned HTTP ${status}`,
+    );
+    this.name = "McpHttpError";
+  }
 }
 
 /** The subset of fetch we use — injectable so tests never touch the network. */
@@ -51,6 +66,19 @@ async function readBodyCapped(res: HttpResponse, maxChars: number): Promise<stri
   return out;
 }
 
+/** The configured headers, with a refreshed token replacing any Authorization header (in any casing). */
+function withBearer(
+  headers: Record<string, string> | undefined,
+  bearer: string | undefined,
+): Record<string, string> {
+  if (!bearer) return { ...headers };
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers ?? {}))
+    if (k.toLowerCase() !== "authorization") out[k] = v;
+  out.Authorization = `Bearer ${bearer}`;
+  return out;
+}
+
 /**
  * A `Transport` over the MCP **Streamable HTTP** binding: each JSON-RPC message is POSTed to the endpoint and
  * the response (a single JSON object OR an `text/event-stream` of `data:` events) is parsed back onto
@@ -67,6 +95,7 @@ export function spawnHttpTransport(
   let onClose: (err?: Error) => void = () => {};
   let closed = false;
   let sessionId: string | undefined;
+  let bearer: string | undefined;
 
   const deliver = (raw: string): void => {
     const text = raw.trim();
@@ -83,18 +112,32 @@ export function spawnHttpTransport(
       if (closed) return;
       const ac = new AbortController();
       const timer = setTimeout(() => ac.abort(), REQUEST_TIMEOUT_MS);
-      doFetch(cfg.url, {
-        method: "POST",
-        signal: ac.signal,
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json, text/event-stream",
-          ...(sessionId ? { "mcp-session-id": sessionId } : {}),
-          ...cfg.headers,
-        },
-        body: line.trim(),
-      })
-        .then(async (res) => {
+      const post = () =>
+        doFetch(cfg.url, {
+          method: "POST",
+          signal: ac.signal,
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            ...(sessionId ? { "mcp-session-id": sessionId } : {}),
+            ...withBearer(cfg.headers, bearer),
+          },
+          body: line.trim(),
+        });
+      post()
+        .then(async (first) => {
+          let res = first;
+          // An expired sign-in: get a fresh token once and retry the same message.
+          if (res.status === 401 && cfg.reauthorize) {
+            const token = await cfg.reauthorize();
+            if (token) {
+              bearer = token;
+              res = await post();
+            }
+          }
+          if (res.status >= 400) {
+            throw new McpHttpError(res.status, res.headers.get("www-authenticate") ?? undefined);
+          }
           const sid = res.headers.get("mcp-session-id");
           if (sid) sessionId = sid;
           const body = await readBodyCapped(res, MAX_BODY_CHARS);

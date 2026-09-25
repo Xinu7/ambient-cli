@@ -97,8 +97,9 @@ rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
   compaction); the agent can propose a revision, but only you commit it.
 - **Brings your setup.** Reads your existing `.claude/agents`, skills, slash commands, instruction files
   (`AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules`, with `@path` imports), and MCP
-  servers (`.mcp.json`, `claude mcp add`, and Codex `config.toml`; stdio, Streamable HTTP and SSE, with
-  header or bearer-token auth from your environment) so what you already use works on Ambient models. When your MCP servers bring more tools than the model has room for, it sees an index and loads
+  servers (`.mcp.json`, `claude mcp add`, and Codex `config.toml`; stdio, Streamable HTTP and SSE; header or
+  bearer-token auth from your environment, or OAuth sign-in with `/mcp login <server>`) so what you already
+  use works on Ambient models. When your MCP servers bring more tools than the model has room for, it sees an index and loads
   the ones it needs on demand.
 - **Hooks and permission rules, the Claude Code way.** Hook commands (`PreToolUse`, `PostToolUse`,
   `UserPromptSubmit`, `Stop`, `SubagentStop`, `SessionStart`, `SessionEnd`, `PreCompact`, `Notification`)
@@ -126,7 +127,7 @@ The activity line narrates what the agent is actually doing — `Reading src/app
 /attach <path>   attach an image                   /login  /logout   add, change or remove your API key
 /tools           what the agent can use            /clear            start a fresh conversation
 /hooks           the hooks that run here           /permissions      your allow / ask / deny rules
-/trust [yes]     review this project's own settings
+/trust [yes]     review this project's own settings /mcp [login <s>]  your MCP servers; sign in to one
 /help            every command and key             /quit
 ```
 
@@ -152,6 +153,7 @@ ambient rewind [<id|latest>] [N]    Revert the workspace to before the last N fi
 ambient config [show|path]          Show your ~/.config/amb defaults
 ambient hooks                       List the hooks that run here
 ambient trust [yes]                 Review (then trust) this project's hooks, allow rules and MCP servers
+ambient mcp [login|logout <name>]   List MCP servers; sign in to one that uses OAuth
 ambient github [status|login]       Show GitHub sign-in (or run `gh auth login`)
 ambient doctor                      Check your setup + network
 ambient login | logout | help
