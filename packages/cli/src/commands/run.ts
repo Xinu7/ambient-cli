@@ -263,7 +263,9 @@ export async function runAgent(args: string[]): Promise<void> {
     // tool returns its proceed-on-best-judgment note instead of blocking on a human who isn't there.
     ...(process.stdin.isTTY ? { ask: makeInteractiveAsker() } : {}),
     capabilities: makeCapabilityPort(),
-    workspace: makeWorkspaceContextPort(),
+    workspace: makeWorkspaceContextPort(undefined, {
+      userInstructions: userConfig.claudeSettings === true,
+    }),
     verify: makeVerifyPort(cwd),
     checkpoint: (content) => saveObject(sessionId, content),
     artifact: (content) => saveObject(sessionId, content), // offload large tool outputs

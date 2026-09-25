@@ -268,7 +268,9 @@ export async function runResume(args: string[]): Promise<void> {
     approve: makeInteractiveApprover({ autoAllow: parsed.autoAllow }),
     ...(process.stdin.isTTY ? { ask: makeInteractiveAsker() } : {}),
     capabilities: makeCapabilityPort(),
-    workspace: makeWorkspaceContextPort(),
+    workspace: makeWorkspaceContextPort(undefined, {
+      userInstructions: userConfig.claudeSettings === true,
+    }),
     verify: makeVerifyPort(cwd),
     checkpoint: (content) => saveObject(sessionId, content),
     artifact: (content) => saveObject(sessionId, content), // offload large tool outputs

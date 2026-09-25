@@ -95,7 +95,8 @@ rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
   levels Ambient models actually serve.
 - **A north-star you set.** `/goal` pins a session objective the agent keeps in view every turn (it survives
   compaction); the agent can propose a revision, but only you commit it.
-- **Brings your setup.** Reads your existing `.claude/agents`, skills, slash commands, `AGENTS.md`, and MCP
+- **Brings your setup.** Reads your existing `.claude/agents`, skills, slash commands, instruction files
+  (`AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules`, with `@path` imports), and MCP
   servers (both the `.mcp.json` and Codex `config.toml` dialects) so what you already use works on Ambient
   models. When your MCP servers bring more tools than the model has room for, it sees an index and loads
   the ones it needs on demand.
@@ -106,8 +107,9 @@ rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
   or deny matching calls (a deny always wins, even in bypass). Put both under `"hooks"` and `"permissions"`
   in `~/.config/amb/config.json`. Deny and ask rules apply from any settings file. A project's own
   `.claude/settings.json` hooks and allow rules apply once you've trusted them (`/hooks trust`, or
-  `ambient hooks trust`; any change needs trusting again), and those in `~/.claude` and plugins apply when
-  you set `"claudeSettings": true`.
+  `ambient hooks trust`; any change needs trusting again), and those in `~/.claude` and plugins — along with your
+  global `~/.claude/CLAUDE.md`, `~/.claude/rules` and `~/.codex/AGENTS.md` — apply when you set
+  `"claudeSettings": true`.
 - **Runs everywhere.** macOS, Linux and Windows (Git Bash or PowerShell), tested on all three.
 
 ## In the interactive TUI

@@ -218,6 +218,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         return new SessionWriter(sessionId, () => new Date().toISOString());
       },
       settings,
+      userInstructions: opts.settingsConfig?.claudeSettings === true,
       capabilities: makeCapabilityPort(),
       agentMode: opts.agentMode,
       permission: opts.permission,

@@ -15,7 +15,7 @@ import { gitState } from "./git-state.js";
  */
 export function makeWorkspaceContextPort(
   now: () => Date = () => new Date(),
-  opts: { stableRepoMap?: boolean } = {},
+  opts: { stableRepoMap?: boolean; userInstructions?: boolean } = {},
 ): WorkspaceContextPort {
   // With `stableRepoMap` (one port per interactive session) the map is built once per workspace + budget: it
   // sits in the system prompt, and rebuilding it after every edit would change the prompt and defeat the
@@ -31,7 +31,9 @@ export function makeWorkspaceContextPort(
     return built;
   };
   return {
-    instructions: (cwd, limits) => loadInstructions(cwd, limits).text,
+    // The user's global Claude Code / Codex instructions join only when they've opted in (claudeSettings).
+    instructions: (cwd, limits) =>
+      loadInstructions(cwd, limits, { userFiles: opts.userInstructions === true }).text,
     readMemory: (workspaceRoot) => readMemory(workspaceRoot),
     writeMemory: (workspaceRoot, summary) => writeMemory(workspaceRoot, summary),
     date: () => now().toISOString().slice(0, 10),

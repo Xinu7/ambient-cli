@@ -177,6 +177,8 @@ export interface AppDeps {
   history?: HistoryPort;
   /** The workspace's files for the `@` picker (listed at the edge, on first use). */
   listFiles?: () => Promise<string[]>;
+  /** Include the user's global Claude Code / Codex instruction files (config `claudeSettings`). */
+  userInstructions?: boolean;
   /** This workspace's hooks and permission rules: applied per run, listed by /hooks and /permissions. */
   settings?: WorkspaceSettings;
 }
@@ -390,7 +392,12 @@ export function App(deps: AppDeps): ReactNode {
   const pendingSwitchRef = useRef<string | undefined>(undefined);
   const sessionImagesRef = useRef<ImageAttachment[]>([]);
   // One workspace port per conversation: its repo map stays fixed so the system prompt stays cacheable.
-  const workspacePortRef = useRef(makeWorkspaceContextPort(undefined, { stableRepoMap: true }));
+  const workspacePortRef = useRef(
+    makeWorkspaceContextPort(undefined, {
+      stableRepoMap: true,
+      userInstructions: deps.userInstructions === true,
+    }),
+  );
   // Discover the user's existing Claude/Codex slash commands ONCE — their names join the palette, their
   // bodies (with $ARGUMENTS/$1 expansion) run as a task on dispatch.
   const customCommands = useMemo(() => {
@@ -696,7 +703,10 @@ export function App(deps: AppDeps): ReactNode {
         persistedGoalRef.current = undefined; // a fresh session log hasn't recorded the goal yet
         conversationRef.current = []; // a fresh session starts with no carried-forward conversation
         sessionImagesRef.current = []; // image numbers restart with the session
-        workspacePortRef.current = makeWorkspaceContextPort(undefined, { stableRepoMap: true });
+        workspacePortRef.current = makeWorkspaceContextPort(undefined, {
+          stableRepoMap: true,
+          userInstructions: deps.userInstructions === true,
+        });
       }
       // The conversation as it stood before this run (after any fresh-session reset above) — restored if the
       // run dies on a rejected key before doing anything, so the retry sends the task once instead of twice.
