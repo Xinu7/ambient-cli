@@ -17,6 +17,9 @@ const RecordSchema = z.object({
   ceiling: z.number().int().positive().optional(),
   verifyRuns: z.number().int().nonnegative().optional(),
   verifyFirstTryPasses: z.number().int().nonnegative().optional(),
+  okRate: z.number().min(0).max(1).optional(),
+  latencyMs: z.number().nonnegative().optional(),
+  samples: z.number().int().nonnegative().optional(),
 });
 const FileSchema = z.object({ version: z.literal(1), records: z.record(z.string(), RecordSchema) });
 
@@ -83,6 +86,35 @@ export class CapabilityStore {
       ...base,
       verifyRuns: (base.verifyRuns ?? 0) + 1,
       verifyFirstTryPasses: (base.verifyFirstTryPasses ?? 0) + (firstTryPass ? 1 : 0),
+    });
+    this.persist();
+  }
+
+  /**
+   * Fold one real request outcome into the model's smoothed success rate and latency (an exponential moving
+   * average, so recent behavior counts most). Used to steer automatic model choice away from a model that
+   * keeps failing or stalling. Best-effort.
+   */
+  recordOutcome(modelId: string, ok: boolean, latencyMs: number): void {
+    const now = Date.now();
+    const existing = this.records.get(modelId);
+    const base: CapabilityRecord = existing ?? {
+      modelId,
+      toolCalling: "unknown",
+      provenance: "assumed",
+      observedAt: now,
+      expiresAt: now + 30 * 24 * 3600 * 1000,
+    };
+    const a = 0.2;
+    const samples = (base.samples ?? 0) + 1;
+    this.records.set(modelId, {
+      ...base,
+      samples,
+      okRate: base.okRate === undefined ? (ok ? 1 : 0) : base.okRate * (1 - a) + (ok ? 1 : 0) * a,
+      latencyMs:
+        base.latencyMs === undefined
+          ? latencyMs
+          : base.latencyMs * (1 - a) + Math.max(0, latencyMs) * a,
     });
     this.persist();
   }

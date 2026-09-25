@@ -59,3 +59,38 @@ describe("a stalled worker", () => {
     expect(res.finalText).toBe("served by the other model");
   });
 });
+
+describe("real outcomes are recorded for model choice", () => {
+  it("records a success with its latency, and a stall as a failure", async () => {
+    const { AmbError } = await import("@amb/protocol");
+    const { TEXT_1M } = await import("./fixtures/catalog.js");
+    const outcomes: Array<[string, boolean]> = [];
+    const capabilities = {
+      laneFor: () => "direct" as const,
+      learn: () => {},
+      recordOutcome: (id: string, ok: boolean) => outcomes.push([id, ok]),
+    };
+    const stall = () => {
+      throw new AmbError({
+        kind: "transport",
+        message: "stalled",
+        retryable: true,
+        detail: "stream-stall",
+      });
+    };
+    const client = new FixtureClient(catalogOf(TEXT_200K, TEXT_1M), [
+      stall,
+      stall,
+      { content: "ok", toolCalls: [] },
+    ]);
+    await new Agent(client, undefined, { sleep: async () => {} }).run(
+      "hi there friend",
+      runOpts({ requestedModel: TEXT_200K.id, capabilities }),
+    );
+    expect(outcomes).toEqual([
+      [TEXT_200K.id, false],
+      [TEXT_200K.id, false],
+      [TEXT_1M.id, true],
+    ]);
+  });
+});

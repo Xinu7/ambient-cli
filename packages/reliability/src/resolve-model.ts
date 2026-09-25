@@ -1,5 +1,5 @@
 import type { CatalogModel } from "@amb/protocol";
-import { pickBestModel } from "./pick-best.js";
+import { type ModelStats, pickBestModel } from "./pick-best.js";
 import { readySubstitute } from "./substitution.js";
 
 /**
@@ -28,6 +28,7 @@ export interface ModelResolution {
 export function resolveRequestedModel(
   requested: string | undefined,
   catalog: CatalogModel[],
+  stats?: ModelStats,
 ): ModelResolution | null {
   if (catalog.length === 0) return null; // empty fleet: nothing can be served (never return a dead target)
   if (requested && requested !== AUTO_MODEL) {
@@ -46,7 +47,7 @@ export function resolveRequestedModel(
         : `no model "${requested}" in the fleet; served a live one`,
     };
   }
-  const best = pickBestModel(catalog);
+  const best = pickBestModel(catalog, stats);
   if (!best) return null;
   // Substitute if the best pick is itself cold, so `auto` on a fleet with a cold flagship + a warm peer
   // still resolves to a WARM model (parity with an explicit request's ready-substitution).

@@ -28,6 +28,12 @@ export interface CapabilityRecord {
    *  Persists across sessions so a model earns (or loses) unattended budget over time. */
   verifyRuns?: number;
   verifyFirstTryPasses?: number;
+  /** Smoothed share of requests to this model that succeeded (0..1), from real traffic. */
+  okRate?: number;
+  /** Smoothed request latency (ms), from real traffic. */
+  latencyMs?: number;
+  /** How many request outcomes were observed. */
+  samples?: number;
 }
 
 export const PROVENANCE_RANK: Record<CapabilityProvenance, number> = {

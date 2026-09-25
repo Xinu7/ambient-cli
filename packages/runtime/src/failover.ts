@@ -150,6 +150,7 @@ export async function runChatWithFailover(
       promptTokens,
       escalation,
     });
+    const attemptStarted = Date.now();
     try {
       const stream = ctx.streamDeltas !== false;
       // Re-resolved per attempt: a failover to a non-reasoning model drops the param automatically. Captured
@@ -190,6 +191,7 @@ export async function runChatWithFailover(
           : undefined,
       });
       const empty = result.content.trim().length === 0 && result.toolCalls.length === 0;
+      ctx.capabilities?.recordOutcome?.(current, !empty, Date.now() - attemptStarted);
       ctx.emit({
         schemaVersion: 1,
         kind: "inference.response",
@@ -228,6 +230,11 @@ export async function runChatWithFailover(
               retryable: true,
               model: current,
             });
+      // A model that stalled, was unreachable or had no workers counts against it when choosing a default
+      // later; our own mistakes (auth, a bad request, an overflow) do not.
+      if (err.kind === "transport" || err.kind === "cold" || err.kind === "rate_limit") {
+        ctx.capabilities?.recordOutcome?.(current, false, Date.now() - attemptStarted);
+      }
       // Record the failed attempt so the log isn't a request with no response (fidelity).
       ctx.emit({
         schemaVersion: 1,

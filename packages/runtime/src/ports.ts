@@ -35,6 +35,10 @@ export interface CapabilityPort {
   bytesPerToken?(modelId: string): number | undefined;
   /** Calibrate a model's bytes-per-token from an actual (requestBytes / reported promptTokens) observation. */
   learnBytesPerToken?(modelId: string, bytesPerToken: number): void;
+  /** Record one real request's outcome (success + latency) — steers automatic model choice over time. */
+  recordOutcome?(modelId: string, ok: boolean, latencyMs: number): void;
+  /** What real traffic taught us about a model, or undefined when nothing is known yet. */
+  stats?(modelId: string): { okRate?: number; latencyMs?: number; samples?: number } | undefined;
 }
 
 /** One tool call the model asked for. */

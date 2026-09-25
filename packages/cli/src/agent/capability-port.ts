@@ -58,6 +58,18 @@ export function makeCapabilityPort(): CapabilityPort {
       // triggered this learn) into an uncaught run failure.
       bestEffort(() => store.put({ ...base, ceiling }));
     },
+    recordOutcome(modelId: string, ok: boolean, latencyMs: number) {
+      bestEffort(() => store.recordOutcome(modelId, ok, latencyMs));
+    },
+    stats(modelId: string) {
+      const rec = store.get(modelId);
+      if (!rec?.samples) return undefined;
+      return {
+        samples: rec.samples,
+        ...(rec.okRate !== undefined ? { okRate: rec.okRate } : {}),
+        ...(rec.latencyMs !== undefined ? { latencyMs: rec.latencyMs } : {}),
+      };
+    },
     recordVerify(modelId: string, firstTryPass: boolean) {
       bestEffort(() => store.recordVerify(modelId, firstTryPass));
     },

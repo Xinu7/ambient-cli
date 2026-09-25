@@ -166,3 +166,26 @@ describe("learned negative TTL", () => {
     expect(TTL.learnedNo).toBeLessThan(TTL.learned);
   });
 });
+
+describe("learned request outcomes", () => {
+  it("keeps a smoothed success rate and latency per model, persisted", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { CapabilityStore } = await import("../src/index.js");
+    const dir = mkdtempSync(join(tmpdir(), "amb-cap-"));
+    try {
+      const p = join(dir, "caps.json");
+      const s = new CapabilityStore(p);
+      for (let i = 0; i < 5; i++) s.recordOutcome("m/x", true, 2_000);
+      s.recordOutcome("m/x", false, 30_000);
+      const again = new CapabilityStore(p).get("m/x");
+      expect(again?.samples).toBe(6);
+      expect(again?.okRate ?? 0).toBeGreaterThan(0.5);
+      expect(again?.okRate ?? 1).toBeLessThan(1);
+      expect(again?.latencyMs ?? 0).toBeGreaterThan(2_000);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

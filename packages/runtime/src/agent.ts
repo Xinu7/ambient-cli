@@ -1332,7 +1332,11 @@ export class Agent {
     // the choice self-heals as the fleet changes. A concrete request is honored, with warm substitution if cold.
     // ONE resolution source (shared with `chat`/`route`). `catalog` is guaranteed non-empty here (run() guards
     // the empty fleet), so this never returns null — the `catalog[0]` fallback exists only for exhaustiveness.
-    const res = resolveRequestedModel(requested, catalog) ?? {
+    const res = resolveRequestedModel(
+      requested,
+      catalog,
+      capabilities?.stats ? (id) => capabilities.stats?.(id) : undefined,
+    ) ?? {
       requested,
       target: catalog[0]?.id ?? requested,
       rule: "auto-best" as const,

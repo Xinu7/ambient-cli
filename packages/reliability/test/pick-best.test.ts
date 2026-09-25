@@ -86,3 +86,23 @@ describe("pickBestModel", () => {
     expect(pickBestModel([a, b])).toBe(pickBestModel([b, a]));
   });
 });
+
+describe("learned outcomes steer the default", () => {
+  it("between comparable models, one that keeps failing loses to one that works", () => {
+    const same = { contextLength: 131_072, maxOutputLength: 8_192 };
+    const fleet = [m("a/one", same), m("b/two", same)];
+    const stats = (id: string) =>
+      id === "a/one"
+        ? { okRate: 0.2, latencyMs: 20_000, samples: 10 }
+        : { okRate: 0.95, latencyMs: 4_000, samples: 10 };
+    expect(pickBestModel(fleet)).toBe("a/one"); // no evidence → deterministic id order
+    expect(pickBestModel(fleet, stats)).toBe("b/two"); // evidence flips it
+  });
+  it("a couple of samples are not enough evidence to move the ranking", () => {
+    const same = { contextLength: 131_072 };
+    const fleet = [m("a/one", same), m("b/two", same)];
+    expect(
+      pickBestModel(fleet, (id) => (id === "a/one" ? { okRate: 0, samples: 2 } : undefined)),
+    ).toBe("a/one");
+  });
+});

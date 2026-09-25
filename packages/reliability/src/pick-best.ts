@@ -14,7 +14,21 @@ import { type CatalogModel, supportsVision } from "@amb/protocol";
  *      model called "code", "flash" or "large" is ranked only by what the catalog says it can do, so a new
  *      model needs no code change. Id order breaks ties deterministically.
  */
-export function pickBestModel(catalog: CatalogModel[]): string | undefined {
+/** What real traffic taught us about a model (from the capabilities store); undefined when unknown. */
+export type ModelStats = (
+  id: string,
+) => { okRate?: number; latencyMs?: number; samples?: number } | undefined;
+
+/** Evidence from real requests: a reliable, fast model gains a little; a failing or stalling one loses. Needs
+ *  a few samples before it counts, so one bad request doesn't move the ranking. */
+export function learnedBonus(stats: ReturnType<ModelStats>): number {
+  if (!stats || (stats.samples ?? 0) < 3) return 0;
+  const reliability = ((stats.okRate ?? 0.5) - 0.5) * 30; // −15 … +15
+  const slowness = Math.min(5, Math.max(0, ((stats.latencyMs ?? 0) - 15_000) / 6_000)); // 0 … −5
+  return reliability - slowness;
+}
+
+export function pickBestModel(catalog: CatalogModel[], stats?: ModelStats): string | undefined {
   if (catalog.length === 0) return undefined;
   const toolCapable = catalog.filter((m) => m.supportedFeatures.includes("tools"));
   const base = toolCapable.length > 0 ? toolCapable : catalog;
@@ -22,7 +36,7 @@ export function pickBestModel(catalog: CatalogModel[]): string | undefined {
   const pool = ready.length > 0 ? ready : base;
 
   return [...pool]
-    .map((m) => ({ id: m.id, score: scoreModel(m) }))
+    .map((m) => ({ id: m.id, score: scoreModel(m) + learnedBonus(stats?.(m.id)) }))
     .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))[0]?.id;
 }
 
