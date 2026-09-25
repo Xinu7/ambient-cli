@@ -78,11 +78,14 @@ const shortFlag = (t: string, letter: string) =>
  * A long option that could mean `name` — the option itself, `--name=value`, or (for tools that accept
  * unambiguous abbreviations, like git and GNU coreutils) any shorter prefix of it.
  */
-const longOption = (t: string, name: string) => {
+const longOption = (t: string, name: string, minLength = 1) => {
   if (!t.startsWith("--") || t.length < 3) return false;
   const opt = t.slice(2).split("=")[0] as string;
-  return name.startsWith(opt);
+  return opt.length >= minLength && name.startsWith(opt);
 };
+
+/** A plain command name (`ls`, `git`) or an absolute path to one (`/bin/ls`) — never an assignment. */
+const COMMAND_WORD = /^(?:[A-Za-z0-9._+-]+|\/[A-Za-z0-9._+/-]+)$/;
 
 /**
  * Options that turn an otherwise read-only command into one that runs a program or writes a file:
@@ -91,7 +94,11 @@ const longOption = (t: string, name: string) => {
  */
 const UNSAFE_OPTION: Record<string, (argv: string[]) => boolean> = {
   rg: (argv) => argv.some((t) => t.startsWith("--pre") || t.startsWith("--hostname-bin")),
-  tree: (argv) => argv.some((t) => shortFlag(t, "o") || longOption(t, "output")),
+  // -o writes a file; -R with -H writes an HTML page into every directory and re-runs tree for each.
+  tree: (argv) =>
+    argv.some(
+      (t) => shortFlag(t, "o") || shortFlag(t, "R") || shortFlag(t, "H") || longOption(t, "output"),
+    ),
   file: (argv) => argv.some((t) => shortFlag(t, "C") || longOption(t, "compile")),
   // Only a display format (`date +%s`) or read-only flags; a bare operand or -s/--set changes the clock.
   date: (argv) =>
@@ -122,11 +129,17 @@ function hasDangerousMeta(command: string): boolean {
 /** True iff `command` is composed ENTIRELY of read-only invocations (see the rules above). */
 export function isReadOnlyCommand(command: string): boolean {
   if (hasDangerousMeta(command)) return false;
+  // Escapes are where a simple tokenizer and the real shell disagree about quoting (`"\"'"` ends differently
+  // for each), so a command with any backslash is never downgraded — it just asks.
+  if (command.includes("\\")) return false;
   const segments = parseShellCommands(command);
   if (segments.length === 0) return false; // empty/whitespace — nothing to downgrade
 
   for (const seg of segments) {
     if (seg.quotedFirst) return false; // a fully-quoted first word is data, not a safe invocation
+    // The first word must be the command itself: a plain name or an absolute path. `X=/ls rm -rf src` sets a
+    // variable and runs `rm`; `GIT_EXTERNAL_DIFF=… git diff` runs a program of its choosing.
+    if (!COMMAND_WORD.test(seg.argv[0] ?? "")) return false;
     const cmd = baseName(seg.argv[0] ?? "");
     if (!cmd) return false;
     // A diff-family write flag (`--output=<file>`) writes a file regardless of the subcommand — reject it.
@@ -137,6 +150,10 @@ export function isReadOnlyCommand(command: string): boolean {
       const sub = seg.argv[1];
       if (!sub || sub.startsWith("-") || !READ_ONLY_GIT.has(sub)) return false;
       if (sub === "grep" && UNSAFE_GIT_GREP(seg.argv)) return false;
+      // External diff and text-conversion drivers are programs named in git config.
+      if (seg.argv.some((t) => longOption(t, "ext-diff", 3) || longOption(t, "textconv", 3))) {
+        return false;
+      }
       continue;
     }
     if (!READ_ONLY_CMDS.has(cmd)) return false;

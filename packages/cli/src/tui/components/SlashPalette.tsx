@@ -72,7 +72,7 @@ function isFuzzyToken(token: string): boolean {
 const EXACT_ONLY = new Set(["/bypass", "/accept", "/ask", "/logout", "/login", "/clear", "/quit"]);
 
 /**
- * No prefix hit → rank the built-in commands by a loose in-order match (e.g. `/cmpt` → `/compact`). The
+ * No prefix hit → rank the built-in commands by a loose in-order match (e.g. `/thnk` → `/thinking`). The
  * user's own discovered commands and anything with side effects need their exact name.
  */
 function fuzzySlash(token: string): SlashCommand[] {

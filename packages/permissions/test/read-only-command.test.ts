@@ -139,3 +139,25 @@ describe("isReadOnlyCommand — abbreviated and lesser-known options", () => {
     expect(isReadOnlyCommand(cmd)).toBe(true);
   });
 });
+
+describe("isReadOnlyCommand — commands hidden behind assignments, quoting or git drivers", () => {
+  it.each([
+    "X=/ls touch pwned",
+    "X=/ls rm -rf src",
+    "GIT_EXTERNAL_DIFF='touch /tmp/p;:/cat' git diff --ext-diff",
+    `echo "\\"'" ; touch pwn ; echo '"'`,
+    "git diff --ext-diff",
+    "git log -p --ext",
+    "git show --textconv HEAD",
+    "git cat-file --textconv HEAD:a.txt",
+    "tree -R -H . -L 1",
+  ])("%s still needs approval", (cmd) => {
+    expect(isReadOnlyCommand(cmd)).toBe(false);
+  });
+  it.each(["/bin/ls -la", "git diff --stat", "git log --oneline -5", "ls src"])(
+    "%s stays read-only",
+    (cmd) => {
+      expect(isReadOnlyCommand(cmd)).toBe(true);
+    },
+  );
+});

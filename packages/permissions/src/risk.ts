@@ -23,19 +23,26 @@ export interface RiskAssessment {
 const FORK_BOMB = /:\s*\(\s*\)\s*\{[^}]{0,60}[|][^}]{0,60}&[^}]{0,60}\}\s*;?\s*:/;
 
 /** Delete targets that are catastrophic regardless of intent: the root, home, or a top-level system dir. */
-function isCatastrophicTarget(a: string): boolean {
-  if (/^(\/|~|\$HOME|\$\{HOME\})\/?\*?$/.test(a)) return true;
-  // System folders at any depth; home folders only at the top (a project deep inside one is ordinary work).
-  if (
-    /^\/(bin|boot|dev|etc|lib|lib64|proc|root|sbin|sys|usr|var|System|Applications)(\/|$)/.test(a)
-  ) {
+function isCatastrophicTarget(raw: string): boolean {
+  // `/Users/z//*` and `/Users/z/./*` are the same place as `/Users/z/*`.
+  const a =
+    raw.startsWith("/") || raw.startsWith("~") || raw.startsWith("$")
+      ? posix.normalize(raw).replace(/(.)\/$/, "$1")
+      : raw;
+  if (a === "/*" || /^(\/|~|\$HOME|\$\{HOME\})(\/\*)?$/.test(a)) return true;
+  // System folders at any depth.
+  if (/^\/(bin|boot|dev|etc|lib|lib64|proc|root|sbin|sys|usr|System|Applications)(\/|$)/.test(a)) {
     return true;
   }
-  if (/^\/(Users|home)(\/[^/]+)?\/?\*?$/.test(a)) return true;
+  // Folders that are only catastrophic near the top: the home folders and their users, and system trees
+  // whose deeper paths are ordinary scratch (e.g. /var/folders is macOS's temp area).
+  if (/^\/(Users|home|var|private|Library|opt|Volumes)(\/[^/]+)?(\/\*)?$/.test(a)) {
+    return !/^\/(var|private\/var)\/folders\//.test(a);
+  }
   // Git Bash spellings of a Windows drive root, its system folders, or one user's profile.
   return (
-    /^\/[a-z](\/(\*|windows|program files|programdata))?\/?$/i.test(a) ||
-    /^\/[a-z]\/users(\/[^/]+)?\/?\*?$/i.test(a)
+    /^\/[a-z](\/(\*|windows|program files|programdata))?$/i.test(a) ||
+    /^\/[a-z]\/users(\/[^/]+)?(\/\*)?$/i.test(a)
   );
 }
 
@@ -57,6 +64,8 @@ function isCatastrophicWindowsTarget(a: string): boolean {
 }
 
 /** powershell.exe parameters that take a value (the value is not the start of the script). */
+/** Their documented short aliases (`-ep Bypass`, `-w hidden`, `-wd C:\x`). */
+const PS_VALUE_ALIASES = new Set(["-ep", "-ex", "-w", "-wd", "-v", "-o", "-of", "-if", "-config"]);
 const PS_VALUE_PARAMS = [
   "-executionpolicy",
   "-windowstyle",
@@ -84,7 +93,7 @@ function powershellScript(argv: string[], risk: Risk): string | undefined {
     }
     if (o === "-c" || psParam(o, "-command", 4)) return args.slice(i + 1).join(" ");
     if (psParam(o, "-file", 3)) return undefined; // a script file — its contents aren't visible here
-    if (PS_VALUE_PARAMS.some((p) => psParam(o, p, 3))) {
+    if (PS_VALUE_ALIASES.has(o) || PS_VALUE_PARAMS.some((p) => psParam(o, p, 3))) {
       i++; // skip the value
       continue;
     }
@@ -105,7 +114,7 @@ const psParam = (opt: string, name: string, minLength: number) =>
  * separators (the POSIX tokenizer would eat them as escapes) and only double quotes group words. Wrapped
  * commands (`cmd /c …`, `powershell -Command …`) are classified too.
  */
-function windowsCommandRisk(command: string, risk: Risk, depth = 0): void {
+function windowsCommandRisk(command: string, risk: Risk, depth = 0, inPowerShell = false): void {
   // cmd's escape character (`r^d`) doesn't change which command runs.
   for (const segment of command.replace(/\^(?=\S)/g, "").split(/&&|\|\||[&|;\n]/)) {
     const argv = segment.match(/"[^"]*"|\S+/g)?.map((t) => t.replace(/^"|"$/g, "")) ?? [];
@@ -124,15 +133,15 @@ function windowsCommandRisk(command: string, risk: Risk, depth = 0): void {
     }
     if (depth < 2 && (base === "powershell" || base === "pwsh")) {
       const script = powershellScript(argv, risk);
-      if (script) windowsCommandRisk(script, risk, depth + 1);
+      if (script) windowsCommandRisk(script, risk, depth + 1, true);
       continue;
     }
-    windowsRisk(base, argv, risk);
+    windowsRisk(base, argv, risk, inPowerShell);
   }
 }
 
 /** Classify one Windows command. `base` is lower-cased without `.exe`. */
-function windowsRisk(base: string, argv: string[], risk: Risk): void {
+function windowsRisk(base: string, argv: string[], risk: Risk, inPowerShell = false): void {
   // `-Recurse:$true` is -Recurse.
   const opts = splitCmdOptions(argv.slice(1)).map((a) =>
     a.toLowerCase().replace(/^(-[a-z]+):.*$/, "$1"),
@@ -145,7 +154,12 @@ function windowsRisk(base: string, argv: string[], risk: Risk): void {
   const psForce = opts.some((o) => o === "-f" || psParam(o, "-force", 3));
   // `rm`/`del`/`rd` are also POSIX or cmd commands; only read them as Remove-Item when a parameter is
   // spelled the PowerShell way (`-Rec`, `-Fo`), so `rm -r -f dist` in bash isn't mistaken for it.
-  const psSpelled = opts.some((o) => psParam(o, "-recurse", 3) || psParam(o, "-force", 3));
+  // A Windows target (`C:\…`, `%USERPROFILE%`) or a script already inside powershell means PowerShell
+  // semantics too, where `-r` alone is -Recurse.
+  const psSpelled =
+    inPowerShell ||
+    targets.some((t) => /^[a-z]:|\\|^%|^\$env:/i.test(t)) ||
+    opts.some((o) => psParam(o, "-recurse", 3) || psParam(o, "-force", 3));
   if ((base === "rd" || base === "rmdir") && has("/s")) {
     risk.add(
       catastrophic ? "critical" : "elevated",
@@ -288,7 +302,7 @@ function classifyBash(command: string): RiskAssessment {
 /** Sensitive file targets for write/edit/apply_patch — writing here can grant access or hijack execution
  *  (`.ambient/verify*` runs automatically after the model edits files). */
 const SENSITIVE_PATH =
-  /(?:^|\/)(?:\.ssh\/|\.aws\/|\.gnupg\/|authorized_keys|id_[rd]sa|\.env(?:$|\.)|\.git\/(?:hooks|config)|\.ambient\/verify|\.github\/workflows\/|\.bashrc|\.zshrc|\.profile|\.npmrc|\.pypirc|\.netrc|sudoers|\/etc\/)/;
+  /(?:^|\/)(?:\.ssh\/|\.aws\/|\.gnupg\/|authorized_keys|id_[rd]sa|\.env(?:$|\.)|\.git\/(?:hooks|config)|\.ambient\/verify|\.gitconfig|\.config\/git\/|\.envrc|\.git\/modules\/[^\n]*\/hooks\/|\.github\/workflows\/|\.bashrc|\.zshrc|\.profile|\.npmrc|\.pypirc|\.netrc|sudoers|\/etc\/)/;
 
 function pathsOf(args: Record<string, unknown>): string[] {
   const out: string[] = [];

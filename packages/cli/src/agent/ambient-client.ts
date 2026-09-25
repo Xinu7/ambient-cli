@@ -46,8 +46,8 @@ export class AmbientChatClient implements ChatClient {
       this.cached = { at: Date.now(), models };
       return models;
     } catch (e) {
-      // Keep working on the last good fleet through an outage: a slightly old list beats a failed run, and
-      // failover refetches before it relies on the list anyway.
+      // Keep working on the last good fleet through an outage: an old list beats a failed run, and a model
+      // that has since gone away fails over like any unavailable one.
       if (c && !signal?.aborted) return c.models;
       throw e;
     }

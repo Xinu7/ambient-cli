@@ -208,6 +208,9 @@ function appReducer(state: ViewState, action: Action): ViewState {
   }
 }
 
+/** Most lines of launch notes that may sit under the splash banner. */
+const SPLASH_NOTE_LINES = 4;
+
 /** The instruction that executes the SAVED plan ("adhere to it"). Called only for an explicit empty-Enter
  *  in BUILD mode; the steps are one-line labels (sanitized in parsePlan) referenced back to the model. */
 function withPlan(plan: PlanTask[]): string {
@@ -273,6 +276,8 @@ export function App(deps: AppDeps): ReactNode {
   const [slashSel, setSlashSel] = useState(0);
   // Bumped by /clear to remount <Static> after the screen + scrollback are wiped.
   const [staticEpoch, setStaticEpoch] = useState(0);
+  /** How many transcript items <Static> has printed this epoch (it only ever grows until /clear). */
+  const committedRef = useRef(0);
   // The in-app key flow. A run that fails because Ambient rejected the key (revoked or mistyped) opens the
   // key panel and re-runs that task once a working key is saved; /login opens it on demand.
   const keyNotice = useCallback(
@@ -573,6 +578,7 @@ export function App(deps: AppDeps): ReactNode {
       // The conversation as it stood before this run — restored if the run dies on a rejected key before doing
       // anything, so the retry sends the task once instead of twice.
       const conversationBefore = conversationRef.current;
+      const imagesBefore = sessionImagesRef.current;
       // One session id + writer for the whole TUI launch (minted lazily on the first turn, reset by /clear).
       if (!sessionIdRef.current || !writerRef.current) {
         sessionIdRef.current = newSessionId();
@@ -811,6 +817,7 @@ export function App(deps: AppDeps): ReactNode {
             keyFlowRef.current.open("rejected", { text: CONTINUE_AFTER_KEY, attachments: [] });
           } else {
             conversationRef.current = conversationBefore;
+            sessionImagesRef.current = imagesBefore; // the retry attaches the same images again
             if (conversationBefore.length === 0) skipLogReplayRef.current = true;
             keyFlowRef.current.open("rejected", { text: task, attachments: attach });
           }
@@ -1125,6 +1132,7 @@ export function App(deps: AppDeps): ReactNode {
         // Scrollback printed by <Static> is outside React's control: clear the screen + scrollback and remount
         // <Static> (its internal cursor would otherwise skip the first items of the fresh transcript).
         stdout?.write("\x1b[2J\x1b[3J\x1b[H");
+        committedRef.current = 0;
         setStaticEpoch((n) => n + 1);
         break;
       }
@@ -1602,12 +1610,16 @@ export function App(deps: AppDeps): ReactNode {
   // A picker/overlay (model · effort · skills) replaces the splash banner so an overlay opened on a fresh
   // screen gets the full window height — otherwise the banner eats ~9 rows and the overlay overflows.
   // The splash stays until the conversation starts; notices from launch (a key note, an update) sit under it.
-  const conversationStarted = state.transcript.some(
-    (t) => t.kind !== "notice" && t.kind !== "receipt",
-  );
-  const onSplash = !conversationStarted && picker === null;
+  // Only a few short launch notes may sit under the banner; a real exchange, or longer output such as /help,
+  // ends the splash.
+  const conversationStarted =
+    state.transcript.some((t) => t.kind !== "notice" && t.kind !== "receipt") ||
+    state.transcript.reduce((n, t) => n + ("text" in t ? t.text.split("\n").length : 1), 0) >
+      SPLASH_NOTE_LINES;
   const slashMatches = matchSlash(input, customCommands.palette);
   const showSlash = input.startsWith("/") && slashMatches.length > 0 && !pending && picker === null;
+  // The banner steps aside for any menu, so the menu gets the room (a squeezed menu overlaps its own rows).
+  const onSplash = !conversationStarted && picker === null && !showSlash;
   const elapsed = runActive && runStartRef.current ? (Date.now() - runStartRef.current) / 1000 : 0;
   // Per-PHASE clock (P1.10): reset whenever the current activity verb changes, so "Thinking · 0:12" means
   // thinking FOR 0:12, not 0:12 into the whole run (the user wanted both readouts).
@@ -1619,10 +1631,13 @@ export function App(deps: AppDeps): ReactNode {
   // append-only even when parallel tools settle out of order — Static must never see an item re-ordered.
   const firstLive = state.transcript.findIndex((it) => !isSettled(it));
   const settledCount = firstLive < 0 ? state.transcript.length : firstLive;
-  // On the splash nothing is committed yet: launch notices render live under the banner, and commit to
-  // scrollback with the rest once the conversation starts.
-  const settledItems = onSplash ? [] : state.transcript.slice(0, settledCount);
-  const liveItems = onSplash ? state.transcript : state.transcript.slice(settledCount);
+  // On the splash, launch notes render live under the banner and commit with the rest once the conversation
+  // starts. What was already committed (a menu hid the banner for a moment) stays committed — <Static> must
+  // only ever grow, or it prints those items a second time.
+  const commitCount = onSplash ? Math.min(committedRef.current, settledCount) : settledCount;
+  committedRef.current = Math.max(committedRef.current, commitCount);
+  const settledItems = state.transcript.slice(0, commitCount);
+  const liveItems = state.transcript.slice(commitCount);
   const interior = Math.max(1, width - 2);
   // Visible queue rows — a rows-derived budget so the always-on panel stack stays under the screen height.
   const qMax = Math.min(5, Math.max(1, rows - 20));

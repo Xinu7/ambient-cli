@@ -113,19 +113,20 @@ export async function runProbe(args: string[]): Promise<void> {
     );
 }
 
-/** Probe every READY model and print a conformance matrix (the live model-matrix). */
+/**
+ * Probe every model and print a conformance matrix (the live model-matrix). Readiness is only a hint (flagged
+ * models serve), so every model is tried; one that really can't serve shows the error it returned.
+ */
 async function probeAll(
   config: AmbientConfig,
   catalog: CatalogModel[],
   store: CapabilityStore,
 ): Promise<void> {
-  const ready = catalog.filter((m) => availability(m) === "ready");
-  const cold = catalog.filter((m) => availability(m) !== "ready");
   process.stdout.write(
-    `${bold("AMBIENT MODEL MATRIX")} ${dim(`— ${ready.length} ready, ${cold.length} cold`)}\n\n`,
+    `${bold("AMBIENT MODEL MATRIX")} ${dim(`— ${catalog.length} model${catalog.length === 1 ? "" : "s"}`)}\n\n`,
   );
 
-  for (const m of ready) {
+  for (const m of catalog) {
     process.stderr.write(dim(`  probing ${m.id}…\r`));
     let worked = false;
     let note = "";
@@ -141,12 +142,9 @@ async function probeAll(
       `  ${glyph} ${m.id.padEnd(34)} lane=${lane.padEnd(11)} ${note || (worked ? "native tools ✓" : "assisted (text protocol)")}\n`,
     );
   }
-  for (const m of cold) {
-    process.stdout.write(`  ${dim(`· ${m.id.padEnd(34)} cold — unavailable`)}\n`);
-  }
   process.stdout.write(
     dim(
-      "\nReady models pass (direct) or fall back to the assisted lane; cold models fail cleanly.\n",
+      "\nModels with working native tool calls run direct; the rest use the assisted lane. A model that can't serve right now shows its error.\n",
     ),
   );
 }
