@@ -46,7 +46,7 @@ Run flags:
   --plan              Read-only: propose changes without making them
   --accept-edits      Auto-approve file edits (still confirms shell)
   --bypass, --yolo    Full autonomy: no approval prompts (incl. shell)
-  --effort <level>    Reasoning effort: auto (default) | off | low | medium | high
+  --effort <level>    Reasoning effort: auto (default) | off | high | max
   --yes, -y           Auto-approve file edits (shell/network still prompt; use --bypass for those)
   --max-turns <n>     Turns per segment before an auto-continue checkpoint (1–1000, default 120)
   --no-auto-continue  Stop at the turn limit for a one-tap continue (default: auto-continue)

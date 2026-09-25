@@ -95,10 +95,14 @@ export interface WorkspaceContextPort {
 }
 
 /**
- * The user's reasoning-effort choice. `auto` is resolved by the agent from the run mode + model capability;
- * `off` sends nothing; low/medium/high are sent as `reasoning_effort` only for reasoning-capable models.
+ * The user's reasoning-effort choice. `auto` is resolved by the agent per turn from the task, the mode and the
+ * run's progress; `off` sends an explicit `none`; `high`/`max` are sent as-is. Nothing is sent to a model that
+ * doesn't advertise `reasoning`.
  */
-export type EffortSetting = "off" | "auto" | "low" | "medium" | "high";
+export type EffortSetting = "off" | "auto" | "high" | "max";
+
+/** The reasoning tiers Ambient actually serves (measured): none, high, max. */
+export type ReasoningLevel = "none" | "high" | "max";
 
 export interface ChatParams {
   model: string;
@@ -106,8 +110,8 @@ export interface ChatParams {
   tools: unknown[];
   maxTokens: number;
   signal: AbortSignal;
-  /** Resolved reasoning effort for THIS request (low/medium/high), or undefined to send none. */
-  reasoningEffort?: "low" | "medium" | "high";
+  /** Resolved reasoning effort for THIS request, or undefined to omit the param. */
+  reasoningEffort?: ReasoningLevel;
   /** True when the outbound messages carry image content-parts — lets the adapter mark the request so an
    *  image-related 400 isn't misread as a context overflow. Absent ⇒ the adapter derives it from `messages`. */
   hasImage?: boolean;
@@ -191,6 +195,8 @@ export interface RunOptions {
   capabilities?: CapabilityPort;
   /** Reasoning-effort choice for this run (resolved per-request by the agent). Absent ⇒ "auto". */
   effort?: EffortSetting;
+  /** The level the previous run in this session used, so a short "continue" keeps it under `auto`. */
+  priorEffort?: ReasoningLevel;
   /** Workspace fs/env context (instructions, memory, clock, platform) — REQUIRED so a run can never silently
    *  lose project instructions/memory. Tests pass an explicit inert or real-fs implementation. */
   workspace: WorkspaceContextPort;

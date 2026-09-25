@@ -22,19 +22,17 @@ function permissionStyle(p: Permission): { label: string; color: string } {
   }
 }
 
-/** Effort label + color — `high` reads active (it thinks harder), `off`/`auto`/`low` stay calm. */
+/** Effort label + color — `max` reads active (it thinks hardest), the rest stay calm. */
 function effortStyle(e: Effort): { label: string; color: string | undefined } {
   switch (e) {
     case "off":
       return { label: "off", color: AmbientTheme.dim };
     case "auto":
       return { label: "auto", color: AmbientTheme.dim };
-    case "low":
-      return { label: "low", color: AmbientTheme.dim };
-    case "medium":
-      return { label: "medium", color: AmbientTheme.fg };
     case "high":
-      return { label: "high", color: AmbientTheme.signal };
+      return { label: "high", color: AmbientTheme.fg };
+    case "max":
+      return { label: "max", color: AmbientTheme.signal };
   }
 }
 

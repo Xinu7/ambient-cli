@@ -14,7 +14,8 @@ describe("buildChatBody", () => {
   it("includes reasoning_effort ONLY when the caller set it", () => {
     expect(buildChatBody(base).reasoning_effort).toBeUndefined();
     expect(buildChatBody({ ...base, reasoningEffort: "high" }).reasoning_effort).toBe("high");
-    expect(buildChatBody({ ...base, reasoningEffort: "low" }).reasoning_effort).toBe("low");
+    expect(buildChatBody({ ...base, reasoningEffort: "none" }).reasoning_effort).toBe("none");
+    expect(buildChatBody({ ...base, reasoningEffort: "max" }).reasoning_effort).toBe("max");
   });
 
   it("omits an empty tools array (some models reject it) but keeps a non-empty one", () => {

@@ -13,6 +13,7 @@ import type {
   CapabilityPort,
   ChatClient,
   ChatParams,
+  ReasoningLevel,
   RunOptions,
   TurnCompletion,
 } from "./ports.js";
@@ -42,7 +43,7 @@ export interface FailoverCtx {
   imageTokens?: (part: unknown) => number;
   capabilities?: CapabilityPort;
   /** Resolve the reasoning effort to send for a given served model (re-resolved per attempt). */
-  effortFor: (model: CatalogModel | undefined) => "low" | "medium" | "high" | undefined;
+  effortFor: (model: CatalogModel | undefined) => ReasoningLevel | undefined;
   onCatalog: (c: CatalogModel[]) => void;
   onSwitch: (m: string) => void;
 }

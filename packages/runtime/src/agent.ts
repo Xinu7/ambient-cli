@@ -58,6 +58,7 @@ import { type ContentPart, buildUserContent, toDataUri } from "./attachments.js"
 import { compact, reduceContext } from "./compaction-runner.js";
 import {
   DESIRED_OUTPUT,
+  FAILED_BATCHES_TO_ESCALATE,
   INJECTED_CONTEXT_FRACTION,
   MALFORMED_STRIKES_TO_DEMOTE,
   MAX_COMPACTIONS,
@@ -306,7 +307,7 @@ export class Agent {
     const servedModel = liveCatalog.find((m) => m.id === target) ?? fallbackModel(target);
     // `auto` effort is TASK-ADAPTIVE: a greeting like "sup" must not trigger medium reasoning (a trivial
     // prompt shouldn't pay for deep reasoning); computed once from the task + mode, then applied per attempt.
-    const autoLevel = autoEffortForTask(userInput, opts.mode);
+    let autoLevel = autoEffortForTask(userInput, opts.mode, opts.priorEffort);
     let firstUserContent: string | ContentPart[] = userInput;
     // The ACCURATE per-image token cost for THIS run's plan (from fitImages) — threaded into every prompt
     // estimate so preflight/overflow sizes images correctly per window, not just the flat default. Undefined
@@ -403,6 +404,7 @@ export class Agent {
     let lastBatchSig = "";
     let batchRepeat = 0;
     let malformedStrikes = 0;
+    let failedBatches = 0;
 
     // ── Turn budget ──────────────────────────────────────────────────────────────────────────────────────
     // `maxTurns` is a SEGMENT, not a hard cap. When a segment fills while the task is still progressing,
@@ -868,6 +870,8 @@ export class Agent {
             });
             if (!outcome.ok) {
               verifyAttempts += 1;
+              // A failed verification means the problem was harder than it looked: reason at max from here.
+              autoLevel = "max";
               // A verify-driven re-fix is legitimate progress-seeking (new failure info), NOT a doom loop —
               // reset the loop tracker so the guard doesn't cut the bounded verify retries short.
               lastBatchSig = "";
@@ -944,6 +948,9 @@ export class Agent {
       // Auto-continue cost gate: a segment must land at least one successful tool call to earn another one —
       // a whole segment with nothing succeeding is a stuck run, not progress, so we stop rather than extend.
       segmentProgress += outcomes.filter((o) => o.ok).length;
+      // Two turns in a row where every tool call failed: the model is struggling — reason at max from here.
+      failedBatches = outcomes.length > 0 && outcomes.every((o) => !o.ok) ? failedBatches + 1 : 0;
+      if (failedBatches >= FAILED_BATCHES_TO_ESCALATE) autoLevel = "max";
       // Doom-loop guard: a batch of the SAME tool calls (same names + args) repeated with no change is the
       // model going in circles. After MAX_IDENTICAL_TOOL_BATCHES identical batches, stop honestly.
       const batchSig = toolCalls

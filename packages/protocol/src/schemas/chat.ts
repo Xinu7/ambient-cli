@@ -18,7 +18,8 @@ export const ChatMessageSchema = z.object({
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
 /** Reasoning-effort levels the OpenAI-compatible API accepts for reasoning-capable models. */
-export const ReasoningEffortSchema = z.enum(["low", "medium", "high"]);
+/** Wire values for `reasoning_effort`. Ambient serves none/high/max; low/medium stay valid for compatibility. */
+export const ReasoningEffortSchema = z.enum(["none", "low", "medium", "high", "max"]);
 export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
 
 export const ChatRequestSchema = z.object({

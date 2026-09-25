@@ -165,7 +165,8 @@ export const EventSchema = z.discriminatedUnion("kind", [
     completionTokens: z.number().int().nonnegative().optional(),
     /** The reasoning effort actually SENT for this attempt (resolved per served model) — drives the live
      *  "Thinking · high" readout so the user sees the effort behind an `auto` setting. */
-    effort: z.enum(["low", "medium", "high"]).optional(),
+    // Old session logs recorded low/medium; new runs record none/high/max.
+    effort: z.enum(["none", "low", "medium", "high", "max"]).optional(),
     empty: z.boolean(),
     truncated: z.boolean(),
   }),

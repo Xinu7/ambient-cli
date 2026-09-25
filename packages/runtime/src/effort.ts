@@ -1,55 +1,81 @@
 import type { CatalogModel, Mode } from "@amb/protocol";
-import type { EffortSetting } from "./ports.js";
-
-/** Hard-work signals in a task → `auto` reasons HARD. */
-const HARD_TASK =
-  /\b(debug|why|fix|bug|error|fail|failing|broken|crash|refactor|optimi[sz]e|architect|design|implement|migrat|crash|race condition|regression|investigat|analy[sz]e|trace|root ?cause|performance|security|audit|algorithm|concurren)\b/i;
-/** Clearly-trivial / conversational input → `auto` should NOT burn deep reasoning — a trivial prompt
- *  shouldn't pay for the latency of deep reasoning. */
-const TRIVIAL_TASK =
-  /^\s*(hi|hey|hello|sup|yo|hiya|thanks|thank you|ty|ok|okay|k|cool|nice|great|got it|test|ping|yes|no|y|n)\b[\s!.?]*$/i;
+import type { EffortSetting, ReasoningLevel } from "./ports.js";
 
 /**
- * The `auto` reasoning level for a task — TASK-ADAPTIVE (not just mode-based), so a greeting doesn't trigger
- * medium reasoning that makes a reasoning model think for many seconds. Plan mode always reasons hard (planning is
- * deliberate); otherwise: clearly-hard work → high, a trivial/tiny/greeting → low, everything else → medium.
+ * Reasoning effort, honest to what Ambient actually serves. Measured live: `none` disables reasoning, `max`
+ * reasons roughly twice as deep, and low/medium/high are ONE tier (sent as `high`). Omitting the param
+ * reasons by default, so `off` must send an explicit `none`.
  */
-export function autoEffortForTask(text: string, mode: Mode): "low" | "medium" | "high" {
-  if (mode === "plan") return "high";
+
+/** Hard-work signals in a task → `auto` reasons at max. Stems accept inflections (debug → debugging). */
+const HARD_TASK =
+  /\b(debug\w*|why|fix\w*|bugs?|errors?|fail\w*|broken|crash\w*|refactor\w*|optimi[sz]\w*|architect\w*|design\w*|implement\w*|migrat\w*|race condition|regression\w*|investigat\w*|analy[sz]\w*|trac(e|ing)|root ?cause|performance|security|audit\w*|algorithm\w*|concurren\w*)\b/i;
+/** Social niceties — nothing to reason about. */
+const TRIVIAL_TASK =
+  /^\s*(hi|hey|hello|sup|yo|hiya|thanks|thank you|ty|cool|nice|great|got it|test|ping)\b[\s!.?]*$/i;
+/** A short go-ahead that continues the work in flight — it should keep the effort that work was using. */
+const CONTINUATION =
+  /^\s*(ok(ay)?|k|yes|yep|yeah|y|sure|continue|go( ahead| on)?|proceed|do it|yes,? do it|keep going|next)\b[\s!.?]*$/i;
+
+/**
+ * The `auto` level for a task. Plan mode and hard work → max; greetings → none; a short go-ahead inherits the
+ * previous run's level (so "continue" doesn't drop a long build to a lower tier); everything else → high.
+ */
+export function autoEffortForTask(
+  text: string,
+  mode: Mode,
+  previous?: ReasoningLevel,
+): ReasoningLevel {
+  if (mode === "plan") return "max";
   const t = (text ?? "").trim();
-  if (HARD_TASK.test(t)) return "high";
-  if (TRIVIAL_TASK.test(t) || t.split(/\s+/).filter(Boolean).length <= 4) return "low";
-  return "medium";
+  if (CONTINUATION.test(t)) return previous ?? "high";
+  if (TRIVIAL_TASK.test(t)) return "none";
+  if (HARD_TASK.test(t)) return "max";
+  return "high";
 }
 
 /**
- * Resolve the user's effort CHOICE into the concrete `reasoning_effort` to send for THIS request, or
- * undefined to send none. Catalog-adaptive + honest:
- *  - `off` / no setting        → send nothing.
- *  - model lacks `reasoning`   → send nothing (never send a param the served model doesn't advertise).
- *  - `auto`                    → TASK-ADAPTIVE via `taskEffort` (plan→high, hard→high, trivial→low, else medium).
- *  - explicit low/medium/high  → sent as-is (still gated on the model supporting reasoning).
- * Resolved PER attempt so a failover to a non-reasoning model automatically drops the param.
+ * Resolve the user's effort CHOICE into the `reasoning_effort` to send for THIS request, or undefined to send
+ * none. Gated on the served model advertising `reasoning` in the live catalog (never send a param a model
+ * doesn't support); resolved per attempt so a failover to a non-reasoning model drops it automatically.
  */
 export function resolveEffort(
   setting: EffortSetting | undefined,
   model: CatalogModel | undefined,
   mode: Mode,
-  taskEffort?: "low" | "medium" | "high",
-): "low" | "medium" | "high" | undefined {
-  const choice = setting ?? "auto";
-  if (choice === "off") return undefined;
+  taskEffort?: ReasoningLevel,
+): ReasoningLevel | undefined {
   const supportsReasoning = model?.supportedFeatures.includes("reasoning") ?? false;
   if (!supportsReasoning) return undefined;
-  if (choice === "auto") return taskEffort ?? (mode === "plan" ? "high" : "medium");
+  const choice = setting ?? "auto";
+  if (choice === "off") return "none";
+  if (choice === "auto") return taskEffort ?? (mode === "plan" ? "max" : "high");
   return choice;
 }
 
 /**
- * Effort for the compaction SUMMARY request. This is a utility task (mechanical extraction into a fixed
- * skeleton) on a pay-per-token network — cheap by design, NOT the user's run effort (a `high` run must not
- * spend high-effort tokens summarizing). Sends `low` to reasoning-capable models, nothing to the rest.
+ * Effort for the compaction SUMMARY request: a mechanical extraction on a pay-per-token network, so it never
+ * reasons (a max-effort run must not spend reasoning tokens summarizing).
  */
-export function summaryEffort(model: CatalogModel | undefined): "low" | undefined {
-  return (model?.supportedFeatures.includes("reasoning") ?? false) ? "low" : undefined;
+export function summaryEffort(model: CatalogModel | undefined): ReasoningLevel | undefined {
+  return (model?.supportedFeatures.includes("reasoning") ?? false) ? "none" : undefined;
 }
+
+/**
+ * Normalize a user-supplied effort value (flag, config, /effort) to a real setting. Legacy/alias values are
+ * accepted and flagged so the caller can say what they map to: low/medium → high, xhigh → max, none → off.
+ */
+export function normalizeEffortSetting(
+  raw: string,
+): { setting: EffortSetting; alias: boolean } | undefined {
+  const v = raw.trim().toLowerCase();
+  if (v === "auto" || v === "off" || v === "high" || v === "max")
+    return { setting: v, alias: false };
+  if (v === "low" || v === "medium") return { setting: "high", alias: true };
+  if (v === "xhigh") return { setting: "max", alias: true };
+  if (v === "none") return { setting: "off", alias: true };
+  return undefined;
+}
+
+/** The choices shown in pickers and help, in order. */
+export const EFFORT_SETTINGS: readonly EffortSetting[] = ["auto", "off", "high", "max"];

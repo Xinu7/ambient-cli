@@ -5,17 +5,16 @@ import { AmbientTheme } from "../theme.js";
 
 /** One-line rationale per choice — `auto` is recommended (it scales effort to the task + model). */
 const EFFORT_HELP: Record<Effort, string> = {
-  auto: "recommended — high while planning, balanced while building",
-  off: "no reasoning — fastest, shallowest",
-  low: "light reasoning — quick answers",
-  medium: "balanced reasoning",
-  high: "deepest reasoning — slower, best for hard problems",
+  auto: "recommended — none for chat, high for work, max for hard problems and planning",
+  off: "no reasoning — fastest answers",
+  high: "reasons before answering — the standard level",
+  max: "deepest reasoning (about twice as long) — best for hard bugs and design",
 };
 
 /**
- * An interactive reasoning-effort picker. ↑/↓ move the selection, Enter picks, Esc cancels. `auto` is the
- * intelligent default: the agent sends HIGH while planning and MEDIUM while building, and sends nothing to
- * models whose catalog entry doesn't advertise `reasoning`.
+ * An interactive reasoning-effort picker. ↑/↓ move the selection, Enter picks, Esc cancels. Offers only the
+ * tiers Ambient really serves; `auto` picks one per turn, and nothing is sent to a model whose catalog entry
+ * doesn't advertise `reasoning`.
  */
 export function EffortPicker({
   efforts,

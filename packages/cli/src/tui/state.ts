@@ -1,5 +1,6 @@
 import type { Lane, Mode, NewEvent } from "@amb/protocol";
 import { AUTO_MODEL } from "@amb/reliability";
+import { EFFORT_SETTINGS, type EffortSetting, type ReasoningLevel } from "@amb/runtime";
 import { type PlanTask, parsePlanTasks } from "@amb/sessions";
 
 /**
@@ -12,14 +13,13 @@ export type AgentMode = "plan" | "build";
 export type Permission = "ask" | "accept-edits" | "bypass";
 
 /**
- * Reasoning-effort choice, surfaced next to the model. `auto` is the intelligent default — the agent sends
- * HIGH effort while planning and MEDIUM while building, and sends nothing to models that don't advertise
- * `reasoning`. `off` disables it; low/medium/high pin a level. This union is structurally identical to the
- * runtime's `EffortSetting`, so it passes straight into RunOptions.effort.
+ * Reasoning-effort choice, surfaced next to the model. `auto` is the intelligent default — the agent picks
+ * none / high / max per turn from the task and the run's progress, and sends nothing to models that don't
+ * advertise `reasoning`. `off` disables it; high/max pin a level. Same union as the runtime's EffortSetting.
  */
-export type Effort = "auto" | "off" | "low" | "medium" | "high";
+export type Effort = EffortSetting;
 /** All effort choices, in the order the /effort picker presents them (auto first — the recommended default). */
-export const EFFORTS: readonly Effort[] = ["auto", "off", "low", "medium", "high"] as const;
+export const EFFORTS: readonly Effort[] = EFFORT_SETTINGS;
 
 /** The single runtime Mode the permission engine understands, derived from the two axes. */
 export function toRuntimeMode(agentMode: AgentMode, permission: Permission): Mode {
@@ -186,7 +186,7 @@ export interface Status {
   activity?: Activity;
   /** Reasoning effort the runtime ACTUALLY sent for the latest model call (resolves an `auto` setting to a
    *  concrete level) — shown next to "Thinking" so the user sees how hard it's reasoning right now. */
-  resolvedEffort?: "low" | "medium" | "high";
+  resolvedEffort?: ReasoningLevel;
   /** Cumulative tokens this session (prompt + completion) — a live, honest cost readout. */
   tokensUsed?: number;
 }
@@ -488,7 +488,7 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
         status: {
           ...state.status,
           ...(ev.reportedModel ? { reportedModel: ev.reportedModel } : {}),
-          ...(ev.effort ? { resolvedEffort: ev.effort } : {}),
+          ...(ev.effort ? { resolvedEffort: toReasoningLevel(ev.effort) } : {}),
           ...(addTokens > 0 ? { tokensUsed: (state.status.tokensUsed ?? 0) + addTokens } : {}),
         },
       };
@@ -1056,4 +1056,9 @@ export const MAX_GOAL_CHARS = 280;
 export function setGoal(state: ViewState, goal: string): ViewState {
   const trimmed = goal.trim().slice(0, MAX_GOAL_CHARS);
   return { ...state, ...(trimmed ? { goal: trimmed } : { goal: undefined }) };
+}
+
+/** Fold a logged effort (older logs recorded low/medium) onto the three tiers Ambient serves. */
+function toReasoningLevel(e: string): ReasoningLevel {
+  return e === "none" || e === "max" ? e : "high";
 }

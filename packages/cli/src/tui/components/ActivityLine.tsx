@@ -26,7 +26,7 @@ export function ActivityLine({
   frame: number;
   width?: number;
   /** The reasoning effort actually in use — shown next to "Thinking" so you see how hard it's reasoning. */
-  effort?: "low" | "medium" | "high";
+  effort?: "none" | "high" | "max";
 }): ReactNode {
   if (!activity) return null;
   const globe =
@@ -43,7 +43,9 @@ export function ActivityLine({
   // The verb carries the effort while THINKING ("Thinking · high") so the user sees how hard it's reasoning
   // — including the concrete level behind an `auto` setting.
   const verbText =
-    effort && activity.verb === "Thinking" ? `${activity.verb} · ${effort}` : activity.verb;
+    effort && effort !== "none" && activity.verb === "Thinking"
+      ? `${activity.verb} · ${effort}`
+      : activity.verb;
   // Bound the verb STRING (when there's no shrinkable detail) to what's left after the clock, so a long verb
   // like "Fixing failed verification" can't clip the priority phase clock on a narrow row.
   const clockW = `  ·  ${mmss(phase)}`.length + (showRun ? `  (run ${mmss(elapsed)})`.length : 0);

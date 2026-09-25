@@ -126,3 +126,13 @@ describe("config precedence — config sets defaults, a flag overrides", () => {
     expect(parseArgs(["--goal", "x".repeat(400)]).goal?.length).toBe(280);
   });
 });
+
+describe("effort in config (legacy values normalize to real tiers)", () => {
+  it("maps low/medium to high and accepts max; rejects junk", async () => {
+    const { AmbConfigSchema } = await import("../src/config.js");
+    expect(AmbConfigSchema.parse({ effort: "low" }).effort).toBe("high");
+    expect(AmbConfigSchema.parse({ effort: "medium" }).effort).toBe("high");
+    expect(AmbConfigSchema.parse({ effort: "max" }).effort).toBe("max");
+    expect(AmbConfigSchema.safeParse({ effort: "banana" }).success).toBe(false);
+  });
+});

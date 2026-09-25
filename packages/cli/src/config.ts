@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Grant, Mode } from "@amb/protocol";
+import { normalizeEffortSetting } from "@amb/runtime";
 import { z } from "zod";
 
 /**
@@ -15,7 +16,17 @@ export const AmbConfigSchema = z
     /** Default requested model id (same as --model). "auto" / omitted ⇒ best live pick. */
     model: z.string().min(1).optional(),
     /** Default reasoning effort (same as --effort). */
-    effort: z.enum(["off", "auto", "low", "medium", "high"]).optional(),
+    effort: z
+      .string()
+      .transform((v, ctx) => {
+        const n = normalizeEffortSetting(v);
+        if (!n) {
+          ctx.addIssue({ code: "custom", message: "effort must be auto, off, high or max" });
+          return z.NEVER;
+        }
+        return n.setting;
+      })
+      .optional(),
     /** Default permission mode (same as --plan/--accept-edits/--bypass). Drives BOTH UIs. */
     mode: z.enum(["plan", "ask", "accept-edits", "bypass"]).optional(),
     /** Default turns per segment before a budget checkpoint (same as --max-turns). */

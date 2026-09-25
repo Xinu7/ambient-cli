@@ -4,7 +4,12 @@ import { join } from "node:path";
 import type { CatalogModel, NewEvent } from "@amb/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Agent } from "../src/agent.js";
-import { autoEffortForTask, resolveEffort, summaryEffort } from "../src/effort.js";
+import {
+  autoEffortForTask,
+  normalizeEffortSetting,
+  resolveEffort,
+  summaryEffort,
+} from "../src/effort.js";
 import type { ChatClient, ChatParams, RunOptions, TurnCompletion } from "../src/ports.js";
 
 function model(id: string, features: string[], ready = true): CatalogModel {
@@ -24,65 +29,77 @@ function model(id: string, features: string[], ready = true): CatalogModel {
 const reasoning = model("re/asoning", ["tools", "reasoning"]);
 const plain = model("no/reasoning", ["tools"]);
 
+// Ambient serves THREE real reasoning tiers (measured live): none, high (low/medium/high are identical), max.
 // Runtime Mode is plan | ask | accept-edits | bypass (the TUI's "build" maps to the permission axis).
-describe("autoEffortForTask — task-adaptive auto effort", () => {
-  it("trivial/greeting/tiny input → low (never medium reasoning on a hello)", () => {
-    expect(autoEffortForTask("sup", "ask")).toBe("low");
-    expect(autoEffortForTask("hi", "ask")).toBe("low");
-    expect(autoEffortForTask("thanks!", "ask")).toBe("low");
-    expect(autoEffortForTask("list the files", "ask")).toBe("low"); // ≤4 words → trivial
+describe("autoEffortForTask — task-adaptive auto effort over the real tiers", () => {
+  it("greetings/thanks → none (no reasoning latency on a hello)", () => {
+    expect(autoEffortForTask("sup", "ask")).toBe("none");
+    expect(autoEffortForTask("hi", "ask")).toBe("none");
+    expect(autoEffortForTask("thanks!", "ask")).toBe("none");
   });
-  it("clearly-hard work → high", () => {
-    expect(autoEffortForTask("fix the failing auth test", "ask")).toBe("high");
-    expect(autoEffortForTask("why is this crashing?", "ask")).toBe("high");
-    expect(autoEffortForTask("refactor the token estimator", "ask")).toBe("high");
+  it("hard work → max, including inflected forms the old regex missed", () => {
+    expect(autoEffortForTask("fix the failing auth test", "ask")).toBe("max");
+    expect(autoEffortForTask("why is this crashing?", "ask")).toBe("max");
+    expect(autoEffortForTask("migrate the db layer", "ask")).toBe("max");
+    expect(autoEffortForTask("investigating a concurrency issue", "ask")).toBe("max");
+    expect(autoEffortForTask("debugging the parser", "ask")).toBe("max");
   });
-  it("ordinary tasks → medium; plan mode always → high", () => {
-    expect(autoEffortForTask("build a 2048 game in react", "ask")).toBe("medium");
-    expect(autoEffortForTask("sup", "plan")).toBe("high");
+  it("ordinary tasks → high; plan mode always → max", () => {
+    expect(autoEffortForTask("build a 2048 game in react", "ask")).toBe("high");
+    expect(autoEffortForTask("list the files", "ask")).toBe("high");
+    expect(autoEffortForTask("sup", "plan")).toBe("max");
+  });
+  it("a short continuation inherits the previous effort instead of dropping", () => {
+    expect(autoEffortForTask("continue", "ask", "max")).toBe("max");
+    expect(autoEffortForTask("yes do it", "ask", "max")).toBe("max");
+    expect(autoEffortForTask("ok", "ask", "high")).toBe("high");
+    expect(autoEffortForTask("continue", "ask")).toBe("high");
   });
   it("resolveEffort uses the task level for `auto`, still gated on reasoning support", () => {
-    const reasoning = { supportedFeatures: ["reasoning"] } as unknown as CatalogModel;
-    const plain = { supportedFeatures: [] } as unknown as CatalogModel;
-    expect(resolveEffort("auto", reasoning, "ask", "low")).toBe("low");
-    expect(resolveEffort("auto", reasoning, "ask", "high")).toBe("high");
-    expect(resolveEffort("auto", plain, "ask", "high")).toBeUndefined(); // not sent to a non-reasoning model
+    const r = { supportedFeatures: ["reasoning"] } as unknown as CatalogModel;
+    const p = { supportedFeatures: [] } as unknown as CatalogModel;
+    expect(resolveEffort("auto", r, "ask", "none")).toBe("none");
+    expect(resolveEffort("auto", r, "ask", "max")).toBe("max");
+    expect(resolveEffort("auto", p, "ask", "max")).toBeUndefined();
   });
 });
 
 describe("resolveEffort (pure)", () => {
-  it("sends nothing when off", () => {
-    expect(resolveEffort("off", reasoning, "bypass")).toBeUndefined();
+  it("off sends an explicit none (omitting the param reasons by default on Ambient)", () => {
+    expect(resolveEffort("off", reasoning, "bypass")).toBe("none");
   });
-  it("defaults an ABSENT setting to auto (never silently disables reasoning)", () => {
-    // undefined ⇒ auto ⇒ medium while building, high while planning — NOT undefined.
-    expect(resolveEffort(undefined, reasoning, "bypass")).toBe("medium");
-    expect(resolveEffort(undefined, reasoning, "plan")).toBe("high");
-  });
-  it("auto thinks HARDER while planning (high) and stays balanced otherwise (medium)", () => {
-    expect(resolveEffort("auto", reasoning, "plan")).toBe("high");
-    expect(resolveEffort("auto", reasoning, "ask")).toBe("medium");
-    expect(resolveEffort("auto", reasoning, "accept-edits")).toBe("medium");
-    expect(resolveEffort("auto", reasoning, "bypass")).toBe("medium");
+  it("defaults an ABSENT setting to auto", () => {
+    expect(resolveEffort(undefined, reasoning, "bypass")).toBe("high");
+    expect(resolveEffort(undefined, reasoning, "plan")).toBe("max");
   });
   it("passes an explicit level through unchanged (for a reasoning-capable model)", () => {
-    expect(resolveEffort("low", reasoning, "ask")).toBe("low");
-    expect(resolveEffort("medium", reasoning, "ask")).toBe("medium");
     expect(resolveEffort("high", reasoning, "ask")).toBe("high");
+    expect(resolveEffort("max", reasoning, "ask")).toBe("max");
   });
   it("NEVER sends effort to a model that doesn't advertise `reasoning` (catalog-adaptive)", () => {
     expect(resolveEffort("high", plain, "plan")).toBeUndefined();
     expect(resolveEffort("auto", plain, "plan")).toBeUndefined();
-    expect(resolveEffort("low", plain, "ask")).toBeUndefined();
+    expect(resolveEffort("off", plain, "ask")).toBeUndefined();
   });
   it("sends nothing when the served model is unknown (absent from the catalog)", () => {
     expect(resolveEffort("high", undefined, "ask")).toBeUndefined();
   });
 });
 
+describe("normalizeEffortSetting (legacy + alias values)", () => {
+  it("maps legacy low/medium to high and xhigh to max; rejects junk", () => {
+    expect(normalizeEffortSetting("low")).toEqual({ setting: "high", alias: true });
+    expect(normalizeEffortSetting("medium")).toEqual({ setting: "high", alias: true });
+    expect(normalizeEffortSetting("xhigh")).toEqual({ setting: "max", alias: true });
+    expect(normalizeEffortSetting("none")).toEqual({ setting: "off", alias: true });
+    expect(normalizeEffortSetting("max")).toEqual({ setting: "max", alias: false });
+    expect(normalizeEffortSetting("banana")).toBeUndefined();
+  });
+});
+
 describe("summaryEffort (compaction is a cheap utility task, not the run's effort)", () => {
-  it("sends LOW to a reasoning-capable model (never the run's high-effort tokens)", () => {
-    expect(summaryEffort(reasoning)).toBe("low");
+  it("sends none to a reasoning-capable model (never the run's reasoning tokens)", () => {
+    expect(summaryEffort(reasoning)).toBe("none");
   });
   it("sends nothing to a model without the reasoning feature, or an unknown model", () => {
     expect(summaryEffort(plain)).toBeUndefined();
@@ -147,10 +164,54 @@ describe("effort reaches the chat client (wired, not just built)", () => {
     expect(client.calls[0]?.reasoningEffort).toBe("high");
   });
 
-  it("auto in plan mode resolves to high on the wire", async () => {
+  it("auto in plan mode resolves to max on the wire", async () => {
     const client = new RecordingClient([reasoning], [{ content: "done", toolCalls: [] }]);
     await new Agent(client).run("hi", opts({ effort: "auto", mode: "plan" }));
+    expect(client.calls[0]?.reasoningEffort).toBe("max");
+  });
+
+  it("auto escalates to max after a failed verification", async () => {
+    const client = new RecordingClient(
+      [reasoning],
+      [
+        {
+          content: "",
+          toolCalls: [
+            { id: "tc_w", name: "write", args: { path: "a.txt", content: "x" }, rawArgs: "{}" },
+          ],
+        },
+        { content: "done", toolCalls: [] },
+        { content: "fixed", toolCalls: [] },
+      ],
+    );
+    let n = 0;
+    await new Agent(client).run(
+      "add a feature",
+      opts({
+        effort: "auto",
+        verify: async () =>
+          n++ === 0 ? { ok: false, summary: "1 test failed" } : { ok: true, summary: "" },
+      }),
+    );
     expect(client.calls[0]?.reasoningEffort).toBe("high");
+    expect(client.calls[1]?.reasoningEffort).toBe("high");
+    expect(client.calls[2]?.reasoningEffort).toBe("max"); // after the failed verification
+  });
+
+  it("auto escalates to max after two turns where every tool call failed", async () => {
+    const failing = (n: number) => ({
+      content: "",
+      toolCalls: [
+        { id: `tc_${n}`, name: "read", args: { path: `missing-${n}.txt` }, rawArgs: "{}" },
+      ],
+    });
+    const client = new RecordingClient(
+      [reasoning],
+      [failing(1), failing(2), { content: "done", toolCalls: [] }],
+    );
+    await new Agent(client).run("add a feature", opts({ effort: "auto" }));
+    expect(client.calls[1]?.reasoningEffort).toBe("high");
+    expect(client.calls[2]?.reasoningEffort).toBe("max");
   });
 
   it("sends NOTHING for a model without the reasoning feature, even at effort high", async () => {
@@ -159,10 +220,10 @@ describe("effort reaches the chat client (wired, not just built)", () => {
     expect(client.calls[0]?.reasoningEffort).toBeUndefined();
   });
 
-  it("off suppresses effort even for a reasoning-capable model", async () => {
+  it("off sends an explicit none to a reasoning-capable model", async () => {
     const client = new RecordingClient([reasoning], [{ content: "done", toolCalls: [] }]);
     await new Agent(client).run("hi", opts({ effort: "off" }));
-    expect(client.calls[0]?.reasoningEffort).toBeUndefined();
+    expect(client.calls[0]?.reasoningEffort).toBe("none");
   });
 });
 

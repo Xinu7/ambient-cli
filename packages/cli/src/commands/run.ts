@@ -26,7 +26,7 @@ import { bold, dim } from "../render/color.js";
 import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
 import { attachImageFile, downscaleForWindow } from "../tui/capture.js";
 import { checkForUpdate, updateHint } from "../update-check.js";
-import { isParseError, parseEffort, parseMaxTurns } from "./args.js";
+import { effortAliasNote, isParseError, parseEffort, parseMaxTurns } from "./args.js";
 import { mergeStdin, readPipedStdin } from "./stdin.js";
 
 interface RunArgs {
@@ -47,7 +47,7 @@ interface RunArgs {
 }
 
 const USAGE =
-  'usage: ambient run "<task>" [--model <id>] [--image <path>]… [--goal "<objective>"] [--plan|--accept-edits|--bypass] [--effort auto|off|low|medium|high] [--yes] [--no-mcp] [--jsonl]';
+  'usage: ambient run "<task>" [--model <id>] [--image <path>]… [--goal "<objective>"] [--plan|--accept-edits|--bypass] [--effort auto|off|high|max] [--yes] [--no-mcp] [--jsonl]';
 
 function parseArgs(args: string[], config: AmbConfig = {}): RunArgs {
   // Config sets the DEFAULTS; an explicit flag below always overrides.
@@ -83,9 +83,13 @@ function parseArgs(args: string[], config: AmbConfig = {}): RunArgs {
     else if (a === "--no-auto-continue") autoContinue = false;
     else if (a === "--help" || a === "-h") help = true;
     else if (a === "--effort") {
-      const r = parseEffort(args[++i]);
+      const raw = args[++i];
+      const r = parseEffort(raw);
       if (isParseError(r)) error = r.error;
-      else effort = r as EffortSetting;
+      else {
+        effort = r.setting;
+        if (r.alias) process.stderr.write(`${effortAliasNote(raw ?? "", r.setting)}\n`);
+      }
     } else if (a === "--max-turns") {
       const r = parseMaxTurns(args[++i]);
       if (isParseError(r)) error = r.error;

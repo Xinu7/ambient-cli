@@ -13,7 +13,9 @@ import {
   type CapabilityPort,
   type ChatClient,
   type Msg,
+  type ReasoningLevel,
   type RunOptions,
+  normalizeEffortSetting,
 } from "@amb/runtime";
 import {
   type SessionWriter,
@@ -32,6 +34,7 @@ import { buildRegistry } from "../agent/registry.js";
 import { makeSubagentTool } from "../agent/subagent-tool.js";
 import { makeVerifyPort } from "../agent/verify-port.js";
 import { makeWorkspaceContextPort } from "../agent/workspace-context-port.js";
+import { effortAliasNote } from "../commands/args.js";
 import type { FleetRow } from "../render/fleet.js";
 import {
   attachImageFile,
@@ -204,6 +207,8 @@ export function App(deps: AppDeps): ReactNode {
   const width = stdout?.columns ?? 80;
   const rows = stdout?.rows ?? 24;
 
+  // The reasoning level the last run actually used, so a short "continue" keeps it under `auto`.
+  const lastEffortRef = useRef<ReasoningLevel | undefined>(undefined);
   const [state, dispatch] = useReducer(
     appReducer,
     initialState({
@@ -214,6 +219,9 @@ export function App(deps: AppDeps): ReactNode {
       ...(deps.initialGoal ? { goal: deps.initialGoal } : {}),
     }),
   );
+  useEffect(() => {
+    lastEffortRef.current = state.status.resolvedEffort;
+  }, [state.status.resolvedEffort]);
   const [input, setInput] = useState("");
   const [cursor, setCursor] = useState(0); // caret offset into `input` (composer editing)
   const [pending, setPending] = useState<ApprovalRequest | null>(null);
@@ -626,6 +634,7 @@ export function App(deps: AppDeps): ReactNode {
           artifact: (content) => saveObject(sessionId, content), // offload large tool outputs
           readArtifact: (handle) => readObject(sessionId, handle),
           effort: effortRef.current,
+          ...(lastEffortRef.current ? { priorEffort: lastEffortRef.current } : {}),
         };
 
         // Build the registry with the `subagent` tool per-run, capturing THIS run's mode/approver/verify.
@@ -876,12 +885,16 @@ export function App(deps: AppDeps): ReactNode {
         return;
       case "/effort":
         if (arg) {
-          const choice = arg.trim().toLowerCase();
-          if ((EFFORTS as readonly string[]).includes(choice)) {
-            const e = choice as Effort;
+          const n = normalizeEffortSetting(arg);
+          if (n) {
+            const e = n.setting;
             effortRef.current = e;
             dispatch({ t: "effort", effort: e });
-            dispatch({ t: "notice", level: "info", text: `effort → ${e}` });
+            dispatch({
+              t: "notice",
+              level: "info",
+              text: n.alias ? effortAliasNote(arg.trim(), e) : `effort → ${e}`,
+            });
           } else {
             dispatch({
               t: "notice",

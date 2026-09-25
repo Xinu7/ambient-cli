@@ -2,7 +2,7 @@ import { AUTO_MODEL } from "@amb/reliability";
 import { type AmbConfig, grantsFromConfig, loadConfig, tuiAxesFromMode } from "../config.js";
 import { runTui } from "../tui/run.js";
 import type { AgentMode, Effort, Permission } from "../tui/state.js";
-import { isParseError, parseEffort, parseMaxTurns } from "./args.js";
+import { effortAliasNote, isParseError, parseEffort, parseMaxTurns } from "./args.js";
 
 interface TuiArgs {
   model: string;
@@ -47,9 +47,13 @@ export function parseArgs(args: string[], config: AmbConfig = {}): TuiArgs {
     else if (a === "--no-mcp") noMcp = true;
     else if (a === "--no-auto-continue") autoContinue = false;
     else if (a === "--effort") {
-      const r = parseEffort(args[++i]);
+      const raw = args[++i];
+      const r = parseEffort(raw);
       if (isParseError(r)) error = r.error;
-      else effort = r as Effort;
+      else {
+        effort = r.setting;
+        if (r.alias) process.stderr.write(`${effortAliasNote(raw ?? "", r.setting)}\n`);
+      }
     } else if (a === "--max-turns") {
       const r = parseMaxTurns(args[++i]);
       if (isParseError(r)) error = r.error;

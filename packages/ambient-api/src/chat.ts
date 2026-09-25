@@ -25,8 +25,8 @@ export interface ChatRequest {
   maxTokens?: number;
   tools?: unknown[];
   temperature?: number;
-  /** Reasoning effort (low/medium/high) — the caller sends it only for reasoning-capable models. */
-  reasoningEffort?: "low" | "medium" | "high";
+  /** Reasoning effort — the caller sends it only for reasoning-capable models. */
+  reasoningEffort?: "none" | "high" | "max";
 }
 
 /** Build the OpenAI-compatible body Ambient expects. Always streamed with usage included. */

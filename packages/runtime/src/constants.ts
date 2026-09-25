@@ -36,3 +36,6 @@ export const INJECTED_CONTEXT_FRACTION = 0.4;
 
 /** Consecutive turns with malformed native tool-call JSON before a model is demoted to the assisted lane. */
 export const MALFORMED_STRIKES_TO_DEMOTE = 3;
+
+/** Consecutive turns where every tool call failed before `auto` effort escalates to max. */
+export const FAILED_BATCHES_TO_ESCALATE = 2;
