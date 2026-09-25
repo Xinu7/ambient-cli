@@ -1,5 +1,5 @@
 import { verifyApiKey } from "@amb/ambient-api";
-import { KEY_SOURCE_LABEL, apiKeyCandidates, maskKey } from "../secrets.js";
+import { KEY_SOURCE_LABEL, apiKeyCandidates, maskKey, saveApiKey } from "../secrets.js";
 import { checkStartupKey } from "../tui/startup-key.js";
 
 /**
@@ -16,9 +16,22 @@ export async function resolveWorkingApiKey(
   if (all.length === 1) return { key: first.key };
   const r = await checkStartupKey(first, all, (key) => verifyApiKey({ baseUrl, apiKey: key }));
   if (r.alternative) {
+    const alt = r.alternative;
+    // ambient's own saved key went stale: replace it with the working one, so this never comes up again.
+    if (first.source === "keychain" || first.source === "file") {
+      try {
+        saveApiKey(alt.key);
+        return {
+          key: alt.key,
+          note: `Your saved Ambient key had stopped working. Replaced it with the working key ${maskKey(alt.key)} (${KEY_SOURCE_LABEL[alt.source]}).`,
+        };
+      } catch {
+        // A locked keychain: use the working key for this run anyway.
+      }
+    }
     return {
-      key: r.alternative.key,
-      note: `The key from ${KEY_SOURCE_LABEL[first.source]} was rejected — using ${maskKey(r.alternative.key)} from ${KEY_SOURCE_LABEL[r.alternative.source]}. ${
+      key: alt.key,
+      note: `The key from ${KEY_SOURCE_LABEL[first.source]} was rejected — using ${maskKey(alt.key)} from ${KEY_SOURCE_LABEL[alt.source]}. ${
         first.source === "env"
           ? "Update or unset AMBIENT_API_KEY to stop seeing this."
           : "Run `ambient login` to fix it."

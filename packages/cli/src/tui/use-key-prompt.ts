@@ -1,7 +1,7 @@
 import type { ImageAttachment } from "@amb/protocol";
 import type { Key } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { KeySource } from "../secrets.js";
+import type { KeyCandidate, KeySource } from "../secrets.js";
 import {
   type KeyCheckResult,
   type KeyPromptReason,
@@ -85,12 +85,8 @@ export function useKeyPrompt(
       // A key the user saved meanwhile always wins over what the launch check found.
       if (!live || savedThisSession.current || !account) return;
       if (alternative) {
-        account.useKey(alternative.key);
         switchedKey.current = true;
-        notice(
-          "info",
-          `Signed in with ${account.mask(alternative.key)} from ${account.sourceLabel(alternative.source)} (the key in ${account.sourceLabel(rejected ?? "keychain")} was rejected). /logout clears the rejected one · /login replaces it`,
-        );
+        notice("info", adoptWorkingKey(account, alternative, rejected));
         // A key panel opened by a run that already failed on the old key → retry it with the working one.
         const openPanel = ref.current;
         if (openPanel && openPanel.reason !== "change") {
@@ -183,4 +179,29 @@ export function useKeyPrompt(
   );
 
   return { state, isOpen: () => ref.current !== null, open, handleInput };
+}
+
+/**
+ * Switch to a working key found on this machine after the one in use was rejected. When the rejected key was
+ * ambient's own saved key, the working key replaces it, so there's one good key and this never comes up
+ * again. A rejected AMBIENT_API_KEY is the user's to change — it's only worked around for this session.
+ */
+export function adoptWorkingKey(
+  account: AccountPort,
+  alternative: KeyCandidate,
+  rejected: KeyCandidate["source"] | undefined,
+): string {
+  const masked = account.mask(alternative.key);
+  if (rejected === "keychain" || rejected === "file") {
+    try {
+      account.save(alternative.key);
+      return `Your saved Ambient key had stopped working. Replaced it with the working key ${masked} (${account.sourceLabel(alternative.source)}).`;
+    } catch {
+      // Saving failed (e.g. a locked keychain): still use the working key for this session.
+    }
+  }
+  account.useKey(alternative.key);
+  return rejected === "env"
+    ? `AMBIENT_API_KEY was rejected, so this session uses ${masked} (${account.sourceLabel(alternative.source)}). Update or unset AMBIENT_API_KEY to fix it.`
+    : `Your saved Ambient key was rejected, so this session uses ${masked} (${account.sourceLabel(alternative.source)}). /login saves a key.`;
 }

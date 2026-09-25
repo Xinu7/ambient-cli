@@ -220,8 +220,8 @@ describe("key panel races", () => {
     ui.unmount();
   });
 
-  it("a launch check that found another working key switches to it and says so", async () => {
-    const { ui, used } = harness({
+  it("a stale saved key is replaced by the working key found at launch, and says so once", async () => {
+    const { ui, used, saved } = harness({
       keyWorks: () => true,
       verify: async () => "valid",
       startupCheck: Promise.resolve({
@@ -231,9 +231,28 @@ describe("key panel races", () => {
       }),
     });
     await settle(80);
-    expect(used).toEqual(["sk-shared-key-2222"]);
-    expect(ui.lastFrame()).toContain("Signed in with …2222");
+    expect(saved).toEqual(["sk-shared-key-2222"]);
+    expect(used).toEqual([]);
+    expect(ui.lastFrame()).toContain("Replaced it with the working key …2222");
+    expect(ui.lastFrame()).not.toContain("/logout clears");
     expect(ui.lastFrame()).not.toContain("Your saved Ambient key doesn't work");
+    ui.unmount();
+  });
+
+  it("a rejected AMBIENT_API_KEY is worked around for the session, never overwritten", async () => {
+    const { ui, used, saved } = harness({
+      keyWorks: () => true,
+      verify: async () => "valid",
+      startupCheck: Promise.resolve({
+        result: "invalid" as const,
+        alternative: { key: "sk-saved-key-3333", source: "keychain" as const },
+        rejected: "env" as const,
+      }),
+    });
+    await settle(80);
+    expect(saved).toEqual([]);
+    expect(used).toEqual(["sk-saved-key-3333"]);
+    expect(ui.lastFrame()).toContain("AMBIENT_API_KEY was rejected");
     ui.unmount();
   });
 
