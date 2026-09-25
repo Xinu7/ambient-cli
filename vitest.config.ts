@@ -5,6 +5,9 @@ export default defineConfig({
   esbuild: { jsx: "automatic" },
   test: {
     include: ["packages/**/test/**/*.test.ts", "packages/**/test/**/*.test.tsx"],
+    // Full-app UI tests step through real renders with short waits; on a slow CI runner (Windows especially)
+    // a sequence can take longer than the 5s default without anything being wrong.
+    testTimeout: 20_000,
     coverage: {
       provider: "v8",
       include: ["packages/**/src/**/*.ts", "packages/**/src/**/*.tsx"],

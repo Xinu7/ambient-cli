@@ -136,7 +136,8 @@ export function SlashPalette({
             <Box width={2} flexShrink={0}>
               <Text color={AmbientTheme.cyan}>{active ? "▸ " : "  "}</Text>
             </Box>
-            <Box width={22} flexShrink={0}>
+            {/* 1-col gutter after the name column, so a truncated name never runs into its description */}
+            <Box width={22} flexShrink={0} marginRight={1}>
               <Text
                 color={active ? AmbientTheme.cyan : AmbientTheme.dim}
                 bold={active}

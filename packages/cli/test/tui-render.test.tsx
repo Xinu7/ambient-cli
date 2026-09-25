@@ -46,7 +46,8 @@ describe("tui render", () => {
       />,
     );
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("█"); // the block "AMBIENT" wordmark (wide terminal)
+    // The test terminal is 24 rows — too short for the full banner plus the composer — so the one-line lockup.
+    expect(frame).toContain("◉ AMBIENT");
     expect(frame.toLowerCase()).toContain("terminal coding agent");
     expect(frame).toContain("4"); // live model count ("4 models on Ambient")
     expect(frame).toContain("models on Ambient");
@@ -696,7 +697,7 @@ describe("tui render", () => {
     expect(frame).toContain("qwen/qwen3.6-27b");
     expect(frame).toContain("▸"); // selection marker on the first (selected) row
     expect(frame).toContain("current"); // the current model is marked
-    expect(frame).toContain("flagged"); // the catalog-flagged model is labeled
+    expect(frame).not.toContain("flagged"); // readiness is only a hint — no labels from it
     expect(frame).toContain("↑/↓"); // the hint
     // The lane column lines up as a grid: the fixed-width status column keeps `direct`/`assisted` at the
     // SAME x on the ready row (blank status) and the cold row (`· cold`) — no ragged, status-shifted columns.

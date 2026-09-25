@@ -210,15 +210,15 @@ export function Composer({
             }`}</Text>
           </Text>
           <Text wrap="truncate-end">
-            <Text color={AmbientTheme.signal}>{"  ↵           "}</Text>
+            <Text color={AmbientTheme.signal}>{"  ↵              "}</Text>
             <Text color={AmbientTheme.fg}>approve &amp; build</Text>
           </Text>
           <Text wrap="truncate-end">
-            <Text color={AmbientTheme.signal}>{"  type a note "}</Text>
+            <Text color={AmbientTheme.signal}>{"  type a note    "}</Text>
             <Text color={AmbientTheme.dim}>revise the plan</Text>
           </Text>
           <Text wrap="truncate-end">
-            <Text color={AmbientTheme.signal}>{"  ⇥ Tab       "}</Text>
+            <Text color={AmbientTheme.signal}>{"  ⇥ Tab          "}</Text>
             <Text color={AmbientTheme.dim}>keep planning</Text>
           </Text>
         </Box>

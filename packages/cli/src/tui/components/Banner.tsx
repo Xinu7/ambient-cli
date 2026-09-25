@@ -35,13 +35,16 @@ export function Banner({
   fleet,
   version,
   update,
+  short = false,
 }: {
   width: number;
+  /** Use the one-line lockup even when wide enough — the terminal is too short for the full banner. */
+  short?: boolean;
   fleet?: { ready: number; total?: number };
   version?: string;
   update?: { latest: string; command: string };
 }): ReactNode {
-  const compact = width - 2 < LOCKUP_W; // account for the App's paddingX:1 (≈ width < 63)
+  const compact = short || width - 2 < LOCKUP_W; // account for the App's paddingX:1 (≈ width < 63)
   const { count, rest } = readyLine(fleet);
   // A subtle upgrade nudge, like Claude Code's — the version is always shown; the ▲ line only when behind. The
   // command matches how this binary was installed (brew vs a from-source/dev build).

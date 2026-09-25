@@ -254,6 +254,9 @@ function appReducer(state: ViewState, action: Action): ViewState {
   }
 }
 
+/** Rows the full splash banner takes (globe + wordmark, tagline, fleet line, rule, margins). */
+const FULL_BANNER_ROWS = 16;
+
 /** Most lines of launch notes that may sit under the splash banner. */
 const SPLASH_NOTE_LINES = 4;
 
@@ -1910,6 +1913,22 @@ export function App(deps: AppDeps): ReactNode {
   // starts. What was already committed (a menu hid the banner for a moment) stays committed — <Static> must
   // only ever grow, or it prints those items a second time.
   const commitCount = onSplash ? Math.min(committedRef.current, settledCount) : settledCount;
+  // The full banner only when it fits with the launch notes and the composer; otherwise the one-line lockup,
+  // so nothing on the first screen gets cut off.
+  const splashNoteRows = onSplash
+    ? state.transcript.reduce(
+        (n, t) =>
+          n +
+          1 +
+          ("text" in t
+            ? t.text
+                .split("\n")
+                .reduce((r, l) => r + Math.max(1, Math.ceil(l.length / Math.max(20, width - 4))), 0)
+            : 1),
+        0,
+      )
+    : 0;
+  const bannerShort = rows < FULL_BANNER_ROWS + splashNoteRows + 10;
   committedRef.current = Math.max(committedRef.current, commitCount);
   const settledItems = state.transcript.slice(0, commitCount);
   const liveItems = state.transcript.slice(commitCount);
@@ -1936,7 +1955,7 @@ export function App(deps: AppDeps): ReactNode {
     queued.length === 0 &&
     state.plan.length === 0;
   const composerReserve =
-    (onSplash ? 14 : 0) + // the splash banner (idle home only, ~14 rows of wordmark + tagline + divider)
+    (onSplash ? (bannerShort ? 5 : FULL_BANNER_ROWS) : 0) + // the splash banner (idle home only)
     (state.goal ? 1 : 0) + // the pinned goal line
     (attachments.length > 0 ? 1 : 0) + // the attachment chip
     9; // status + hint + border + margins + a safety cushion so the whole stack stays under `rows`
@@ -1980,6 +1999,7 @@ export function App(deps: AppDeps): ReactNode {
           {onSplash ? (
             <Banner
               width={width}
+              short={bannerShort}
               fleet={
                 readyCount !== undefined
                   ? { ready: readyCount, total: fleet?.length ?? 0 }

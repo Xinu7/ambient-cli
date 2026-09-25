@@ -60,9 +60,10 @@ it("the /model picker lists every model, ready first; catalog-flagged ones are m
   expect(frame).toContain("Pick a model"); // the picker is open
   expect(frame).toContain("kimi-k2.7-code"); // ready → shown
   expect(frame).toContain("glm-5.2"); // ready → shown
-  // The readiness flag is a hint (flagged models have served live), so a flagged model stays pickable…
+  // The readiness flag is a hint (flagged models have served live), so a flagged model stays pickable and
+  // isn't labeled by it…
   expect(frame).toContain("qwen3.6-27b");
-  expect(frame).toContain("flagged");
+  expect(frame).not.toContain("flagged");
   // …and it sorts after the ready ones.
   expect(frame.indexOf("qwen3.6-27b")).toBeGreaterThan(frame.indexOf("glm-5.2"));
   unmount();
