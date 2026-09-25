@@ -109,6 +109,9 @@ export interface ChatParams {
   /** True when the outbound messages carry image content-parts — lets the adapter mark the request so an
    *  image-related 400 isn't misread as a context overflow. Absent ⇒ the adapter derives it from `messages`. */
   hasImage?: boolean;
+  /** Watchdog budgets for this request (first byte + idle). The adapter aborts a stalled stream with a
+   *  retryable transport error so failover takes over. Absent ⇒ unbounded. */
+  timeouts?: { firstByteMs: number; idleMs: number };
   onContent?: (t: string) => void;
   onReasoning?: (t: string) => void;
 }

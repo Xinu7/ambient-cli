@@ -27,6 +27,7 @@ export class AmbientChatClient implements ChatClient {
     };
     const out = await streamChatCompletion(this.config, req, {
       signal: params.signal,
+      ...(params.timeouts ? { timeouts: params.timeouts } : {}),
       onContent: params.onContent,
       onReasoning: params.onReasoning,
       // Tell the API layer the outbound body carries image parts, so an image-related 400 from a model that

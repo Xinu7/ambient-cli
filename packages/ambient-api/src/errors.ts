@@ -8,9 +8,10 @@ import { classify429, isContextOverflowError } from "@amb/reliability";
 export function classifyHttpError(
   status: number,
   body: string,
-  opts: { model?: string; hasImage?: boolean } = {},
+  opts: { model?: string; hasImage?: boolean; retryAfterMs?: number } = {},
 ): AmbError {
   const model = opts.model;
+  const retryAfter = opts.retryAfterMs !== undefined ? { retryAfterMs: opts.retryAfterMs } : {};
   if (status === 401 || status === 403) {
     return new AmbError({
       kind: "auth",
@@ -31,6 +32,7 @@ export function classifyHttpError(
       retryable: kind !== "cold",
       model,
       detail: body,
+      ...retryAfter,
     });
   }
   if (status === 400 && isContextOverflowError(body, { hasImage: opts.hasImage })) {
@@ -72,6 +74,7 @@ export function classifyHttpError(
       retryable: true,
       model,
       detail: body,
+      ...retryAfter,
     });
   }
   return new AmbError({

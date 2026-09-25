@@ -5,7 +5,7 @@ import {
   planCompaction,
 } from "@amb/context";
 import type { CatalogModel } from "@amb/protocol";
-import { pickForRole } from "@amb/reliability";
+import { pickForRole, streamTimeouts } from "@amb/reliability";
 import { SUMMARY_MARKER, deterministicSummary, planSpill } from "./agent-support.js";
 import { MAX_COMPACTIONS } from "./constants.js";
 import { summaryEffort } from "./effort.js";
@@ -83,6 +83,7 @@ export async function compact(
         maxTokens: 2048,
         // Utility task — cheap by design; never spends the run's high-effort tokens summarizing.
         reasoningEffort: summaryEffort(catalog.find((m) => m.id === compactor)),
+        timeouts: streamTimeouts({ promptTokens: estimateMessagesTokens(req) }),
         signal,
       });
       // Use the model's NARRATIVE but ALWAYS append the AUTHORITATIVE facts from the log (files touched,

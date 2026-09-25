@@ -7,6 +7,7 @@ import {
 } from "@amb/ambient-api";
 import { CapabilityStore, laneFor, probedRecord, resolveRecord } from "@amb/capabilities";
 import { AmbError, type CatalogModel, availability } from "@amb/protocol";
+import { streamTimeouts } from "@amb/reliability";
 import { ambHome } from "@amb/sessions";
 import { bold, dim } from "../render/color.js";
 import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
@@ -31,18 +32,22 @@ function capabilitiesPath(): string {
 
 /** Live-test one model's native tool-calling. Returns true iff it emitted a well-formed call. */
 async function probeModel(config: AmbientConfig, modelId: string): Promise<boolean> {
-  const out = await streamChatCompletion(config, {
-    model: modelId,
-    messages: [
-      {
-        role: "system",
-        content: "You must answer by calling the provided tool. Do not reply in text.",
-      },
-      { role: "user", content: "What is 21 + 21? Call report_sum with the result." },
-    ],
-    tools: [PROBE_TOOL],
-    maxTokens: 512,
-  });
+  const out = await streamChatCompletion(
+    config,
+    {
+      model: modelId,
+      messages: [
+        {
+          role: "system",
+          content: "You must answer by calling the provided tool. Do not reply in text.",
+        },
+        { role: "user", content: "What is 21 + 21? Call report_sum with the result." },
+      ],
+      tools: [PROBE_TOOL],
+      maxTokens: 512,
+    },
+    { timeouts: streamTimeouts({ promptTokens: 200 }) },
+  );
   const call = out.toolCalls.find((c) => c.name === "report_sum");
   if (!call) return false;
   try {

@@ -19,6 +19,8 @@ export const AmbErrorSchema = z.object({
   retryable: z.boolean(),
   model: z.string().optional(),
   detail: z.unknown().optional(),
+  /** Server-requested wait before retrying (from a `Retry-After` header), in milliseconds. */
+  retryAfterMs: z.number().nonnegative().optional(),
 });
 export type AmbErrorData = z.infer<typeof AmbErrorSchema>;
 
@@ -27,6 +29,7 @@ export class AmbError extends Error {
   readonly retryable: boolean;
   readonly model?: string;
   readonly detail?: unknown;
+  readonly retryAfterMs?: number;
 
   constructor(data: AmbErrorData) {
     super(data.message);
@@ -35,5 +38,6 @@ export class AmbError extends Error {
     this.retryable = data.retryable;
     this.model = data.model;
     this.detail = data.detail;
+    this.retryAfterMs = data.retryAfterMs;
   }
 }

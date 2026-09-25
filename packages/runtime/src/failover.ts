@@ -6,7 +6,7 @@ import {
   newAttemptId,
   supportsVision,
 } from "@amb/protocol";
-import { backoffSeconds, nextMaxTokens, readySubstitute } from "@amb/reliability";
+import { backoffSeconds, nextMaxTokens, readySubstitute, streamTimeouts } from "@amb/reliability";
 import { fallbackModel, isAbortError } from "./agent-support.js";
 import { DESIRED_OUTPUT, MAX_FAILOVERS, MAX_SAME_MODEL_RETRIES } from "./constants.js";
 import type {
@@ -72,6 +72,16 @@ async function abortableSleep(
   } finally {
     if (onAbort) signal.removeEventListener("abort", onAbort);
   }
+}
+
+/** Longest honored server `Retry-After`, so a hostile/buggy header can't park the run for hours. */
+const RETRY_AFTER_CAP_S = 60;
+
+/** Backoff for a retry: our jittered exponential, raised to the server's `Retry-After` when it asks for more. */
+export function retryDelaySeconds(err: AmbError, attempt: number): number {
+  const ours = backoffSeconds(attempt);
+  if (err.retryAfterMs === undefined) return ours;
+  return Math.max(ours, Math.min(RETRY_AFTER_CAP_S, err.retryAfterMs / 1000));
 }
 
 export async function runChatWithFailover(
@@ -143,6 +153,8 @@ export async function runChatWithFailover(
         model: current,
         maxTokens: sentOutput,
         reasoningEffort: reqEffort,
+        // Bound the stream: a worker that accepts the request then goes silent must not hang the turn.
+        timeouts: streamTimeouts({ promptTokens, ...(reqEffort ? { effort: reqEffort } : {}) }),
         onContent: stream
           ? (t) =>
               ctx.emit({
@@ -224,7 +236,7 @@ export async function runChatWithFailover(
       // worker has none, so it fails over immediately).
       if (err.kind !== "cold" && sameModelRetries < MAX_SAME_MODEL_RETRIES) {
         sameModelRetries += 1;
-        await abortableSleep(deps.sleep, backoffSeconds(sameModelRetries), ctx.signal);
+        await abortableSleep(deps.sleep, retryDelaySeconds(err, sameModelRetries), ctx.signal);
         continue;
       }
       // Bound the number of FAILOVERS independently of same-model retries. On exhaustion, surface a CLEAR
@@ -240,7 +252,7 @@ export async function runChatWithFailover(
       }
       failovers += 1;
       if (err.kind !== "cold")
-        await abortableSleep(deps.sleep, backoffSeconds(failovers), ctx.signal);
+        await abortableSleep(deps.sleep, retryDelaySeconds(err, failovers), ctx.signal);
 
       // Fail over to a warm model, never one we've already failed on this turn.
       failed.add(current);

@@ -1,5 +1,5 @@
 import { type CatalogModel, supportsVision } from "@amb/protocol";
-import { pickVisionModel } from "@amb/reliability";
+import { pickVisionModel, streamTimeouts } from "@amb/reliability";
 import type { ChatClient } from "./ports.js";
 
 /**
@@ -75,6 +75,8 @@ export async function relayImageToText(deps: RelayDeps): Promise<RelayResult> {
         messages: [{ role: "user", content: toVisionContent(userText, imageDataUris) }],
         tools: [],
         maxTokens: descTokens,
+        // Images are a large, slow prefill; the watchdog still catches a silent worker well before the cap.
+        timeouts: streamTimeouts({ promptTokens: 8_000 * imageDataUris.length }),
         signal: linked.signal,
         hasImage: true,
       });

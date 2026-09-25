@@ -1,4 +1,5 @@
 import { AmbError, ChatRequestSchema } from "@amb/protocol";
+import { type StreamTimeouts, parseRetryAfter } from "@amb/reliability";
 import { type AmbientConfig, type FetchLike, authHeaders, chatUrl } from "./config.js";
 import { classifyHttpError } from "./errors.js";
 import {
@@ -8,6 +9,15 @@ import {
   type SSEEvent,
   readSSEStream,
 } from "./sse.js";
+import { StallWatchdog } from "./watchdog.js";
+
+export interface StreamOptions {
+  fetch?: FetchLike;
+  signal?: AbortSignal;
+  hasImage?: boolean;
+  /** Bound the request with first-byte + idle clocks. Omitted ⇒ unbounded (legacy callers/tests). */
+  timeouts?: StreamTimeouts;
+}
 
 export interface ChatRequest {
   model: string;
@@ -36,11 +46,14 @@ export function buildChatBody(req: ChatRequest): Record<string, unknown> {
   return body;
 }
 
-/** POST /v1/chat/completions and stream SSE events. Throws a classified AmbError on a non-OK response. */
+/**
+ * POST /v1/chat/completions and stream SSE events. Throws a classified AmbError on a non-OK response, and a
+ * RETRYABLE transport error when the watchdog sees the worker stall (so failover can take over).
+ */
 export async function* streamChat(
   config: AmbientConfig,
   req: ChatRequest,
-  opts: { fetch?: FetchLike; signal?: AbortSignal; hasImage?: boolean } = {},
+  opts: StreamOptions = {},
 ): AsyncGenerator<SSEEvent> {
   const doFetch = opts.fetch ?? (fetch as unknown as FetchLike);
   // Validate the OUTBOUND body against the wire schema before sending — a malformed request is our bug, not a
@@ -55,29 +68,42 @@ export async function* streamChat(
       model: req.model,
     });
   }
-  const res = await doFetch(chatUrl(config), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "text/event-stream",
-      ...authHeaders(config),
-    },
-    body: JSON.stringify(body),
-    signal: opts.signal,
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw classifyHttpError(res.status, text, { model: req.model, hasImage: opts.hasImage });
+  const wd = opts.timeouts ? new StallWatchdog(opts.timeouts, opts.signal) : undefined;
+  try {
+    const res = await doFetch(chatUrl(config), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        ...authHeaders(config),
+      },
+      body: JSON.stringify(body),
+      signal: wd?.signal ?? opts.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      const retryAfterMs = parseRetryAfter(res.headers?.get?.("retry-after"));
+      throw classifyHttpError(res.status, text, {
+        model: req.model,
+        hasImage: opts.hasImage,
+        ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+      });
+    }
+    if (!res.body) throw new Error("Ambient chat response has no body");
+    yield* readSSEStream(res.body as ReadableStream<Uint8Array>, wd ? () => wd.alive() : undefined);
+  } catch (e) {
+    if (wd?.stalled) throw wd.error(req.model);
+    throw e;
+  } finally {
+    wd?.dispose();
   }
-  if (!res.body) throw new Error("Ambient chat response has no body");
-  yield* readSSEStream(res.body as ReadableStream<Uint8Array>);
 }
 
 /** Convenience: stream a chat completion to completion, invoking callbacks as text arrives. */
 export async function streamChatCompletion(
   config: AmbientConfig,
   req: ChatRequest,
-  opts: { fetch?: FetchLike; signal?: AbortSignal; hasImage?: boolean } & AccumulatorCallbacks = {},
+  opts: StreamOptions & AccumulatorCallbacks = {},
 ): Promise<AccumulatedCompletion> {
   const acc = new ChatAccumulator({ onContent: opts.onContent, onReasoning: opts.onReasoning });
   for await (const e of streamChat(config, req, opts)) {

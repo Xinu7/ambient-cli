@@ -4,7 +4,13 @@ import {
   type RawCatalogModel,
   normalizeCatalog,
 } from "@amb/protocol";
-import type { ChatClient, ChatParams, TurnCompletion } from "../../src/ports.js";
+import type {
+  ChatClient,
+  ChatParams,
+  RunOptions,
+  TurnCompletion,
+  WorkspaceContextPort,
+} from "../../src/ports.js";
 
 /**
  * Fixture catalog harness. Models are written in the API's raw snake_case shape and run through the REAL
@@ -83,4 +89,37 @@ export class FixtureClient implements ChatClient {
     if (!next) throw new Error("fixture script exhausted");
     return typeof next === "function" ? next(params) : next;
   }
+}
+
+/** An in-memory workspace port (no fs, fixed clock) so fixture tests stay hermetic. */
+export function memWorkspace(): WorkspaceContextPort & { memory: string | undefined } {
+  const ws = {
+    memory: undefined as string | undefined,
+    instructions: () => "",
+    readMemory: () => ws.memory,
+    writeMemory: (_root: string, s: string) => {
+      ws.memory = s;
+    },
+    date: () => "2026-09-25",
+    platform: () => "test",
+    skills: () => [],
+  };
+  return ws;
+}
+
+/** Minimal RunOptions for fixture tests; override any field. */
+export function runOpts(over: Partial<RunOptions> = {}): RunOptions {
+  return {
+    sessionId: "ses_fixture",
+    mode: "bypass",
+    requestedModel: "auto",
+    maxTurns: 4,
+    cwd: "/nonexistent-fixture-ws",
+    workspaceRoot: "/nonexistent-fixture-ws",
+    signal: new AbortController().signal,
+    emit: () => {},
+    approve: async () => "deny",
+    workspace: memWorkspace(),
+    ...over,
+  };
 }

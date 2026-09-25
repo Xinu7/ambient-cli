@@ -7,7 +7,7 @@ import {
 } from "@amb/ambient-api";
 import { budgetFromCatalog, estimateTokens, preflight } from "@amb/context";
 import { AmbError } from "@amb/protocol";
-import { resolveRequestedModel } from "@amb/reliability";
+import { resolveRequestedModel, streamTimeouts } from "@amb/reliability";
 import { cyan, dim } from "../render/color.js";
 import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
 import { mergeStdin, readPipedStdin } from "./stdin.js";
@@ -135,6 +135,7 @@ export async function runChat(args: string[]): Promise<void> {
 
   try {
     const out = await streamChatCompletion(config, req, {
+      timeouts: streamTimeouts({ promptTokens: promptEstimate }),
       onContent: (t) => process.stdout.write(t),
       onReasoning: showReasoning ? (t) => process.stderr.write(dim(t)) : undefined,
     });

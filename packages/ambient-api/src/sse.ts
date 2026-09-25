@@ -169,8 +169,14 @@ export function accumulateChatStream(events: Iterable<SSEEvent>): AccumulatedCom
   return acc.result();
 }
 
-/** Incrementally parse SSE events from a byte stream, respecting arbitrary chunk boundaries. */
-export async function* readSSEStream(body: ReadableStream<Uint8Array>): AsyncGenerator<SSEEvent> {
+/**
+ * Incrementally parse SSE events from a byte stream, respecting arbitrary chunk boundaries. `onBytes` fires for
+ * every body chunk (including keep-alive comments) so a watchdog can treat any traffic as liveness.
+ */
+export async function* readSSEStream(
+  body: ReadableStream<Uint8Array>,
+  onBytes?: () => void,
+): AsyncGenerator<SSEEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   const sep = /\r?\n\r?\n/;
@@ -178,6 +184,7 @@ export async function* readSSEStream(body: ReadableStream<Uint8Array>): AsyncGen
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
+    onBytes?.();
     buf += decoder.decode(value, { stream: true });
     let m = sep.exec(buf);
     while (m) {
