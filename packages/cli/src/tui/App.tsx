@@ -160,7 +160,7 @@ export interface AppDeps {
 }
 
 type Action =
-  | { t: "event"; ev: NewEvent }
+  | { t: "event"; ev: NewEvent; at?: number }
   | { t: "stop"; stopReason: string }
   | { t: "agentMode"; agentMode: AgentMode }
   | { t: "permission"; permission: Permission }
@@ -175,7 +175,7 @@ type Action =
 function appReducer(state: ViewState, action: Action): ViewState {
   switch (action.t) {
     case "event":
-      return reduce(state, action.ev);
+      return reduce(state, action.ev, action.at);
     case "stop":
       return withStop(state, action.stopReason);
     case "agentMode":
@@ -653,7 +653,7 @@ export function App(deps: AppDeps): ReactNode {
             }
             if (ev.kind === "error" && ev.errorKind === "auth") authRejectedRef.current = true;
             if (ev.kind === "tool.result") toolsRanRef.current = true;
-            dispatch({ t: "event", ev });
+            dispatch({ t: "event", ev, at: Date.now() });
           },
           onWriteError: () => {
             controller.abort();
@@ -1740,6 +1740,7 @@ export function App(deps: AppDeps): ReactNode {
               frame={tick}
               width={width}
               effort={state.status.resolvedEffort}
+              stream={state.status.stream}
             />
             {/* The LIVE subagent wave — a small, fixed-height panel (never a tall re-rendering tree), so the
                 dynamic frame stays under the viewport and can't scroll-strand/strobe. Each scout's result is a

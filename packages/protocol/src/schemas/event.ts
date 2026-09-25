@@ -166,6 +166,8 @@ export const EventSchema = z.discriminatedUnion("kind", [
     sentOutput: z.number().int().nonnegative(),
     promptTokens: z.number().int().nonnegative().optional(),
     escalation: z.number().int().nonnegative(),
+    /** The reasoning effort sent with this request, when the model reasons. */
+    effort: z.enum(["none", "low", "medium", "high", "max"]).optional(),
   }),
   aev("inference.response", {
     reportedModel: z.string().optional(),

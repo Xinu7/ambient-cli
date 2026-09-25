@@ -1,0 +1,132 @@
+import type { NewEvent } from "@amb/protocol";
+import { describe, expect, it } from "vitest";
+import { streamStats } from "../src/tui/components/ActivityLine.js";
+import { type ViewState, initialState, reduce } from "../src/tui/state.js";
+
+const base = { schemaVersion: 1 as const, sessionId: "ses_a", turnId: "trn_a", attemptId: "att_a" };
+const init = () =>
+  initialState({ agentMode: "build", permission: "ask", effort: "auto", requestedModel: "m/x" });
+const run = (events: Array<[NewEvent, number]>, from: ViewState = init()) =>
+  events.reduce((s, [ev, at]) => reduce(s, ev, at), from);
+
+const request = (effort?: "high" | "max"): NewEvent => ({
+  ...base,
+  kind: "inference.request",
+  targetModel: "m/x",
+  sentOutput: 8192,
+  escalation: 0,
+  ...(effort ? { effort } : {}),
+});
+const reasoning = (text: string): NewEvent => ({ ...base, kind: "reasoning.delta", text });
+const answer = (text: string): NewEvent => ({ ...base, kind: "assistant.delta", text });
+
+describe("thinking is kept as a row once the model answers", () => {
+  it("records how long it reasoned, at the effort sent with that call", () => {
+    const s = run([
+      [request("max"), 1_000],
+      [reasoning("let me think"), 2_000],
+      [reasoning(" more"), 9_000],
+      [answer("Here is the fix."), 14_500],
+    ]);
+    const thought = s.transcript.find((t) => t.kind === "thought");
+    expect(thought).toMatchObject({ kind: "thought", seconds: 12.5, effort: "max" });
+    // The thought row sits above the answer.
+    expect(s.transcript.map((t) => t.kind)).toEqual(["thought", "assistant"]);
+    expect(s.status.activity?.verb).toBe("Answering");
+  });
+  it("also records it when the model goes straight to a tool", () => {
+    const s = run([
+      [request("high"), 1_000],
+      [reasoning("look at the file"), 1_500],
+      [
+        {
+          ...base,
+          kind: "tool.proposed",
+          toolCallId: "tc_1",
+          wireId: "w1",
+          toolName: "read",
+          args: { path: "a.ts" },
+        } as NewEvent,
+        4_500,
+      ],
+    ]);
+    expect(s.transcript[0]).toMatchObject({ kind: "thought", seconds: 3 });
+  });
+  it("adds no row when there was no reasoning, or no clock (replay)", () => {
+    expect(
+      run([
+        [request(), 1],
+        [answer("hi"), 2],
+      ]).transcript.some((t) => t.kind === "thought"),
+    ).toBe(false);
+    const replay = [request("high"), reasoning("x"), answer("y")].reduce(
+      (s, ev) => reduce(s, ev),
+      init(),
+    );
+    expect(replay.transcript.some((t) => t.kind === "thought")).toBe(false);
+  });
+});
+
+describe("live output stats", () => {
+  it("counts streamed text from the start of each call and takes the exact count when reported", () => {
+    let s = run([
+      [request(), 1_000],
+      [reasoning("a".repeat(350)), 2_000],
+      [answer("b".repeat(350)), 3_000],
+    ]);
+    expect(s.status.stream?.chars).toBe(700);
+    expect(streamStats("Answering", s.status.stream, 11_000)).toBe("↓ 200 tok  ·  20 tok/s");
+    s = reduce(
+      s,
+      {
+        ...base,
+        kind: "inference.response",
+        completionTokens: 1_234,
+        empty: false,
+        truncated: false,
+      },
+      11_000,
+    );
+    expect(streamStats("Answering", s.status.stream, 11_000)).toBe("↓ 1.2k tok  ·  123 tok/s");
+    // A new call starts from zero.
+    s = reduce(s, request(), 12_000);
+    expect(s.status.stream?.chars).toBe(0);
+  });
+  it("shows nothing during tool work or before the first token", () => {
+    expect(streamStats("Reading", { chars: 700, since: 0 }, 5_000)).toBeUndefined();
+    expect(streamStats("Thinking", { chars: 0, since: 0 }, 5_000)).toBeUndefined();
+    expect(streamStats("Thinking", { chars: 700, since: 4_000 }, 5_000)).toBe("↓ 200 tok"); // too soon for a rate
+  });
+});
+
+describe("tool verbs", () => {
+  const verbFor = (toolName: string, args: unknown) =>
+    run([
+      [
+        {
+          ...base,
+          kind: "tool.proposed",
+          toolCallId: "tc_1",
+          wireId: "w",
+          toolName,
+          args,
+        } as NewEvent,
+        1,
+      ],
+      [{ ...base, kind: "tool.started", toolCallId: "tc_1" } as NewEvent, 2],
+    ]).status.activity;
+  it("names what apply_patch, read_artifact and ask_vision are doing", () => {
+    expect(verbFor("apply_patch", { edits: [{ path: "a.ts" }, { path: "a.ts" }] })).toEqual({
+      verb: "Editing",
+      detail: "a.ts",
+    });
+    expect(verbFor("apply_patch", { edits: [{ path: "a.ts" }, { path: "b.ts" }] })?.detail).toBe(
+      "2 files",
+    );
+    expect(verbFor("read_artifact", { handle: "h" })?.verb).toBe("Reading saved output");
+    expect(verbFor("ask_vision", { image: 1, question: "what error?" })).toEqual({
+      verb: "Asking about an image",
+      detail: "what error?",
+    });
+  });
+});

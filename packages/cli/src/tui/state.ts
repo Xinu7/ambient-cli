@@ -75,6 +75,8 @@ export type TranscriptItem =
       error?: string;
     }
   | { kind: "handoff"; id: string; from: string; to: string; role: string; reason?: string }
+  // How long the model reasoned before it answered or acted — kept in scrollback after the live tail clears.
+  | { kind: "thought"; id: string; seconds: number; effort?: ReasoningLevel }
   | { kind: "receipt"; id: string; text: string }
   | { kind: "notice"; id: string; level: "info" | "warn" | "error"; text: string }
   // The DURABLE scrollback record of a subagent wave — one settled line per finished child (+ a closing line),
@@ -188,6 +190,9 @@ export interface Status {
   resolvedEffort?: ReasoningLevel;
   /** Cumulative tokens this session (prompt + completion) — a live, honest cost readout. */
   tokensUsed?: number;
+  /** The model call in flight: characters streamed so far (answer + reasoning), when it started, and the
+   *  exact completion tokens once the response reports them. Drives the live "↓ 1.2k tok · 40 tok/s". */
+  stream?: { chars: number; since?: number; tokens?: number };
 }
 
 /** One step in the agent's visible task list (maintained via the `plan` tool). */
@@ -212,6 +217,8 @@ export interface ViewState {
   thinking: string;
   /** Whether the live reasoning block is shown (toggle: `/thinking` or Ctrl+T). */
   showThinking: boolean;
+  /** When the model started reasoning in the current step (wall clock ms), until it answers or acts. */
+  thinkingSince?: number;
   /** Immutable monotonic counter for reducer-created item ids (keeps `reduce` pure). */
   seq: number;
   /** The LIVE subagent wave, if one is running — a small bounded panel (NOT a transcript item), so a wave can
@@ -249,6 +256,15 @@ export function initialState(opts: {
   };
 }
 
+/** The distinct file paths an apply_patch call edits. */
+function patchFiles(a: Record<string, unknown>): string[] {
+  if (!Array.isArray(a.edits)) return [];
+  const paths = a.edits
+    .map((e) => (e && typeof e === "object" ? (e as Record<string, unknown>).path : undefined))
+    .filter((p): p is string => typeof p === "string");
+  return [...new Set(paths)];
+}
+
 /** Map a running tool to a human activity verb + a short detail (for the live activity line). */
 function toolActivity(toolName: string, args: unknown): Activity {
   const a = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
@@ -268,6 +284,21 @@ function toolActivity(toolName: string, args: unknown): Activity {
       return { verb: "Writing", detail: path };
     case "edit":
       return { verb: "Editing", detail: path };
+    case "apply_patch": {
+      const files = patchFiles(a);
+      return {
+        verb: "Editing",
+        detail:
+          files.length === 1 ? files[0] : files.length > 1 ? `${files.length} files` : undefined,
+      };
+    }
+    case "read_artifact":
+      return { verb: "Reading saved output" };
+    case "ask_vision":
+      return {
+        verb: "Asking about an image",
+        detail: typeof a.question === "string" ? a.question : undefined,
+      };
     case "bash":
       return { verb: "Running", detail: command ? command.slice(0, 60) : undefined };
     case "plan":
@@ -394,6 +425,7 @@ function resetRunScoped(status: Status): Status {
     contextWindow: undefined,
     promptEstimate: undefined,
     activity: undefined,
+    stream: undefined,
   };
 }
 
@@ -401,7 +433,32 @@ function resetRunScoped(status: Status): Status {
  * Fold one event into the view state. Kept exhaustive-ish; unknown kinds pass through untouched so the
  * TUI never crashes on a new event type.
  */
-export function reduce(state: ViewState, ev: NewEvent): ViewState {
+/**
+ * The model stopped reasoning (it answered, acted, or the call ended): record how long it thought as a
+ * settled row. `now` is 0 when the caller has no clock (replay) — then nothing is recorded.
+ */
+function settleThought(state: ViewState, now: number): ViewState {
+  if (state.thinkingSince === undefined) return state;
+  const since = state.thinkingSince;
+  const cleared: ViewState = { ...state, thinkingSince: undefined };
+  if (now <= 0) return cleared;
+  const effort = state.status.resolvedEffort;
+  return pushItem(cleared, (id) => ({
+    kind: "thought",
+    id,
+    seconds: Math.max(0, (now - since) / 1000),
+    ...(effort ? { effort } : {}),
+  }));
+}
+
+/** Count streamed characters toward the in-flight call's live token readout. */
+function addStreamed(status: Status, text: string): Status {
+  const stream = status.stream ?? { chars: 0 };
+  return { ...status, stream: { ...stream, chars: stream.chars + text.length } };
+}
+
+/** `now` (wall clock ms) lets the view time reasoning; omitted in replay and most tests. */
+export function reduce(state: ViewState, ev: NewEvent, now = 0): ViewState {
   switch (ev.kind) {
     case "session.started":
       // A run just started: reset run-scoped counters + the plan (a new session === a new run) so a
@@ -416,6 +473,7 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
         pending: {},
         active: {},
         thinking: "",
+        thinkingSince: undefined,
         status: { ...resetRunScoped(state.status), running: true, activity: { verb: "Thinking" } },
       };
 
@@ -480,17 +538,33 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
         },
       };
 
-    case "inference.response": {
-      // Fold: who ACTUALLY served (post-substitution), the reasoning effort really sent (resolves `auto`),
-      // and cumulative session token usage (a live, honest cost readout).
-      const addTokens = (ev.promptTokens ?? 0) + (ev.completionTokens ?? 0);
+    case "inference.request":
+      // A new model call: its live token count starts from zero, and the effort it was sent with is known
+      // now (so "Thinking · max" describes THIS call, not the previous one).
       return {
         ...state,
         status: {
           ...state.status,
+          stream: { chars: 0, ...(now > 0 ? { since: now } : {}) },
+          ...(ev.effort ? { resolvedEffort: toReasoningLevel(ev.effort) } : {}),
+        },
+      };
+
+    case "inference.response": {
+      // Fold: who ACTUALLY served (post-substitution), the reasoning effort really sent (resolves `auto`),
+      // and cumulative session token usage (a live, honest cost readout).
+      const addTokens = (ev.promptTokens ?? 0) + (ev.completionTokens ?? 0);
+      const settled = settleThought(state, now);
+      return {
+        ...settled,
+        status: {
+          ...settled.status,
           ...(ev.reportedModel ? { reportedModel: ev.reportedModel } : {}),
           ...(ev.effort ? { resolvedEffort: toReasoningLevel(ev.effort) } : {}),
-          ...(addTokens > 0 ? { tokensUsed: (state.status.tokensUsed ?? 0) + addTokens } : {}),
+          ...(addTokens > 0 ? { tokensUsed: (settled.status.tokensUsed ?? 0) + addTokens } : {}),
+          ...(settled.status.stream && ev.completionTokens !== undefined
+            ? { stream: { ...settled.status.stream, tokens: ev.completionTokens } }
+            : {}),
         },
       };
     }
@@ -512,14 +586,27 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
       return {
         ...state,
         thinking: buf,
-        status: { ...state.status, activity: { verb: "Thinking" } },
+        thinkingSince: state.thinkingSince ?? (now > 0 ? now : undefined),
+        status: { ...addStreamed(state.status, text), activity: { verb: "Thinking" } },
       };
     }
 
     case "assistant.delta": {
       const text = typeof ev.text === "string" ? ev.text : ""; // guard a malformed event
-      // The model moved from thinking to answering → clear the live reasoning tail.
-      const base = state.thinking ? { ...state, thinking: "" } : state;
+      // The model moved from thinking to answering → clear the live reasoning tail, keep how long it thought,
+      // and say it's answering (unless tools are still running alongside).
+      const answering = text.trim().length > 0;
+      const thought = answering ? settleThought(state, now) : state;
+      const counted: ViewState = {
+        ...thought,
+        status: {
+          ...addStreamed(thought.status, text),
+          ...(answering && Object.keys(thought.active).length === 0
+            ? { activity: { verb: "Answering" } }
+            : {}),
+        },
+      };
+      const base = counted.thinking ? { ...counted, thinking: "" } : counted;
       const last = base.transcript[base.transcript.length - 1];
       if (last && last.kind === "assistant" && last.streaming) {
         const full = last.text + text;
@@ -599,20 +686,22 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
     case "tool.proposed": {
       // Record what THIS call will do, keyed by id — the activity line reads it on `tool.started` (all
       // proposals for a turn are emitted up front, so proposal order is NOT execution order).
-      const pending = { ...state.pending, [ev.toolCallId]: toolActivity(ev.toolName, ev.args) };
+      // The model stopped reasoning and started acting.
+      const acted = settleThought(state, now);
+      const pending = { ...acted.pending, [ev.toolCallId]: toolActivity(ev.toolName, ev.args) };
       // The `plan` tool updates the pinned task list, not the transcript — fold it and don't show a row.
       if (ev.toolName === "plan") {
         const plan = parsePlanTasks(ev.args);
-        const next = { ...state, pending };
+        const next = { ...acted, pending };
         return plan ? { ...next, plan } : next;
       }
       // The `subagent` tool renders its OWN richer transcript item on `subagent.started` — DON'T also push a
       // generic tool row here, or the two collide on the same toolCallId (duplicate React key + a stray "◐
       // subagent" line above the real tree). Keep the pending entry so the activity line still reflects it.
-      if (ev.toolName === "subagent") return { ...state, pending };
+      if (ev.toolName === "subagent") return { ...acted, pending };
       // The diff isn't known at proposal time — it's produced by the tool's OUTPUT and arrives on tool.result.
       return push(
-        { ...state, pending },
+        { ...acted, pending },
         {
           kind: "tool",
           id: ev.toolCallId,

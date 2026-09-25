@@ -139,6 +139,9 @@ export async function runChatWithFailover(
           )
         : pf.sentOutput;
 
+    // Re-resolved per attempt: a failover to a non-reasoning model drops the param automatically. Captured
+    // once so the same value drives the request, its announcement, and the inference.response readout.
+    const reqEffort = ctx.effortFor(model);
     ctx.emit({
       schemaVersion: 1,
       kind: "inference.request",
@@ -149,13 +152,11 @@ export async function runChatWithFailover(
       sentOutput,
       promptTokens,
       escalation,
+      ...(reqEffort ? { effort: reqEffort } : {}),
     });
     const attemptStarted = Date.now();
     try {
       const stream = ctx.streamDeltas !== false;
-      // Re-resolved per attempt: a failover to a non-reasoning model drops the param automatically. Captured
-      // once so the same value drives BOTH the request and the inference.response readout.
-      const reqEffort = ctx.effortFor(model);
       const result = await deps.client.chat({
         ...params,
         model: current,

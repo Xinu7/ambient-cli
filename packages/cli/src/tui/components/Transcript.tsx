@@ -309,6 +309,19 @@ export function TranscriptRow({
         </Box>
       );
 
+    case "thought":
+      // How long the model reasoned before answering or acting — the live reasoning tail is gone by now.
+      return (
+        <Box marginTop={1}>
+          <Text color={AmbientTheme.dim} wrap="truncate">
+            {clip(
+              `∴ Thought ${item.seconds < 1 ? "briefly" : `for ${formatSeconds(item.seconds)}`}${item.effort && item.effort !== "none" ? ` · ${item.effort}` : ""}`,
+              width,
+            )}
+          </Text>
+        </Box>
+      );
+
     case "receipt":
       // A calm, honest receipt (warm-model substitution) — never an alarm.
       return (
@@ -366,4 +379,11 @@ export function Transcript({
       ))}
     </Box>
   );
+}
+
+/** "12s", "1m 05s". */
+function formatSeconds(seconds: number): string {
+  const s = Math.round(seconds);
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 }
