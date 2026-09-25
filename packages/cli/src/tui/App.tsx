@@ -110,6 +110,7 @@ import {
 } from "./state.js";
 import { AmbientTheme } from "./theme.js";
 import { type AccountPort, useKeyPrompt } from "./use-key-prompt.js";
+import { visionNote } from "./vision-note.js";
 
 export interface AppDeps {
   client: ChatClient;
@@ -269,6 +270,7 @@ export function App(deps: AppDeps): ReactNode {
   const skipLogReplayRef = useRef(false);
   // A model chosen while a run is flying — handed to the agent at its next turn boundary, then cleared.
   const pendingSwitchRef = useRef<string | undefined>(undefined);
+  const sessionImagesRef = useRef<ImageAttachment[]>([]);
   // Discover the user's existing Claude/Codex slash commands ONCE — their names join the palette, their
   // bodies (with $ARGUMENTS/$1 expansion) run as a task on dispatch.
   const customCommands = useMemo(() => {
@@ -640,6 +642,8 @@ export function App(deps: AppDeps): ReactNode {
             : [];
         for (const a of sized) saveObject(sessionId, a.dataBase64);
 
+        sessionImagesRef.current = [...sessionImagesRef.current, ...sized];
+        const sessionImages = sessionImagesRef.current;
         const opts: RunOptions = {
           sessionId,
           mode: runtimeMode,
@@ -670,6 +674,9 @@ export function App(deps: AppDeps): ReactNode {
           // Pin the outstanding plan into the anchor so a multi-message session keeps adhering to it.
           ...(planRef.current.length > 0 ? { plan: { tasks: planRef.current } } : {}),
           ...(sized.length > 0 ? { attachments: sized } : {}),
+          // Every image attached this session, numbered from 1 — a model that can't see images can ask a
+          // vision model about any of them later (ask_vision).
+          ...(sessionImages.length > 0 ? { sessionImages } : {}),
           capabilities: deps.capabilities,
           workspace: makeWorkspaceContextPort(),
           verify: makeVerifyPort(deps.workspaceRoot),
@@ -710,6 +717,7 @@ export function App(deps: AppDeps): ReactNode {
         if (result.messages && result.messages.length > 1) {
           conversationRef.current = result.messages.slice(1);
           skipLogReplayRef.current = false;
+          sessionImagesRef.current = [];
         }
         dispatch({ t: "stop", stopReason: result.stopReason });
       } catch (err) {
@@ -1748,6 +1756,11 @@ export function App(deps: AppDeps): ReactNode {
                 agentMode={state.status.agentMode}
                 maxRows={composerMaxRows}
                 attachments={attachments}
+                visionNote={
+                  attachments.length > 0
+                    ? visionNote(state.status.requestedModel, fleet)
+                    : undefined
+                }
                 planReview={planAwaitingReview}
                 planReviewSteps={state.plan.filter((t) => t.status !== "done").length}
                 planReady={

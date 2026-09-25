@@ -709,18 +709,33 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
       }));
     }
 
+    case "vision.relay.started":
+      // The served model can't see images, so a vision model is looking for it — say exactly that.
+      return {
+        ...state,
+        status: {
+          ...state.status,
+          activity: {
+            verb: `Looking at ${ev.imageCount === 1 ? "your image" : `${ev.imageCount} images`}`,
+            detail: `${shortName(ev.visionModel)} for ${shortName(ev.targetModel)}`,
+          },
+        },
+      };
+
     case "vision.relay": {
       // A calm one-line receipt about how an attached image was handled. NATIVE (the model saw it) needs no
       // line — it just works. The relay/degrade outcomes are surfaced so the user knows what happened.
       if (ev.outcome === "native") return state;
       const text =
         ev.outcome === "described"
-          ? `${shortName(ev.targetModel)} can't see images — ${shortName(ev.visionModel ?? "a vision model")} described it`
+          ? ev.visionModel
+            ? `${shortName(ev.targetModel)} can't see images — ${shortName(ev.visionModel)} described ${ev.imageCount === 1 ? "it" : `all ${ev.imageCount}`}${ev.descriptionChars ? ` (${ev.descriptionChars.toLocaleString("en-US")} chars)` : ""}`
+            : `${shortName(ev.targetModel)} can't see images — reused the description from earlier`
           : ev.outcome === "no-model"
             ? `${shortName(ev.targetModel)} can't see images, and no vision model is live — proceeding from your text`
             : ev.outcome === "cold"
-              ? `${shortName(ev.targetModel)} can't see images, and the vision model is cold — proceeding from your text`
-              : `couldn't read the attached image — proceeding from your text`;
+              ? `${shortName(ev.targetModel)} can't see images, and every vision model is cold (tried ${(ev.tried ?? []).map(shortName).join(", ") || "none"}) — proceeding from your text`
+              : `couldn't read the attached image${ev.tried?.length ? ` (tried ${ev.tried.map(shortName).join(", ")})` : ""} — proceeding from your text`;
       return pushItem(state, (id) => ({ kind: "receipt", id, text }));
     }
 

@@ -4,6 +4,7 @@ import type {
   AskResponse,
   CatalogModel,
   Grant,
+  ImageAttachment,
   Lane,
   Mode,
   NewEvent,
@@ -198,6 +199,9 @@ export interface RunOptions {
   effort?: EffortSetting;
   /** The level the previous run in this session used, so a short "continue" keeps it under `auto`. */
   priorEffort?: ReasoningLevel;
+  /** Every image attached in this session so far (numbered from 1, in order) — lets a model that can't see
+   *  images ask a vision model about any of them with `ask_vision`. Absent ⇒ just this run's attachments. */
+  sessionImages?: readonly ImageAttachment[];
   /** Polled at each turn boundary: a model id the user switched to mid-run (e.g. /model), consumed once. The
    *  switch applies from the next turn and re-fits the conversation to the new model. */
   nextModel?: () => string | undefined;

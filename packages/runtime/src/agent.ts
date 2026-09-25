@@ -17,6 +17,7 @@ import {
   AmbError,
   type CatalogModel,
   type Grant,
+  type ImageAttachment,
   type Lane,
   type Mode,
   type StopReason,
@@ -62,6 +63,7 @@ import {
   withGoalReminder,
   withTurnBudget,
 } from "./agent-support.js";
+import { makeAskVisionTool } from "./ask-vision.js";
 import { assistedProtocol, parseAssistedResponse, stripActionBlock } from "./assisted.js";
 import { type ContentPart, buildUserContent, toDataUri } from "./attachments.js";
 import { compact, reduceContext } from "./compaction-runner.js";
@@ -118,6 +120,9 @@ export interface AgentOptions {
 export class Agent {
   private readonly registry: ToolRegistry;
   private readonly sleep: (seconds: number) => Promise<void>;
+
+  /** Images attached in this session (read live by the `ask_vision` tool). */
+  private sessionImages: readonly ImageAttachment[] = [];
 
   constructor(
     private readonly client: ChatClient,
@@ -219,6 +224,24 @@ export class Agent {
     // (vacuously true for zero-effect tools like `ask_user`/`propose_goal_update`). This drops bash/edit/write
     // AND network (web_*), so the model is never offered a tool it would be denied and can't loop on it; it
     // researches, records a `plan`, and stops. Must mirror the `plan` case in permissions/decide. Build offers all.
+    // A model that can't see images gets `ask_vision` whenever the session has images: it can ask a vision
+    // model targeted follow-up questions instead of relying only on the one-time description.
+    this.sessionImages = opts.sessionImages ?? opts.attachments ?? [];
+    const served = liveCatalog.find((m) => m.id === target);
+    if (
+      this.sessionImages.length > 0 &&
+      !(served && supportsVision(served)) &&
+      !this.registry.has("ask_vision")
+    ) {
+      this.registry.register(
+        makeAskVisionTool({
+          client: this.client,
+          catalog: () => liveCatalog,
+          images: () => this.sessionImages,
+          targetWindow: () => profileOf(target).window,
+        }),
+      );
+    }
     const advertisedTools =
       opts.mode === "plan"
         ? this.registry.list().filter((t) => t.manifest.effects.every((e) => e === "read"))
@@ -350,6 +373,17 @@ export class Agent {
           imageDataUris: attachments.map(toDataUri),
           userText: userInput,
           signal: opts.signal,
+          targetWindow: modelWindow,
+          onAttempt: (visionModel, imageCount) =>
+            emit({
+              schemaVersion: 1,
+              kind: "vision.relay.started",
+              sessionId,
+              turnId,
+              targetModel: target,
+              visionModel,
+              imageCount,
+            }),
         });
         firstUserContent = injectDescription(userInput, relay);
         emit({
@@ -361,6 +395,8 @@ export class Agent {
           imageCount: attachments.length,
           outcome: relay.outcome,
           ...(relay.visionModel ? { visionModel: relay.visionModel } : {}),
+          ...(relay.tried && relay.tried.length > 0 ? { tried: relay.tried } : {}),
+          ...(relay.description ? { descriptionChars: relay.description.length } : {}),
         });
         void reason;
       };

@@ -184,6 +184,9 @@ importers:
       '@amb/tools-core':
         specifier: workspace:*
         version: link:../tools-core
+      zod:
+        specifier: ^4.4.3
+        version: 4.5.4
 
   packages/sessions:
     dependencies:

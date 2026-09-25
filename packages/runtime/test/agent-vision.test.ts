@@ -12,6 +12,7 @@ import type {
   TurnCompletion,
   WorkspaceContextPort,
 } from "../src/ports.js";
+import { clearRelayCache } from "../src/vision-relay.js";
 
 const testWorkspace = (): WorkspaceContextPort => ({
   instructions: (cwd) => loadInstructions(cwd).text,
@@ -82,6 +83,7 @@ const baseOpts = (over: Partial<RunOptions> = {}): RunOptions => ({
 });
 
 beforeEach(async () => {
+  clearRelayCache();
   ws = await mkdtemp(join(tmpdir(), "amb-vis-"));
   collected.length = 0;
 });

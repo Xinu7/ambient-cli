@@ -1344,3 +1344,38 @@ describe("assistant streaming → incremental <Static> commit (reducer)", () => 
     expect(a[0]?.text).toBe("  Just one paragraph, no breaks (final-corrected)");
   });
 });
+
+describe("vision relay activity", () => {
+  it("shows which model is looking at the image and for whom, then a receipt with what it produced", () => {
+    let s = initialState({
+      agentMode: "build",
+      permission: "ask",
+      effort: "auto",
+      requestedModel: "z/glm",
+    });
+    s = reduce(s, {
+      kind: "vision.relay.started",
+      schemaVersion: 1,
+      sessionId: "s",
+      turnId: "t",
+      targetModel: "z-ai/glm-5.2",
+      visionModel: "qwen/qwen3.6-27b",
+      imageCount: 1,
+    } as NewEvent);
+    expect(s.status.activity?.verb).toBe("Looking at your image");
+    expect(s.status.activity?.detail).toContain("qwen3.6-27b");
+    s = reduce(s, {
+      kind: "vision.relay",
+      schemaVersion: 1,
+      sessionId: "s",
+      turnId: "t",
+      targetModel: "z-ai/glm-5.2",
+      imageCount: 1,
+      outcome: "described",
+      visionModel: "qwen/qwen3.6-27b",
+      descriptionChars: 1420,
+    } as NewEvent);
+    const last = s.transcript.at(-1) as { text?: string } | undefined;
+    expect(last?.text).toContain("described it (1,420 chars)");
+  });
+});

@@ -104,11 +104,21 @@ export const EventSchema = z.discriminatedUnion("kind", [
   tev("steer", { text: z.string() }),
   // How an attached image was handled: seen NATIVELY by a vision model, DESCRIBED via a relay vision model,
   // or degraded (no vision model / cold / failed). Drives a single calm UI line; never carries image bytes.
+  // A vision model is about to describe images for a model that can't see them (one per attempt).
+  tev("vision.relay.started", {
+    targetModel: z.string(),
+    visionModel: z.string(),
+    imageCount: z.number().int().nonnegative(),
+  }),
   tev("vision.relay", {
     targetModel: z.string(),
     imageCount: z.number().int().nonnegative(),
     outcome: z.enum(["native", "described", "no-model", "cold", "failed"]),
     visionModel: z.string().optional(),
+    /** Every vision model tried, in order. */
+    tried: z.array(z.string()).optional(),
+    /** Length of the description handed to the served model. */
+    descriptionChars: z.number().int().nonnegative().optional(),
   }),
   tev("model.resolved", {
     requestedModel: z.string(),

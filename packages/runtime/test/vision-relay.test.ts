@@ -1,7 +1,12 @@
 import { AmbError, type CatalogModel } from "@amb/protocol";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { ChatClient, ChatParams, TurnCompletion } from "../src/ports.js";
-import { injectDescription, relayImageToText, toVisionContent } from "../src/vision-relay.js";
+import {
+  clearRelayCache,
+  injectDescription,
+  relayImageToText,
+  toVisionContent,
+} from "../src/vision-relay.js";
 
 function m(id: string, over: Partial<CatalogModel> = {}): CatalogModel {
   return {
@@ -24,6 +29,8 @@ function client(chat: (p: ChatParams) => Promise<TurnCompletion>): ChatClient {
 }
 const URIS = ["data:image/png;base64,AAAA"];
 const sig = new AbortController().signal;
+
+beforeEach(() => clearRelayCache());
 
 describe("vision relay (slice 6)", () => {
   it("describes via a ready vision model and injects the labelled description", async () => {
@@ -117,5 +124,82 @@ describe("vision relay (slice 6)", () => {
     const parts = toVisionContent("hi", URIS) as { type: string }[];
     expect(parts.some((p) => p.type === "image_url")).toBe(true);
     expect(parts[0]?.type).toBe("text");
+  });
+});
+
+describe("vision relay — batching, caching, progress", () => {
+  const many = Array.from({ length: 8 }, (_, i) => `data:image/png;base64,IMG${i}`);
+
+  it("splits many images into requests that fit the vision model's window and labels each image", async () => {
+    const perCall: number[] = [];
+    const res = await relayImageToText({
+      client: client(async (p) => {
+        const parts = p.messages[0]?.content as { type: string }[];
+        perCall.push(parts.filter((x) => x.type === "image_url").length);
+        return { content: "a screenshot", toolCalls: [] };
+      }),
+      catalog: [vision("q/vl", { contextLength: 32_768 })],
+      imageDataUris: many,
+      userText: "compare these",
+      signal: sig,
+      cache: new Map(),
+    });
+    expect(res.outcome).toBe("described");
+    expect(perCall.length).toBeGreaterThan(1);
+    expect(perCall.reduce((a, b) => a + b, 0)).toBe(8);
+    expect(res.description).toContain("Images #1");
+  });
+
+  it("reuses a cached description instead of describing the same image twice", async () => {
+    const cache = new Map();
+    let calls = 0;
+    const c = client(async () => {
+      calls += 1;
+      return { content: "a red error dialog", toolCalls: [] };
+    });
+    const deps = {
+      client: c,
+      catalog: [vision("q/vl")],
+      imageDataUris: URIS,
+      userText: "?",
+      signal: sig,
+      cache,
+    };
+    await relayImageToText(deps);
+    const again = await relayImageToText(deps);
+    expect(calls).toBe(1);
+    expect(again.description).toContain("a red error dialog");
+  });
+
+  it("reports each attempt before it starts (so the UI can show it working)", async () => {
+    const started: string[] = [];
+    await relayImageToText({
+      client: client(async () => ({ content: "ok", toolCalls: [] })),
+      catalog: [vision("q/vl")],
+      imageDataUris: URIS,
+      userText: "?",
+      signal: sig,
+      cache: new Map(),
+      onAttempt: (m) => started.push(m),
+    });
+    expect(started).toEqual(["q/vl"]);
+  });
+
+  it("sizes the description from the vision model's output cap and the target's window", async () => {
+    let maxTokens = 0;
+    await relayImageToText({
+      client: client(async (p) => {
+        maxTokens = p.maxTokens;
+        return { content: "ok", toolCalls: [] };
+      }),
+      catalog: [vision("q/vl", { maxOutputLength: 8_192 })],
+      imageDataUris: URIS,
+      userText: "?",
+      signal: sig,
+      cache: new Map(),
+      targetWindow: 202_752,
+    });
+    expect(maxTokens).toBeGreaterThan(1500); // no longer a fixed 1500 cap
+    expect(maxTokens).toBeLessThanOrEqual(8_192);
   });
 });

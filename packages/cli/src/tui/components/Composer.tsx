@@ -140,6 +140,7 @@ export function Composer({
   planReview = false,
   planReviewSteps = 0,
   attachments = [],
+  visionNote,
 }: {
   value: string;
   /** Caret offset into `value` (composer editing). Defaults to end (back-compat for callers/tests). */
@@ -159,6 +160,8 @@ export function Composer({
   planReviewSteps?: number;
   /** Pending image attachments shown as chips above the input (Ctrl+V / drag-drop / /attach). */
   attachments?: { bytes: number }[];
+  /** What will happen to the image with the chosen model (e.g. "glm can't see images — qwen will describe it"). */
+  visionNote?: string;
 }): ReactNode {
   const boxW = Math.max(0, Math.min(width - 2, 120));
   const rows = Math.max(MIN_INPUT_ROWS, maxRows);
@@ -185,6 +188,11 @@ export function Composer({
               ? `image attached · ${kb(attachments[0]?.bytes ?? 0)} · ⌫ removes`
               : `${attachments.length} images attached · ⌫ removes the last`}
           </Text>
+        </Box>
+      ) : null}
+      {attachments.length > 0 && visionNote ? (
+        <Box paddingX={1}>
+          <Text color={AmbientTheme.dim} wrap="truncate-end">{`  ${visionNote}`}</Text>
         </Box>
       ) : null}
       {/* The label on the input frame + its border colour. In plan-review it's the SINGLE approve/revise
