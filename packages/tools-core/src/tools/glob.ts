@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { ToolContext, ToolDefinition } from "@amb/protocol";
 import { z } from "zod";
 import { resolveInWorkspace } from "../paths.js";
@@ -94,7 +95,7 @@ export const globTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
         timedOut = true;
         break;
       }
-      if (re.test(rel)) {
+      if (re.test(rel) && !ctx.readDenied?.(join(root, rel))) {
         matches.push(rel);
         if (matches.length >= input.limit) {
           truncated = true;

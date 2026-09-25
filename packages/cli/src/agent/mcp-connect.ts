@@ -53,11 +53,11 @@ export interface ConnectOptions {
 }
 
 /**
- * Connect the user's configured MCP servers (Claude `.mcp.json` + Codex `config.toml` + project
- * `.ambient/mcp.json`) and return their tools for the registry. v1 is stdio-only (remote transports are
- * skipped with a notice). A PROJECT-scoped server is a process-spawn/secret surface, so it only starts when
- * `approveServer` says yes; user-scoped servers (the user's own global config) start automatically. A server
- * that fails to start is skipped, never fatal. Returns `{tools:[], close, notices}` when nothing is configured.
+ * Connect the user's configured MCP servers (Claude `.mcp.json` + `~/.claude.json`, Codex `config.toml`,
+ * project `.ambient/mcp.json`, and optionally enabled plugins) over stdio, Streamable HTTP or legacy SSE, and
+ * return their tools for the registry. A PROJECT-scoped server is a process-spawn/secret surface, so it only
+ * starts when `approveServer` says yes; the user's own servers start automatically. A server that fails to
+ * start is skipped, never fatal.
  */
 export async function connectMcp(
   workspaceRoot: string,
@@ -78,7 +78,7 @@ export async function connectMcp(
   const status = (s: McpServerSpec, state: McpServerStatus["state"], detail?: string) =>
     statuses.set(s.name, { ...baseStatus(s), state, tools: 0, ...(detail ? { detail } : {}) });
   for (const s of specs) {
-    // stdio (local child) + http/sse (remote Streamable-HTTP) are supported; only a truly-unknown transport skips.
+    // stdio (a local process), Streamable HTTP and legacy SSE are supported; an unknown transport is skipped.
     if (s.transport !== "stdio" && s.transport !== "http" && s.transport !== "sse") {
       notices.push(`mcp: ${s.name} uses ${s.transport} — transport not supported (skipped)`);
       status(s, "skipped", "transport not supported");
@@ -99,7 +99,9 @@ export async function connectMcp(
     // A PROJECT-scoped server (a workspace file, higher trust surface — a local process OR remote data egress)
     // starts only with an explicit approval. Fail CLOSED: no approver ⇒ not approved.
     if (s.source === "project" && !(opts.approveServer && (await opts.approveServer(s)))) {
-      notices.push(`mcp: ${s.name} (project-scoped) not approved — skipped`);
+      notices.push(
+        `mcp: ${s.name} is this project's server; it starts once you trust the project (ambient trust)`,
+      );
       status(s, "skipped", "project not trusted yet (/trust)");
       continue;
     }

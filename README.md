@@ -95,26 +95,31 @@ rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
   levels Ambient models actually serve.
 - **Memory you control.** Start a line with `#` to save a note to the project's memory
   (`.ambient/MEMORY.md`) without a model call; `/memory all <note>` keeps one for every project. `/memory`
-  lists them and `/memory forget <n>` removes one. The agent also records what it learns there as it works.
+  lists them and `/memory forget <n>` removes one (`u<n>` for every-project notes). The agent also records
+  what it learns there as it works.
 - **A north-star you set.** `/goal` pins a session objective the agent keeps in view every turn (it survives
   compaction); the agent can propose a revision, but only you commit it.
 - **Brings your setup.** Reads your existing `.claude/agents`, skills, slash commands, instruction files
-  (`AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules`, with `@path` imports), and MCP
-  servers (`.mcp.json`, `claude mcp add`, and Codex `config.toml`; stdio, Streamable HTTP and SSE; header or
-  bearer-token auth from your environment, or OAuth sign-in with `/mcp login <server>`; their resources are
-  readable and their prompts run as `/mcp__server__prompt`) so what you already use works on Ambient models. When your MCP servers bring more tools than the model has room for, it sees an index and loads
-  the ones it needs on demand.
+  (`AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules`, with `@path` imports; a subfolder's own
+  files join when the agent starts working there), and MCP servers (`.mcp.json`, `claude mcp add`, and Codex
+  `config.toml`; stdio, Streamable HTTP and SSE; header or bearer-token auth from your environment, or OAuth
+  sign-in with `/mcp login <server>`; their resources are readable and their prompts run as
+  `/mcp__server__prompt`), so what you already use works on Ambient models. When your MCP servers bring more
+  tools than the model has room for, it sees an index and loads the ones it needs on demand.
 - **Hooks and permission rules, the Claude Code way.** Hook commands (`PreToolUse`, `PostToolUse`,
   `UserPromptSubmit`, `Stop`, `SubagentStop`, `SessionStart`, `SessionEnd`, `PreCompact`, `Notification`)
   can block a tool call, rewrite its input, add context, or send the agent back to work. Rules like
   `Bash(npm test:*)`, `Read(./.env)`, `WebFetch(domain:docs.ambient.xyz)` or `mcp__github` allow, ask for,
   or deny matching calls (a deny always wins, even in bypass). Put both under `"hooks"` and `"permissions"`
-  in `~/.config/amb/config.json`; deny and ask rules apply from any settings file.
-- **Nothing from a clone runs until you say so.** A project's own `.claude/settings.json` hooks and allow
-  rules and its `.mcp.json` servers apply once you've reviewed and trusted them (`/trust`, or
-  `ambient trust`); any change needs trusting again. Your `~/.claude` hooks, allow rules and global
-  instructions (`~/.claude/CLAUDE.md`, `~/.claude/rules`, `~/.codex/AGENTS.md`) and your enabled Claude Code
-  plugins' MCP servers apply when you set `"claudeSettings": true`.
+  in `~/.config/amb/config.json`; deny and ask rules apply from any settings file. For example:
+  `{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "./check.sh"}]}]},
+  "permissions": {"allow": ["Bash(npm test:*)"], "deny": ["Read(./.env)"]}}`
+- **Nothing from a clone runs until you say so.** A project's own hooks and allow rules
+  (`.claude/settings.json`, `settings.local.json`), its MCP servers (`.mcp.json`, `.ambient/mcp.json`) and the
+  shell lines in its slash commands apply once you've reviewed and trusted them (`/trust`, or `ambient trust`);
+  any change needs trusting again. Your `~/.claude` hooks, allow rules and global instructions
+  (`~/.claude/CLAUDE.md`, `~/.claude/rules`, `~/.codex/AGENTS.md`) and your enabled Claude Code plugins' hooks
+  and MCP servers apply when you set `"claudeSettings": true`.
 - **Runs everywhere.** macOS, Linux and Windows (Git Bash or PowerShell), tested on all three.
 
 ## In the interactive TUI
@@ -131,7 +136,7 @@ The activity line narrates what the agent is actually doing — `Reading src/app
 /tools           what the agent can use            /clear            start a fresh conversation
 /memory          notes ambient keeps (# adds one)  /hooks            the hooks that run here
 /permissions     your allow / ask / deny rules     /trust [yes]      review this project's own settings
-/mcp [login <s>] your MCP servers; sign in to one
+/mcp             your MCP servers (/mcp login <name> signs in to one)
 /help            every command and key             /quit
 ```
 
@@ -170,18 +175,20 @@ Anything can be piped in as context: `cat error.log | ambient "explain this fail
 The Claude Code headless flags work the same way:
 
 ```
-ambient -p "why does the build fail?"                   print just the answer; never prompts
-ambient -p "..." --output-format json                   one result object (stream-json: one JSON line per step)
-ambient -p "fix the tests" --allowedTools "Bash(npm test:*) Edit"   run these without asking
-ambient -p "..." --disallowedTools "Bash(git push:*)"   refuse these
-ambient -p "..." --append-system-prompt "Answer tersely."
-ambient -c -p "and now add docs"                        continue the latest conversation in this folder
-ambient -r <session> -p "..."                           continue a specific session
-ambient -p "..." --mcp-config servers.json [--strict-mcp-config]
-ambient -p "/review 42"                                 your custom commands and skills work here too
+ambient -p "why does the build fail?"                     print just the answer; never prompts
+ambient -p "..." --output-format json                     one result object (stream-json: a line per step)
+ambient -p "..." --allowedTools "Bash(npm test:*) Edit"   run these without asking
+ambient -p "..." --disallowedTools "Bash(git push:*)"     refuse these
+ambient -p "..." --append-system-prompt "Be terse."       extra instructions for this run
+ambient -c -p "and now add docs"                          continue the latest conversation in this folder
+ambient -r <session> -p "..."                             continue a specific session
+ambient -p "..." --mcp-config servers.json                add MCP servers (--strict-mcp-config: only these)
+ambient -p "/review 42"                                   your custom commands and skills work here too
 ```
 
-In print mode anything that would ask for approval is refused instead, so allow what the job needs.
+In print mode anything that would ask for approval is refused instead, so allow what the job needs. A project's
+own hooks, allow rules and MCP servers apply only after `ambient trust yes` has been run in that folder on that
+machine.
 
 ## Architecture
 

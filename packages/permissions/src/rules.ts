@@ -1,7 +1,8 @@
+import { realpathSync } from "node:fs";
 import { posix, win32 } from "node:path";
 import type { PermissionDecision, PermissionInput } from "@amb/protocol";
 import { hasUnmodeledExpansion } from "./read-only-command.js";
-import { parseShellCommands } from "./shell-tokens.js";
+import { MAX_CMD_CHARS, baseName, parseShellCommands } from "./shell-tokens.js";
 
 /**
  * Permission rules in Claude Code's syntax — `Bash(npm test:*)`, `Read(./secrets/**)`, `Edit(src/**)`,
@@ -53,7 +54,7 @@ export function parseRules(texts: readonly unknown[] | undefined): PermissionRul
 /** Which ambient tools a rule's tool name covers (Claude's names cover every tool of that kind). */
 const TOOL_ALIASES: Record<string, readonly string[]> = {
   bash: ["bash"],
-  read: ["read", "grep", "glob", "list", "read_artifact"],
+  read: ["read", "grep", "glob", "list"],
   grep: ["grep"],
   glob: ["glob"],
   ls: ["list"],
@@ -80,6 +81,9 @@ function coversTool(rule: PermissionRule, toolName: string): boolean {
   }
   return (TOOL_ALIASES[rule.tool] ?? [rule.tool]).includes(tool);
 }
+
+const isResourceTool = (name: string) =>
+  name === "mcp_read_resource" || name === "mcp_list_resources";
 
 /** A glob (`*` within a path segment, `**` across segments, `?` one character) as a RegExp. */
 function globToRegExp(glob: string, caseInsensitive: boolean): RegExp {
@@ -111,26 +115,164 @@ function anchorPattern(pattern: string, root: string, home: string): string {
   return `${r}/${p.replace(/^\.\//, "")}`;
 }
 
-/** A path matches a pattern when it, or a folder it's inside, does (so `./secrets` covers what's in it). */
+/** The path as the filesystem resolves it (symlinks followed) — through the nearest existing folder when the
+ *  path itself doesn't exist yet. */
+function realPath(path: string): string {
+  let head = path;
+  let tail = "";
+  for (let i = 0; i < 64; i++) {
+    try {
+      return tail ? `${realpathSync(head)}${sepOf(path)}${tail}` : realpathSync(head);
+    } catch {
+      const cut = Math.max(head.lastIndexOf("/"), head.lastIndexOf("\\"));
+      if (cut <= 0) return path;
+      tail = tail ? `${head.slice(cut + 1)}${sepOf(path)}${tail}` : head.slice(cut + 1);
+      head = head.slice(0, cut);
+    }
+  }
+  return path;
+}
+const sepOf = (p: string) => (/^[A-Za-z]:/.test(p) ? "\\" : "/");
+
+/** macOS and Windows folders ignore letter case by default, so a rule must too (`.ENV` is `.env` there). */
+const CASE_INSENSITIVE = process.platform === "win32" || process.platform === "darwin";
+
+/** A path matches a pattern when it, or a folder it's inside, does (so `./secrets` covers what's in it) — by
+ *  the path as written AND as the filesystem resolves it, so a symlink can't dodge a rule. */
 function pathMatches(pattern: string, path: string, root: string, home: string): boolean {
-  const insensitive = /^[A-Za-z]:/.test(root) || process.platform === "win32";
-  const re = globToRegExp(anchorPattern(pattern, root, home), insensitive);
-  const norm = toSlash(/^[A-Za-z]:/.test(path) ? win32.normalize(path) : posix.normalize(path));
-  let p = norm.replace(/\/+$/, "");
-  while (p) {
-    if (re.test(p)) return true;
-    const cut = p.lastIndexOf("/");
-    if (cut <= 0) break;
-    p = p.slice(0, cut);
+  const insensitive = CASE_INSENSITIVE || /^[A-Za-z]:/.test(root);
+  const variants = [
+    anchorPattern(pattern, root, home),
+    anchorPattern(pattern, realPath(root), realPath(home)),
+  ];
+  const res = [...new Set(variants)].map((v) => globToRegExp(v, insensitive));
+  for (const candidate of new Set([path, realPath(path)])) {
+    const norm = toSlash(
+      /^[A-Za-z]:/.test(candidate) ? win32.normalize(candidate) : posix.normalize(candidate),
+    );
+    let p = norm.replace(/\/+$/, "");
+    while (p) {
+      if (res.some((re) => re.test(p))) return true;
+      const cut = p.lastIndexOf("/");
+      if (cut <= 0) break;
+      p = p.slice(0, cut);
+    }
   }
   return false;
 }
 
-/** The simple commands a shell line runs, each as its quote-stripped words joined by spaces. */
-export function shellSegments(command: string): string[] {
-  return parseShellCommands(command)
-    .map((c) => c.argv.join(" ").trim())
-    .filter(Boolean);
+/** Whether your deny rules keep a file from being read — checked by the tools that walk folders too, so a
+ *  search over a parent folder can't return what `Read(./secrets/**)` denies. */
+export function isReadDenied(
+  rules: PermissionRules | undefined,
+  path: string,
+  workspaceRoot: string,
+  home: string,
+): boolean {
+  return (rules?.deny ?? []).some(
+    (r) =>
+      r.specifier !== undefined &&
+      coversTool(r, "read") &&
+      pathMatches(r.specifier, path, workspaceRoot, home),
+  );
+}
+
+/** Programs that run the rest of their arguments as a command (`env X=1 rm`, `nice -n 5 rm`, `sudo rm`). */
+const WRAPPERS = new Set([
+  "env",
+  "command",
+  "builtin",
+  "exec",
+  "nice",
+  "nohup",
+  "time",
+  "timeout",
+  "sudo",
+  "doas",
+  "xargs",
+  "stdbuf",
+  "caffeinate",
+]);
+/** Wrapper options that take a value (`nice -n 5`, `sudo -u root`, `timeout -s KILL`). */
+const WRAPPER_VALUE_OPTS = new Set(["-n", "-u", "-g", "-s", "-k", "-C", "-I", "-L", "-P"]);
+const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
+
+/** The command a segment really runs: leading `VAR=value`s and wrappers dropped, the program by its name. */
+function normalizeArgv(argv: readonly string[]): string[] {
+  let a = [...argv];
+  for (let guard = 0; guard < 8; guard++) {
+    while (a[0] !== undefined && /^[A-Za-z_][A-Za-z0-9_]*=/.test(a[0])) a = a.slice(1);
+    const head = a[0];
+    if (head === undefined) return [];
+    const name = baseName(head);
+    if (!WRAPPERS.has(name)) return [name, ...a.slice(1)];
+    a = a.slice(1);
+    // The wrapper's own options (and numeric durations/priorities) come before the command.
+    while (a[0] !== undefined && (a[0].startsWith("-") || /^\d+[smhd]?$/.test(a[0]))) {
+      const opt = a[0];
+      a = a.slice(1);
+      if (WRAPPER_VALUE_OPTS.has(opt) && a[0] !== undefined) a = a.slice(1);
+    }
+  }
+  return a;
+}
+
+/** The text inside every `$(…)`, `<(…)`, `>(…)` and backtick substitution (nested ones included). */
+function substitutions(command: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    if ((c === "$" || c === "<" || c === ">") && command[i + 1] === "(") {
+      let depth = 0;
+      for (let j = i + 1; j < command.length; j++) {
+        if (command[j] === "(") depth++;
+        else if (command[j] === ")" && --depth === 0) {
+          out.push(command.slice(i + 2, j));
+          break;
+        }
+      }
+    } else if (c === "`") {
+      const end = command.indexOf("`", i + 1);
+      if (end > i) {
+        out.push(command.slice(i + 1, end));
+        i = end;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Every simple command a shell line may run, each as its words joined by spaces — through wrappers
+ * (`env`, `nice`, `sudo`, …), `sh -c "…"`, and command/process substitutions. Deny and ask rules check all of
+ * them, so `/bin/rm`, `X=1 rm`, `bash -c 'rm …'` and `$(rm …)` are all still `rm`.
+ */
+export function shellSegments(command: string, depth = 0): string[] {
+  const out: string[] = [];
+  for (const c of parseShellCommands(command)) {
+    const argv = normalizeArgv(c.argv);
+    if (argv.length === 0) continue;
+    out.push(argv.join(" ").trim());
+    const script = SHELLS.has(argv[0] as string) ? argv[argv.indexOf("-c") + 1] : undefined;
+    if (script !== undefined && argv.includes("-c") && depth < 4)
+      out.push(...shellSegments(script, depth + 1));
+  }
+  if (depth < 4)
+    for (const inner of substitutions(command)) out.push(...shellSegments(inner, depth + 1));
+  return out.filter(Boolean);
+}
+
+/** Whether an allow rule can safely judge this command word by word: nothing the parser could read
+ *  differently from bash (escapes, `$'…'`, substitutions, redirections, nested shells), and not so long the
+ *  parser stops reading. */
+function allowable(command: string): boolean {
+  if (command.length > MAX_CMD_CHARS) return false;
+  if (command.includes("\\") || command.includes("$'")) return false;
+  if (hasUnmodeledExpansion(command) || hasRedirection(command)) return false;
+  return !parseShellCommands(command).some((c) => {
+    const argv = normalizeArgv(c.argv);
+    return SHELLS.has(argv[0] ?? "") || argv.join(" ") !== c.argv.join(" ");
+  });
 }
 
 /** Whether a command redirects input or output (`>`, `<`, `>>`, `2>`) outside quotes — an allow rule for the
@@ -193,22 +335,27 @@ export interface RuleCall {
  * `npm test && rm -rf ~` through) and nothing is hidden in a substitution or redirection.
  */
 export function ruleCovers(rule: PermissionRule, call: RuleCall, mode: "any" | "all"): boolean {
+  if (isResourceTool(call.toolName) && rule.tool.startsWith("mcp__")) {
+    // Reading an MCP server's resources is that server's business: `mcp__github` covers them too.
+    const server = typeof call.args.server === "string" ? call.args.server : undefined;
+    return server === undefined ? mode === "any" : `mcp__${server}`.toLowerCase() === rule.tool;
+  }
   if (!coversTool(rule, call.toolName)) return false;
   const spec = rule.specifier;
   if (spec === undefined) return true;
   const tool = call.toolName.toLowerCase();
   if (tool === "bash") {
     const command = typeof call.args.command === "string" ? call.args.command : "";
-    const parts = shellSegments(command);
-    if (parts.length === 0) return false;
     if (mode === "all") {
-      return (
-        !hasUnmodeledExpansion(command) &&
-        !hasRedirection(command) &&
-        parts.every((p) => commandMatches(spec, p))
-      );
+      const parts = shellSegments(command);
+      return parts.length > 0 && allowable(command) && parts.every((p) => commandMatches(spec, p));
     }
-    return commandMatches(spec, command.trim()) || parts.some((p) => commandMatches(spec, p));
+    // Too long to read in full: a deny or ask rule can't be sure it isn't there, so it counts as matched.
+    if (command.length > MAX_CMD_CHARS) return true;
+    return (
+      commandMatches(spec, command.trim()) ||
+      shellSegments(command).some((p) => commandMatches(spec, p))
+    );
   }
   if (tool === "web_fetch") {
     const host = hostOf(call.args.url);
@@ -217,8 +364,9 @@ export function ruleCovers(rule: PermissionRule, call: RuleCall, mode: "any" | "
     const domain = m[1].trim().toLowerCase().replace(/^\*\./, "");
     return host === domain || host.endsWith(`.${domain}`);
   }
-  // File tools: the specifier is a path pattern checked against every path the call touches.
-  if (call.resources.length === 0) return false;
+  // File tools: the specifier is a path pattern checked against every path the call touches. A call whose
+  // paths can't be told can't be shown to stay clear of a deny or ask rule, so those count it as matched.
+  if (call.resources.length === 0) return mode === "any";
   const test = (p: string) => pathMatches(spec, p, call.workspaceRoot, call.home);
   return mode === "all" ? call.resources.every(test) : call.resources.some(test);
 }

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { type SlashCommand, expandCommand, importRefs, readTextCappedSafe } from "@amb/context";
-import { type PermissionRules, parseRules, ruleCovers } from "@amb/permissions";
+import { type PermissionRules, isReadDenied, parseRules, ruleCovers } from "@amb/permissions";
 import { machineShell, shellEnv, shellInvocation } from "@amb/tools-core";
 
 /**
@@ -21,6 +21,8 @@ export interface ExpandOptions {
   home: string;
   /** The session's rules: a deny rule stops a `!` command even when the command file allows it. */
   rules?: PermissionRules;
+  /** Whether this project's own settings are trusted — a project command's shell lines only run then. */
+  projectTrusted?: boolean;
   /** Runs one shell command in the workspace; injectable for tests. */
   runShell?: (command: string, cwd: string) => string;
 }
@@ -58,6 +60,10 @@ export function expandSlashCommand(
     home: opts.home,
   });
   let text = expandCommand(command.body, args).replace(/!`([^`\n]+)`/g, (whole, cmd: string) => {
+    // A project's own command arrives with a clone: its shell lines wait until the project is trusted.
+    if (command.source === "project" && opts.projectTrusted !== true) {
+      return `${whole} (not run: this project's commands run shell lines once you trust it — /trust)`;
+    }
     const denied = opts.rules?.deny.some((r) => ruleCovers(r, call(cmd), "any"));
     const permitted = !denied && allowed.some((r) => ruleCovers(r, call(cmd), "all"));
     if (!permitted) {
@@ -69,6 +75,7 @@ export function expandSlashCommand(
   const attached: string[] = [];
   for (const ref of importRefs(text).slice(0, MAX_FILES)) {
     const path = join(opts.workspaceRoot, ref.replace(/^\.\//, ""));
+    if (isReadDenied(opts.rules, path, opts.workspaceRoot, opts.home)) continue;
     const content = readTextCappedSafe(path, { root: opts.workspaceRoot })?.trim();
     if (!content) continue;
     const shown =

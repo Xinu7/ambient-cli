@@ -246,3 +246,70 @@ describe("permission rules in a run", () => {
     expect(readFileSync(join(ws, "f.txt"), "utf8")).toBe("ok");
   });
 });
+
+describe("rules the reviewers tried to get around", () => {
+  it("apply_patch can't edit a denied path; grep over the workspace skips denied files", async () => {
+    const { parseRules } = await import("@amb/permissions");
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    mkdirSync(join(ws, "secrets"), { recursive: true });
+    writeFileSync(join(ws, "secrets", "k.txt"), "API_KEY=ZZZ-SECRET");
+    writeFileSync(join(ws, "app.ts"), "const API_KEY = process.env.X;");
+    const patch = {
+      content: "",
+      toolCalls: [
+        {
+          id: "tc_p",
+          name: "apply_patch",
+          args: { edits: [{ path: "secrets/k.txt", oldString: "ZZZ", newString: "YYY" }] },
+          rawArgs: "{}",
+        },
+      ],
+    };
+    const grep = {
+      content: "",
+      toolCalls: [{ id: "tc_g", name: "grep", args: { pattern: "API_KEY" }, rawArgs: "{}" }],
+    };
+    const client = new FixtureClient(catalogOf(TEXT_200K), [patch, grep, done]);
+    await new Agent(client).run(
+      "go",
+      runOpts({
+        requestedModel: TEXT_200K.id,
+        mode: "bypass",
+        cwd: ws,
+        workspaceRoot: ws,
+        permissionRules: {
+          allow: [],
+          ask: [],
+          deny: parseRules(["Edit(./secrets/**)", "Read(./secrets/**)"]),
+        },
+      }),
+    );
+    expect(readFileSync(join(ws, "secrets", "k.txt"), "utf8")).toBe("API_KEY=ZZZ-SECRET");
+    const results = toolResults(client).join("\n");
+    expect(results).toContain("app.ts");
+    expect(results).not.toContain("ZZZ-SECRET");
+  });
+
+  it("a hook's allow doesn't answer a question your ask rule insists on", async () => {
+    const { parseRules } = await import("@amb/permissions");
+    const { port } = fakeHooks({ PreToolUse: () => ({ allow: true }) });
+    let asked = 0;
+    const client = new FixtureClient(catalogOf(TEXT_200K), [writeCall("g.txt", "x"), done]);
+    await new Agent(client).run(
+      "write",
+      runOpts({
+        requestedModel: TEXT_200K.id,
+        mode: "bypass",
+        cwd: ws,
+        workspaceRoot: ws,
+        hooks: port,
+        approve: async () => {
+          asked++;
+          return "deny";
+        },
+        permissionRules: { allow: [], deny: [], ask: parseRules(["Write(g.txt)"]) },
+      }),
+    );
+    expect(asked).toBe(1);
+  });
+});

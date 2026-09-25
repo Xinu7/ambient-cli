@@ -86,6 +86,9 @@ export interface ToolContext {
   /** Folders outside the workspace this run may READ (a loaded skill's own files — scripts/, references/).
    *  `add` grants one for the rest of the run. Optional — absent ⇒ reads stay inside the workspace. */
   readRoots?: { list(): readonly string[]; add(dir: string): void };
+  /** Whether your deny rules keep this absolute path from being read — tools that walk folders skip such
+   *  files, and `read` refuses them. Optional — absent ⇒ no read rules. */
+  readDenied?(absPath: string): boolean;
 }
 
 /** A tool = serializable manifest + Zod I/O schemas + an execute fn. Not fully serializable (has execute). */

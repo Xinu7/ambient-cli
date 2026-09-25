@@ -5,7 +5,7 @@
  * quotes, records whether the first word was FULLY quoted (⇒ data, not an invocation), and bounds the input.
  */
 
-const MAX_CMD_CHARS = 16_000;
+export const MAX_CMD_CHARS = 16_000;
 
 export interface ShellCommand {
   /** Ordered, quote-stripped tokens for one pipeline/sequence segment (argv[0] = command). */

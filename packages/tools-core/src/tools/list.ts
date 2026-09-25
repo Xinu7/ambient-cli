@@ -1,6 +1,6 @@
 import type { Dirent } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { relative } from "node:path";
+import { join, relative } from "node:path";
 import type { ToolContext, ToolDefinition } from "@amb/protocol";
 import { z } from "zod";
 import { resolveReadable } from "../paths.js";
@@ -47,7 +47,7 @@ export const listTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
       throw err;
     }
     const entries = dirents
-      .filter((d) => !IGNORE.has(d.name))
+      .filter((d) => !IGNORE.has(d.name) && !ctx.readDenied?.(join(abs, d.name)))
       .map((d) => ({ name: d.name, dir: d.isDirectory() }))
       .sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
     return { path: rel, entries, notFound: false };

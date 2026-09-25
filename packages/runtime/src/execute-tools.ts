@@ -1,10 +1,17 @@
+import { homedir } from "node:os";
 import {
   isAbsolute as isAbsolutePath,
   join as joinPath,
   relative as relativePath,
   resolve as resolvePath,
 } from "node:path";
-import { decide, refineBashEffects, resolveResource } from "@amb/permissions";
+import {
+  decide,
+  isReadDenied,
+  refineBashEffects,
+  resolveResource,
+  ruleCovers,
+} from "@amb/permissions";
 import {
   type Grant,
   type NewEvent,
@@ -42,16 +49,27 @@ export interface Scope {
 }
 
 /** Resolve the resource paths a tool touches (best-effort, for the workspace-boundary check). */
-function resourcesOf(args: unknown): string[] {
+/** Tools that walk a folder; with no `path` they walk the whole workspace. */
+const FOLDER_WALKERS = new Set(["grep", "glob", "list"]);
+
+/** The paths a call touches: `path`/`file`, every `edits[].path` (apply_patch), and the workspace itself for
+ *  a folder walk with no path — so path rules see everything the call reaches. */
+function resourcesOf(args: unknown, toolName?: string): string[] {
+  const out: string[] = [];
   if (args && typeof args === "object") {
     const a = args as Record<string, unknown>;
-    const out: string[] = [];
     for (const key of ["path", "file"]) {
       if (typeof a[key] === "string") out.push(a[key] as string);
     }
-    return out;
+    if (Array.isArray(a.edits)) {
+      for (const e of a.edits) {
+        const p = (e as { path?: unknown } | null)?.path;
+        if (typeof p === "string") out.push(p);
+      }
+    }
   }
-  return [];
+  if (out.length === 0 && toolName && FOLDER_WALKERS.has(toolName)) out.push(".");
+  return out;
 }
 
 async function runOne(
@@ -136,16 +154,33 @@ async function runOne(
     normalizedArgs: parsed.data as Record<string, unknown>,
     // Resolved with the host's path rules (normalizes `..`, absolute and drive-letter paths) so the
     // outside-the-workspace check can't be walked around.
-    resolvedResources: resourcesOf(parsed.data).map((r) => resolveResource(opts.workspaceRoot, r)),
+    resolvedResources: resourcesOf(parsed.data, tool.manifest.name).map((r) =>
+      resolveResource(opts.workspaceRoot, r),
+    ),
     workspaceRoot: opts.workspaceRoot,
     grants,
     autoApprovalStreak: autoApproval.streak,
     ...(autoApproval.cap !== undefined ? { autoApprovalCap: autoApproval.cap } : {}),
   };
   const base = decide(permInput, opts.permissionRules ? { rules: opts.permissionRules } : {});
-  // A hook can turn a prompt into an automatic allow, or an automatic allow into a prompt — never undo a denial.
+  // A hook can turn a prompt into an automatic allow, or an automatic allow into a prompt — never undo a denial,
+  // and never answer a question one of YOUR ask rules insists on.
+  const askedByYou =
+    opts.permissionRules?.ask.some((r) =>
+      ruleCovers(
+        r,
+        {
+          toolName: permInput.toolName,
+          args: permInput.normalizedArgs,
+          resources: permInput.resolvedResources,
+          workspaceRoot: opts.workspaceRoot,
+          home: homedir(),
+        },
+        "any",
+      ),
+    ) === true;
   const decision =
-    base.effect === "ask" && pre.allow && !pre.ask
+    base.effect === "ask" && pre.allow && !pre.ask && !askedByYou
       ? { ...base, effect: "allow" as const, reason: "allowed by a hook" }
       : base.effect === "allow" && pre.ask
         ? { ...base, effect: "ask" as const, reason: "a hook asked to confirm this" }
@@ -334,6 +369,11 @@ export async function executeTools(
   runState?: RunState,
 ): Promise<ToolOutcome[]> {
   const readRoots = runState?.readRoots;
+  const rules = opts.permissionRules;
+  const home = homedir();
+  const readDenied = rules?.deny.some((r) => r.specifier !== undefined)
+    ? (p: string) => isReadDenied(rules, p, opts.workspaceRoot, home)
+    : undefined;
   const makeToolCtx = (toolCallId: string): ToolContext => ({
     cwd: opts.cwd,
     workspaceRoot: opts.workspaceRoot,
@@ -352,6 +392,7 @@ export async function executeTools(
     ...(readRoots
       ? { readRoots: { list: () => [...readRoots], add: (dir: string) => void readRoots.add(dir) } }
       : {}),
+    ...(readDenied ? { readDenied } : {}),
   });
 
   const ids = calls.map((c) => (c.id.startsWith("tc_") ? c.id : newToolCallId()));

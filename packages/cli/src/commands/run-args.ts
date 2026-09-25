@@ -1,4 +1,5 @@
 import { splitList } from "@amb/context";
+import { parseRule } from "@amb/permissions";
 import type { Mode } from "@amb/protocol";
 import { AUTO_MODEL } from "@amb/reliability";
 import type { EffortSetting } from "@amb/runtime";
@@ -68,16 +69,18 @@ const PERMISSION_MODES: Record<string, Mode> = {
 
 export const USAGE = `usage: ambient run "<task>" [flags]   (or: ambient -p "<task>" [flags])
 
-  -p, --print                    print only the answer; never prompt (unlisted tools are refused)
-  --output-format text|json|stream-json
+  -p, --print                    print only the answer; anything that would ask for approval is refused
+  --output-format text|json|stream-json   json: one result object; stream-json: one line per step
   --allowedTools "<rules>"       e.g. "Bash(npm test:*) Edit" — run these without asking
   --disallowedTools "<rules>"    refuse these
-  --append-system-prompt "<text>"
+  --append-system-prompt "<text>"   extra instructions for this run
   -c, --continue                 continue the latest conversation in this folder
   -r, --resume <id>              continue a specific session
   --mcp-config <file|json>       extra MCP servers (repeatable); --strict-mcp-config uses only these
   -m, --model <id>   -i, --image <path>   -g, --goal "<objective>"
-  --plan | --accept-edits | --bypass | --permission-mode <mode>   --yes
+  --plan | --accept-edits | --bypass (--yolo)
+  --permission-mode default|plan|acceptEdits|bypassPermissions
+  --yes                          auto-approve file edits (shell and network still ask)
   --effort auto|off|high|max   --max-turns <n>   --no-auto-continue   --no-mcp   --jsonl`;
 
 export function parseRunArgs(args: string[], config: AmbConfig = {}): RunArgs {
@@ -175,6 +178,10 @@ export function parseRunArgs(args: string[], config: AmbConfig = {}): RunArgs {
     } else if (a) parts.push(a);
   }
   if (mode === "bypass") autoAllow = true;
+  // A rule that doesn't parse must fail loudly: silently dropping `Bash(rm:*` from --disallowedTools would
+  // leave the run less restricted than asked.
+  const badRule = [...allowedTools, ...disallowedTools].find((r) => !parseRule(r) || !balanced(r));
+  if (badRule !== undefined) error = error ?? `not a valid permission rule: "${badRule}"`;
   return {
     task: parts.join(" ").trim(),
     model,
@@ -199,4 +206,14 @@ export function parseRunArgs(args: string[], config: AmbConfig = {}): RunArgs {
     help,
     error,
   };
+}
+
+/** Parentheses open and close in order (`Bash(rm:*` is not a rule). */
+function balanced(rule: string): boolean {
+  let depth = 0;
+  for (const ch of rule) {
+    if (ch === "(") depth++;
+    else if (ch === ")" && --depth < 0) return false;
+  }
+  return depth === 0;
 }

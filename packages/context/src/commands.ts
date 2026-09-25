@@ -123,3 +123,21 @@ export function expandCommand(body: string, args: string[]): string {
     digit ? (args[Number(digit) - 1] ?? "") : args.join(" "),
   );
 }
+
+/** The `` !`cmd` `` shell lines in a command's template. */
+export function shellLines(body: string): string[] {
+  return [...body.matchAll(/!`([^`\n]+)`/g)].map((m) => m[1] as string);
+}
+
+/**
+ * The project's own commands that run shell lines (and what they let themselves run) — they arrive with a
+ * clone, so they're part of what a user trusts about a project before those lines run.
+ */
+export function projectShellCommands(
+  workspaceRoot: string,
+  home?: string,
+): Array<{ name: string; lines: string[]; allowedTools: string[] }> {
+  return discoverCommands(workspaceRoot, home)
+    .filter((c) => c.source === "project" && shellLines(c.body).length > 0)
+    .map((c) => ({ name: c.name, lines: shellLines(c.body), allowedTools: c.allowedTools ?? [] }));
+}

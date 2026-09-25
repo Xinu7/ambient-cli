@@ -55,6 +55,12 @@ describe("run flags", () => {
       here: false,
     });
     expect(RUN_VALUE_FLAGS.has("--resume")).toBe(true);
+    expect(parseRunArgs(["--disallowedTools", "Bash(rm:* Edit", "x"]).error).toContain(
+      "not a valid permission rule",
+    );
+    expect(parseRunArgs(["--allowedTools", "not a rule!", "x"]).error).toContain(
+      "not a valid permission rule",
+    );
   });
 
   it("adds --allowedTools / --disallowedTools to the configured rules", () => {
@@ -91,7 +97,7 @@ describe("commands in a headless task", () => {
     };
     const cmd = {
       name: "status",
-      source: "project" as const,
+      source: "user" as const,
       allowedTools: ["Bash(git status:*)", "Bash(git diff:*)"],
       body: "Status: !`git status --short`\nDiff: !`git diff`\nPush: !`git push`",
     };
@@ -115,6 +121,19 @@ describe("commands in a headless task", () => {
         runShell,
       }),
     ).toContain("(not run");
+    // A project's own command waits for the project to be trusted.
+    const project = { ...cmd, source: "project" as const };
+    expect(expandSlashCommand(project, [], { workspaceRoot: ws, home: ws, runShell })).toContain(
+      "(not run: this project's commands run shell lines once you trust it — /trust)",
+    );
+    expect(
+      expandSlashCommand(project, [], {
+        workspaceRoot: ws,
+        home: ws,
+        runShell,
+        projectTrusted: true,
+      }),
+    ).toContain("Status: out:git status --short");
   });
 
   it("attaches @files from the project, never from outside it", () => {
@@ -131,6 +150,16 @@ describe("commands in a headless task", () => {
     expect(text).toContain("## @notes.md\n```\nPROJECT-NOTES\n```");
     expect(text).not.toContain("root:");
     expect(text.match(/## @/g)).toHaveLength(1);
+    const denied = expandSlashCommand(
+      { name: "r", source: "project", body: "Review @notes.md" },
+      [],
+      {
+        workspaceRoot: ws,
+        home: ws,
+        rules: { allow: [], ask: [], deny: parseRules(["Read(./notes.md)"]) },
+      },
+    );
+    expect(denied).not.toContain("PROJECT-NOTES");
   });
 });
 

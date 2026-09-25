@@ -55,6 +55,7 @@ export function expandTaskCommand(
   task: string,
   cwd: string,
   rules: PermissionRules | undefined,
+  projectTrusted = false,
 ): { task: string } | { error: string } {
   const m = /^\/([A-Za-z][\w:.-]*)(?:\s+([\s\S]*))?$/.exec(task.trim());
   if (!m?.[1]) return { task };
@@ -79,6 +80,7 @@ export function expandTaskCommand(
       workspaceRoot: cwd,
       home: homedir(),
       ...(rules ? { rules } : {}),
+      projectTrusted,
     }),
   };
 }
@@ -153,7 +155,7 @@ export async function runAgent(args: string[]): Promise<void> {
 
   const settings = workspaceSettings(cwd, userConfig, configDir());
   const permissionRules = withFlagRules(settings.rules(), a.allowedTools, a.disallowedTools);
-  const expanded = expandTaskCommand(piped, cwd, permissionRules);
+  const expanded = expandTaskCommand(piped, cwd, permissionRules, settings.projectTrusted());
   if ("error" in expanded) return fail(expanded.error);
   const finalTask = expanded.task;
 
@@ -233,7 +235,7 @@ export async function runAgent(args: string[]): Promise<void> {
       if (resumed.droppedTail > 0)
         process.stderr.write(
           dim(
-            `  the prior session ended abruptly (${resumed.droppedTail} unfinished log line(s))\n`,
+            `  the prior session ended abruptly (${resumed.droppedTail} unfinished log line${resumed.droppedTail === 1 ? "" : "s"})\n`,
           ),
         );
       for (const n of resumed.recoveryNotes) process.stderr.write(dim(`  recovery: ${n}\n`));
@@ -248,7 +250,9 @@ export async function runAgent(args: string[]): Promise<void> {
 
   const hooks = settings.hooksPort(() => sessionId);
   const note = untrustedNote(settings);
-  if (note && live) process.stderr.write(dim(`  ${note}\n`));
+  // Said in every mode (on stderr): a script on a fresh machine should learn why the project's settings are off.
+  if (note && reporting !== "jsonl")
+    process.stderr.write(live ? dim(`  ${note}\n`) : `ambient: ${note}\n`);
 
   const opts: RunOptions = {
     sessionId,
@@ -289,10 +293,8 @@ export async function runAgent(args: string[]): Promise<void> {
   const mcp: Pick<McpConnection, "tools" | "notices" | "close"> = skipMcp
     ? { tools: [], notices: [], close: () => {} }
     : await connectMcp(cwd, {
-        // A project's own servers connect once the project's settings are trusted; the env switch remains
-        // for scripted runs.
-        approveServer: async () =>
-          process.env.AMBIENT_MCP_ALLOW_PROJECT === "1" || settings.projectTrusted(),
+        // A project's own servers connect once the project's settings are trusted (/trust).
+        approveServer: async () => settings.projectTrusted(),
         plugins: userConfig.claudeSettings === true,
         auth: makeMcpAuth(),
         extra: extraMcp,

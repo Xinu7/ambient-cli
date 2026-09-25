@@ -56,7 +56,11 @@ describe("connectMcp", () => {
       approveServer: async () => false,
     });
     expect(denied.tools.map((t) => t.manifest.name)).toEqual(["mcp__user__t"]); // only the user server
-    expect(denied.notices.some((n) => n.includes("proj") && n.includes("not approved"))).toBe(true);
+    expect(
+      denied.notices.some(
+        (n) => n.includes("proj") && n.includes("starts once you trust the project"),
+      ),
+    ).toBe(true);
 
     const approved = await connectMcp("/ws", {
       load: () => specs,
@@ -77,6 +81,8 @@ describe("connectMcp", () => {
     // No approveServer supplied at all — the project server must be skipped, not silently spawned.
     const c = await connectMcp("/ws", { load: () => specs, start: stubStart });
     expect(c.tools.map((t) => t.manifest.name)).toEqual(["mcp__user__t"]);
-    expect(c.notices.some((n) => n.includes("proj") && n.includes("not approved"))).toBe(true);
+    expect(
+      c.notices.some((n) => n.includes("proj") && n.includes("starts once you trust the project")),
+    ).toBe(true);
   });
 });

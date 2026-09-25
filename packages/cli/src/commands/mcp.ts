@@ -34,7 +34,7 @@ export async function runMcp(args: string[]): Promise<void> {
         s.transport,
         ...(s.url && store.get(s.url)?.tokens ? ["signed in"] : []),
         ...(s.missingEnv?.length ? [`needs ${s.missingEnv.join(", ")}`] : []),
-        ...(s.source === "project" && !trusted ? ["waits for /trust"] : []),
+        ...(s.source === "project" && !trusted ? ["waits for ambient trust"] : []),
       ];
       const shown = where.length > 60 ? `${where.slice(0, 59)}…` : where;
       process.stdout.write(`${s.name.padEnd(24)} ${shown}\n${"".padEnd(25)}${notes.join(" · ")}\n`);
@@ -43,9 +43,14 @@ export async function runMcp(args: string[]): Promise<void> {
   }
 
   if (sub === "login" || sub === "logout") {
+    if (!name) {
+      process.stderr.write(`ambient: which server? (use: ambient mcp ${sub} <name>)\n`);
+      process.exitCode = 1;
+      return;
+    }
     const spec = specs.find((s) => s.name === name);
-    if (!name || !spec) {
-      process.stderr.write(`ambient: no MCP server named "${name ?? ""}" (see: ambient mcp)\n`);
+    if (!spec) {
+      process.stderr.write(`ambient: no MCP server named "${name}" (see: ambient mcp)\n`);
       process.exitCode = 1;
       return;
     }
@@ -55,6 +60,10 @@ export async function runMcp(args: string[]): Promise<void> {
       return;
     }
     if (sub === "logout") {
+      if (!store.get(spec.url)) {
+        process.stdout.write(`You weren't signed in to ${name}.\n`);
+        return;
+      }
       store.delete(spec.url);
       process.stdout.write(`Signed out of ${name}.\n`);
       return;
@@ -78,7 +87,7 @@ export async function runMcp(args: string[]): Promise<void> {
   }
 
   process.stderr.write(
-    `ambient: unknown mcp command "${sub}" (use: ambient mcp [list|login|logout] <name>)\n`,
+    `ambient: unknown mcp command "${sub}" (use: ambient mcp [list | login <name> | logout <name>])\n`,
   );
   process.exitCode = 1;
 }

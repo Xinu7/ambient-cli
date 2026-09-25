@@ -1315,8 +1315,8 @@ export function App(deps: AppDeps): ReactNode {
       case "/trust": {
         const settings = deps.settings;
         const word = arg.trim().toLowerCase();
-        // `/trust yes` (and the older `/hooks trust`) trusts; plain `/trust` shows what would be trusted.
-        const confirm = command.name === "/trust" ? word === "yes" : word === "trust";
+        // `/trust yes` trusts; plain `/trust` shows what would be trusted.
+        const confirm = command.name === "/trust" && word === "yes";
         const text = !settings
           ? "No hooks, permission rules or project settings."
           : confirm
@@ -1349,7 +1349,11 @@ export function App(deps: AppDeps): ReactNode {
       case "/mcp": {
         const [sub, name] = arg.trim().split(/\s+/);
         if (!deps.mcp) {
-          dispatch({ t: "notice", level: "info", text: "MCP is off for this session (--no-mcp)." });
+          dispatch({
+            t: "notice",
+            level: "info",
+            text: 'MCP is off for this session (--no-mcp, AMBIENT_NO_MCP or "noMcp" in config).',
+          });
         } else if (sub === "login") {
           if (!name) {
             dispatch({ t: "notice", level: "info", text: "usage: /mcp login <server>" });
@@ -1521,6 +1525,7 @@ export function App(deps: AppDeps): ReactNode {
               workspaceRoot: deps.workspaceRoot,
               home: homedir(),
               ...(deps.settings?.rules() ? { rules: deps.settings.rules() } : {}),
+              projectTrusted: deps.settings?.projectTrusted() === true,
             }),
           );
         }

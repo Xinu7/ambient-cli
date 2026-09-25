@@ -58,7 +58,7 @@ export function loadResumeContext(
   const { events, chainIntact, interiorCorruption, droppedTail } = readSession(fromSessionId);
   if (!chainIntact || interiorCorruption) {
     return {
-      error: `session ${fromSessionId} has a corrupted/incomplete log (chain broken) — refusing to resume it`,
+      error: `session ${fromSessionId}'s log is incomplete or damaged, so it can't be resumed`,
     };
   }
   const recordedRoot =

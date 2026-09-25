@@ -18,7 +18,7 @@ export async function runTrust(args: string[]): Promise<void> {
   process.exitCode = 1;
 }
 
-/** `ambient hooks` lists the hooks that run in this folder; `ambient hooks trust` allows the project's own. */
+/** `ambient hooks` lists the hooks that run in this folder (`ambient trust` reviews the project's own). */
 export async function runHooks(args: string[]): Promise<void> {
   const config = loadConfig();
   const control = workspaceSettings(process.cwd(), config, configDir());
@@ -27,10 +27,8 @@ export async function runHooks(args: string[]): Promise<void> {
     process.stdout.write(`${control.hooksSummary().join("\n")}\n`);
     return;
   }
-  if (sub === "trust") {
-    process.stdout.write(`${control.trust()}\n`);
-    return;
-  }
-  process.stderr.write(`ambient: unknown hooks command "${sub}" (use: ambient hooks [trust])\n`);
+  process.stderr.write(
+    `ambient: unknown hooks command "${sub}" (use: ambient hooks; ambient trust reviews this project's settings)\n`,
+  );
   process.exitCode = 1;
 }

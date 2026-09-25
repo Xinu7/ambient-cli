@@ -32,6 +32,7 @@ export const readTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
   outputSchema: Output,
   async execute(input, ctx: ToolContext) {
     const abs = resolveReadable(ctx.workspaceRoot, input.path, ctx.readRoots?.list());
+    if (ctx.readDenied?.(abs)) throw new Error(`${input.path}: reading it is denied by your rules`);
     const raw = await readFile(abs, "utf8");
     const all = raw.split(/\r?\n/); // CRLF files show the same clean lines as LF ones
     const start = input.offset ? input.offset - 1 : 0;

@@ -26,6 +26,7 @@ Usage:
   ambient tui ["<task>"] [flags]         Same — the Ambient-branded interactive UI
   ambient "<task>"                       Run the coding agent on a task (line UI)
   ambient run "<task>" [flags]           Same as above
+  ambient -p "<task>" [flags]            Print only the answer; never prompts (scripts/CI)
   cmd | ambient "<task>"                 Pipe stdin in as context (cat err.log | ambient "explain")
   ambient chat "<prompt>" [--model <id>] Talk to a live Ambient model (no tools)
   ambient models [--json]                Show the live Ambient model fleet
@@ -33,7 +34,7 @@ Usage:
   ambient skills show "<name>"           Print a discovered skill's full instructions
   ambient skills pin|unpin "<name>"      Pin a skill so it ALWAYS auto-loads (or unpin it)
   ambient hooks                          List the hooks that run here
-  ambient trust [yes]                    Review (then trust) this project's hooks, allow rules, MCP servers
+  ambient trust [yes]                    Review, then trust, this project's own settings
   ambient mcp [login|logout <name>]      List MCP servers; sign in to one that uses OAuth
   ambient probe <model-id>               Test a model's native tool-calling (records the result)
   ambient route explain [model-id]       Explain which model + lane a task would use
@@ -57,6 +58,15 @@ Run flags:
   --max-turns <n>     Turns per segment before an auto-continue checkpoint (1–1000, default 120)
   --no-auto-continue  Stop at the turn limit for a one-tap continue (default: auto-continue)
   --jsonl             Emit machine-readable JSONL events to stdout (for scripts/CI)
+
+Scripts and CI (ambient -p "<task>" [flags]):
+  -p, --print         Print only the answer; anything that would ask for approval is refused
+  --output-format <f> text | json | stream-json
+  --allowedTools "<rules>" / --disallowedTools "<rules>"   Allow or refuse calls for this run
+  --append-system-prompt "<text>"                          Extra instructions for this run
+  -c, --continue / -r, --resume <id>   Continue the latest conversation here / a session
+  --permission-mode <m> default | plan | acceptEdits | bypassPermissions
+  --mcp-config <file|json> [--strict-mcp-config]           MCP servers for this run
 
 Eval flags:
   --model <id>        Model to evaluate (default: auto)

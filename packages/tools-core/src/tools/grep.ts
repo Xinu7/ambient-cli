@@ -55,6 +55,7 @@ export const grepTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
       .join("/");
     for await (const rel of walkFiles(root, { start: rootPrefix, signal: ctx.signal })) {
       if (input.glob && !rel.endsWith(input.glob)) continue;
+      if (ctx.readDenied?.(join(root, rel))) continue;
       ctx.signal.throwIfAborted();
       let content: string;
       try {
