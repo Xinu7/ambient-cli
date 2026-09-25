@@ -4,6 +4,7 @@ import type { ToolContext, ToolDefinition } from "@amb/protocol";
 import { z } from "zod";
 import { unifiedDiff } from "../diff.js";
 import { sha256 } from "../hash.js";
+import { matchLineEndings } from "../patch.js";
 import { resolveInWorkspace } from "../paths.js";
 
 const Input = z.object({
@@ -45,16 +46,18 @@ export const writeTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Out
       prior = undefined;
     }
     if (prior !== undefined) ctx.checkpoint?.(prior); // save the pre-image for `amb rewind`
+    // Rewriting a CRLF file keeps it CRLF (the model writes `\n`) instead of flipping every line ending.
+    const content = prior !== undefined ? matchLineEndings(input.content, prior) : input.content;
     await mkdir(dirname(abs), { recursive: true });
-    await writeFile(abs, input.content, "utf8");
+    await writeFile(abs, content, "utf8");
     const operation = prior === undefined ? "create" : "modify";
     return {
       path: input.path,
       operation,
-      bytes: Buffer.byteLength(input.content, "utf8"),
+      bytes: Buffer.byteLength(content, "utf8"),
       preimageHash: prior === undefined ? undefined : sha256(prior),
-      postimageHash: sha256(input.content),
-      diff: unifiedDiff(prior ?? "", input.content, input.path),
+      postimageHash: sha256(content),
+      diff: unifiedDiff(prior ?? "", content, input.path),
     };
   },
 };

@@ -15,6 +15,17 @@ export function countOccurrences(haystack: string, needle: string): number {
   return n;
 }
 
+/** True when every line break in `text` is CRLF (a Windows-style file) — mixed files are left exact. */
+export function isCrlf(text: string): boolean {
+  const lf = (text.match(/\n/g) ?? []).length;
+  return lf > 0 && (text.match(/\r\n/g) ?? []).length === lf;
+}
+
+/** Give LF text the line endings of `like` (CRLF when `like` is a consistently-CRLF file). */
+export function matchLineEndings(text: string, like: string): string {
+  return isCrlf(like) ? text.replace(/\r?\n/g, "\r\n") : text;
+}
+
 export interface HunkResult {
   content: string;
   replacements: number;
@@ -31,6 +42,13 @@ export function applyHunk(
   replaceAll: boolean,
   label: string,
 ): HunkResult {
+  // A CRLF file (Windows checkout) is edited in LF — the model writes `\n` — and converted back, so a
+  // multi-line match works and inserted lines don't produce mixed line endings.
+  if (isCrlf(content)) {
+    const lf = (s: string) => s.replace(/\r\n/g, "\n");
+    const r = applyHunk(lf(content), lf(oldString), lf(newString), replaceAll, label);
+    return { content: r.content.replace(/\n/g, "\r\n"), replacements: r.replacements };
+  }
   if (oldString === newString) {
     throw new Error(`oldString and newString are identical (${label})`);
   }

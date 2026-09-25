@@ -251,3 +251,12 @@ describe("project memory (.ambient/MEMORY.md)", () => {
     }
   });
 });
+
+describe("CRLF SKILL.md", () => {
+  it("parses a Windows-style (CRLF) skill file like an LF one", async () => {
+    const { parseSkill } = await import("../src/skills.js");
+    const s = parseSkill("---\r\nname: fmt\r\ndescription: Format code\r\n---\r\nBody here\r\n");
+    expect(s?.meta.name).toBe("fmt");
+    expect(s?.meta.description).toBe("Format code");
+  });
+});

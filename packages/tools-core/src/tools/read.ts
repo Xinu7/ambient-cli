@@ -33,7 +33,7 @@ export const readTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
   async execute(input, ctx: ToolContext) {
     const abs = resolveInWorkspace(ctx.workspaceRoot, input.path);
     const raw = await readFile(abs, "utf8");
-    const all = raw.split("\n");
+    const all = raw.split(/\r?\n/); // CRLF files show the same clean lines as LF ones
     const start = input.offset ? input.offset - 1 : 0;
     const end = Math.min(all.length, start + (input.limit ?? MAX_LINES));
     const slice = all.slice(start, end);

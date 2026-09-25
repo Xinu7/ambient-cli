@@ -35,9 +35,8 @@ export interface SkillMeta {
  * lines (name/description only — parsed by hand to avoid a YAML dep, then validated with Zod). Returns null if
  * the frontmatter is missing or fails validation (an unparseable skill is skipped, never guessed).
  */
-export function parseSkill(
-  content: string,
-): { meta: Omit<SkillMeta, "path">; body: string } | null {
+export function parseSkill(raw: string): { meta: Omit<SkillMeta, "path">; body: string } | null {
+  const content = raw.replace(/\r\n?/g, "\n"); // a CRLF SKILL.md (Windows checkout) parses the same
   const m = /^---\s*\n([\s\S]*?)\n---\s*\n?/.exec(content);
   if (!m) return null;
   const block = m[1] ?? "";

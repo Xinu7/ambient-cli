@@ -1,4 +1,3 @@
-import { relative } from "node:path";
 import type { ToolContext, ToolDefinition } from "@amb/protocol";
 import { z } from "zod";
 import { resolveInWorkspace } from "../paths.js";
@@ -76,7 +75,10 @@ export const globTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
     const root = resolveInWorkspace(ctx.workspaceRoot, ".");
     // A leading "/" is NOT the filesystem root here — paths are workspace-relative; strip it so the pattern
     // (and its regex, which is anchored to no-leading-slash walk paths) can actually match.
-    const pattern = input.pattern.replace(/^\/+/, "");
+    // Windows users (and models) may write `src\**\*.ts`; walk paths always use `/`.
+    const pattern = (
+      process.platform === "win32" ? input.pattern.replace(/\\/g, "/") : input.pattern
+    ).replace(/^\/+/, "");
     const re = globToRegExp(pattern);
     const start = patternStart(pattern);
     const matches: string[] = [];
@@ -103,7 +105,7 @@ export const globTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
     matches.sort();
     return {
       pattern: input.pattern,
-      matches: matches.map((m) => relative(".", m)),
+      matches, // already workspace-relative with `/` separators on every OS
       truncated,
       timedOut,
     };

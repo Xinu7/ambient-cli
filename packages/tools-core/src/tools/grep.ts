@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import type { ToolContext, ToolDefinition } from "@amb/protocol";
 import { z } from "zod";
 import { resolveInWorkspace } from "../paths.js";
@@ -48,7 +48,11 @@ export const grepTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
     }
     const matches: z.infer<typeof Match>[] = [];
     let truncated = false;
-    const rootPrefix = base.slice(root.length + 1);
+    // walkFiles speaks `/`-separated workspace paths on every OS.
+    const rootPrefix = base
+      .slice(root.length + 1)
+      .split(sep)
+      .join("/");
     for await (const rel of walkFiles(root, { start: rootPrefix, signal: ctx.signal })) {
       if (input.glob && !rel.endsWith(input.glob)) continue;
       ctx.signal.throwIfAborted();
@@ -60,7 +64,7 @@ export const grepTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
       } catch {
         continue;
       }
-      const lines = content.split("\n");
+      const lines = content.split(/\r?\n/); // `$` anchors work on CRLF files too
       for (let i = 0; i < lines.length; i++) {
         const full = lines[i] ?? "";
         const text = full.length > MAX_LINE_CHARS ? full.slice(0, MAX_LINE_CHARS) : full;
