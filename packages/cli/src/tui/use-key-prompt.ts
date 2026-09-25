@@ -1,6 +1,7 @@
 import type { ImageAttachment } from "@amb/protocol";
 import type { Key } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { KeySource } from "../secrets.js";
 import {
   type KeyCheckResult,
   type KeyPromptReason,
@@ -9,6 +10,7 @@ import {
   keyPromptSettled,
   openKeyPrompt,
 } from "./key-flow.js";
+import type { StartupKeyResult } from "./startup-key.js";
 
 /** The account effects the App needs — implemented at the CLI edge (keychain/network), never in the App. */
 export interface AccountPort {
@@ -23,11 +25,12 @@ export interface AccountPort {
   openKeysPage(): boolean;
   /** Masked form of a key for confirmations (`…1234`). */
   mask(key: string): string;
-  /**
-   * The launch-time check of the saved key, resolved in the background. `note` is shown when the check had
-   * to switch keys (e.g. the CLI's own saved key was rejected but another saved Ambient key works).
-   */
-  startupCheck?: Promise<{ result: KeyCheckResult; note?: string }>;
+  /** The launch-time check of the key in use (resolved in the background; it reports, never switches). */
+  startupCheck?: Promise<StartupKeyResult>;
+  /** Switch the live session to a key already stored on this machine (no save). */
+  useKey(key: string): void;
+  /** Human wording for where a key came from. */
+  sourceLabel(source: KeySource): string;
   /** AMBIENT_API_KEY is set: it takes priority over any saved key on the next launch. */
   envKeyOverrides?: boolean;
 }
@@ -50,8 +53,11 @@ export function useKeyPrompt(
   // Bumped whenever the panel opens or closes: a key check that finishes after the user moved on (Esc, or a
   // new /login) is stale and must not save anything or reopen anything.
   const generation = useRef(0);
-  // Set once a key is saved this session: a slow launch check of the OLD key must not then complain.
+  // Set once a key is saved this session: a slow launch check of the OLD key must never override or complain.
   const savedThisSession = useRef(false);
+  // Set when the launch check switched to another working key: a run that was already in flight on the old key
+  // and fails with "rejected" is then simply retried instead of asking the user for a key.
+  const switchedKey = useRef(false);
   const setState = useCallback((s: KeyPromptState | null, bump = false) => {
     if (bump) generation.current += 1;
     ref.current = s;
@@ -61,17 +67,39 @@ export function useKeyPrompt(
   const open = useCallback(
     (reason: KeyPromptReason, retry?: { text: string; attachments: ImageAttachment[] }) => {
       if (!account) return;
+      if (reason === "rejected" && switchedKey.current && retry) {
+        switchedKey.current = false;
+        notice("info", "Retrying with the working key…");
+        rerun(retry.text, retry.attachments);
+        return;
+      }
       setState(openKeyPrompt(reason, retry), true);
     },
-    [account, setState],
+    [account, notice, rerun, setState],
   );
 
   // A saved key that no longer works is caught at launch, before the user types anything.
   useEffect(() => {
     let live = true;
-    void account?.startupCheck?.then(({ result, note }) => {
-      if (!live || savedThisSession.current) return;
-      if (note) notice("info", note);
+    void account?.startupCheck?.then(({ result, alternative, rejected }) => {
+      // A key the user saved meanwhile always wins over what the launch check found.
+      if (!live || savedThisSession.current || !account) return;
+      if (alternative) {
+        account.useKey(alternative.key);
+        switchedKey.current = true;
+        notice(
+          "info",
+          `The key from ${account.sourceLabel(rejected ?? "keychain")} was rejected, so ambient is using ${account.mask(alternative.key)} from ${account.sourceLabel(alternative.source)}. Type /login to set a different one.`,
+        );
+        // A key panel opened by a run that already failed on the old key → retry it with the working one.
+        const openPanel = ref.current;
+        if (openPanel && openPanel.reason !== "change") {
+          setState(null, true);
+          switchedKey.current = false;
+          if (openPanel.retry) rerun(openPanel.retry.text, openPanel.retry.attachments);
+        }
+        return;
+      }
       // A run in flight will surface a rejected key itself (and retry after it's fixed) — never pop the panel
       // over it or over another open panel.
       if (result === "invalid" && !ref.current && !isBusy()) {
@@ -81,7 +109,7 @@ export function useKeyPrompt(
     return () => {
       live = false;
     };
-  }, [account, isBusy, notice, setState]);
+  }, [account, isBusy, notice, rerun, setState]);
 
   const submit = useCallback(async () => {
     const s = ref.current;

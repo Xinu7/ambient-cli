@@ -264,6 +264,9 @@ export function App(deps: AppDeps): ReactNode {
   const authRejectedRef = useRef(false);
   // Whether the current run executed any tool — decides how a run that died on a rejected key is retried.
   const toolsRanRef = useRef(false);
+  // Set when a session's FIRST run died on a rejected key before doing anything: its only logged turn is that
+  // failed attempt, so the retry must not rebuild context from the log (it would carry the task twice).
+  const skipLogReplayRef = useRef(false);
   // Discover the user's existing Claude/Codex slash commands ONCE — their names join the palette, their
   // bodies (with $ARGUMENTS/$1 expansion) run as a task on dispatch.
   const customCommands = useMemo(() => {
@@ -562,7 +565,10 @@ export function App(deps: AppDeps): ReactNode {
       // process that resumed an on-disk session with no live Msg[]) falls back to the lossy text
       // reconstruction, which the runtime budgets/trims to the served window.
       const carryForward = conversationRef.current.length > 0;
-      const priorContext = carryForward ? "" : reconstructTranscript(readSession(sessionId).events);
+      const priorContext =
+        carryForward || skipLogReplayRef.current
+          ? ""
+          : reconstructTranscript(readSession(sessionId).events);
       const controller = new AbortController();
       controllerRef.current = controller;
       // Snapshot the axes for THIS run (a mid-run Tab/Shift+Tab must not change what's already flying).
@@ -696,6 +702,7 @@ export function App(deps: AppDeps): ReactNode {
         // own compaction instead of a lossy per-message reconstruction.
         if (result.messages && result.messages.length > 1) {
           conversationRef.current = result.messages.slice(1);
+          skipLogReplayRef.current = false;
         }
         dispatch({ t: "stop", stopReason: result.stopReason });
       } catch (err) {
@@ -757,6 +764,7 @@ export function App(deps: AppDeps): ReactNode {
             keyFlowRef.current.open("rejected", { text: CONTINUE_AFTER_KEY, attachments: [] });
           } else {
             conversationRef.current = conversationBefore;
+            if (conversationBefore.length === 0) skipLogReplayRef.current = true;
             keyFlowRef.current.open("rejected", { text: task, attachments: attach });
           }
         } else if (leftoverSteer.length > 0) {
@@ -1057,6 +1065,7 @@ export function App(deps: AppDeps): ReactNode {
           // Nothing from the cleared conversation carries into the next one: not its plan, not its effort.
           planRef.current = [];
           lastEffortRef.current = undefined;
+          skipLogReplayRef.current = false;
         }
         // The kept plan is now from a cleared session — retire the review prompt/gesture so an empty Enter can't
         // silently execute a stale plan in the fresh session.

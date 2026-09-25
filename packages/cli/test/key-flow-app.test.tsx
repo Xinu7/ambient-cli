@@ -4,6 +4,7 @@ import type { SessionWriter } from "@amb/sessions";
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
 import { App } from "../src/tui/App.js";
+import type { StartupKeyResult } from "../src/tui/startup-key.js";
 import type { AccountPort } from "../src/tui/use-key-prompt.js";
 
 const model: CatalogModel = {
@@ -44,6 +45,7 @@ function harness(opts: {
     },
   } as unknown as ChatClient;
   const saved: string[] = [];
+  const used: string[] = [];
   const account: AccountPort = {
     keysUrl: "https://app.ambient.xyz/keys",
     verify: opts.verify,
@@ -51,6 +53,8 @@ function harness(opts: {
     remove: () => "Signed out on this machine.",
     openKeysPage: () => true,
     mask: (k) => `…${k.slice(-4)}`,
+    useKey: (k) => used.push(k),
+    sourceLabel: (src) => src,
     ...(opts.startupCheck ? { startupCheck: opts.startupCheck } : {}),
   };
   const ui = render(
@@ -67,7 +71,7 @@ function harness(opts: {
       account={account}
     />,
   );
-  return { ui, saved, prompts, requests };
+  return { ui, saved, prompts, requests, used };
 }
 
 describe("a key rejected mid-session", () => {
@@ -149,6 +153,8 @@ describe("a key rejected mid-session", () => {
           remove: () => "",
           openKeysPage: () => true,
           mask: (k) => k,
+          useKey: () => {},
+          sourceLabel: (src) => src,
           startupCheck: Promise.resolve({ result: "invalid" as const }),
         }}
       />,
@@ -187,18 +193,119 @@ describe("key panel races", () => {
     ui.unmount();
   });
 
-  it("a launch check that switched to another working key says so", async () => {
-    const { ui } = harness({
+  it("a launch check that found another working key switches to it and says so", async () => {
+    const { ui, used } = harness({
       keyWorks: () => true,
       verify: async () => "valid",
       startupCheck: Promise.resolve({
-        result: "valid" as const,
-        note: "Your saved key was rejected, so ambient is using …2222",
+        result: "invalid" as const,
+        alternative: { key: "sk-shared-key-2222", source: "keychain-shared" as const },
+        rejected: "keychain" as const,
       }),
     });
     await settle(80);
+    expect(used).toEqual(["sk-shared-key-2222"]);
     expect(ui.lastFrame()).toContain("using …2222");
-    expect(ui.lastFrame()).not.toContain("Change your Ambient API key");
+    expect(ui.lastFrame()).not.toContain("Your saved Ambient key doesn't work");
     ui.unmount();
+  });
+
+  it("a key saved with /login wins over a slower launch check's alternative", async () => {
+    let resolveCheck: (r: StartupKeyResult) => void = () => {};
+    const { ui, used, saved } = harness({
+      keyWorks: () => true,
+      verify: async () => "valid",
+      startupCheck: new Promise<StartupKeyResult>((r) => {
+        resolveCheck = r;
+      }),
+    });
+    await settle(30);
+    for (const ch of "/login") ui.stdin.write(ch);
+    await settle(30);
+    ui.stdin.write("\r");
+    await settle(40);
+    ui.stdin.write("sk-user-chosen-3333");
+    ui.stdin.write("\r");
+    await settle(80);
+    expect(saved).toEqual(["sk-user-chosen-3333"]);
+    resolveCheck({
+      result: "invalid",
+      alternative: { key: "sk-shared-key-2222", source: "keychain-shared" },
+      rejected: "keychain",
+    });
+    await settle(60);
+    expect(used).toEqual([]); // the late check did not override the user's choice
+    ui.unmount();
+  });
+});
+
+describe("retry on a session's FIRST message with a real session log", () => {
+  it("sends the task exactly once — not again via the log replay", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { SessionWriter } = await import("@amb/sessions");
+    const home = mkdtempSync(join(tmpdir(), "amb-keyflow-"));
+    const prevHome = process.env.AMB_HOME;
+    process.env.AMB_HOME = home;
+    try {
+      let good = false;
+      const requests: ChatParams[] = [];
+      const client = {
+        fetchCatalog: async () => [model],
+        chat: async (p: ChatParams) => {
+          requests.push({ ...p, messages: [...p.messages] });
+          if (!good)
+            throw new AmbError({
+              kind: "auth",
+              message: "Ambient authentication failed",
+              retryable: false,
+            });
+          return { content: "ok", toolCalls: [] };
+        },
+      } as unknown as ChatClient;
+      const ui = render(
+        <App
+          client={client}
+          makeWriter={(id: string) => new SessionWriter(id, () => new Date().toISOString())}
+          agentMode="build"
+          permission="bypass"
+          effort="auto"
+          requestedModel="vendor/m"
+          maxTurns={4}
+          cwd={home}
+          workspaceRoot={home}
+          account={{
+            keysUrl: "u",
+            verify: async () => "valid",
+            save: () => {
+              good = true;
+            },
+            remove: () => "",
+            openKeysPage: () => true,
+            mask: (k) => k,
+            useKey: () => {},
+            sourceLabel: (s) => s,
+          }}
+        />,
+      );
+      await settle(30);
+      for (const ch of "UNIQUE-TASK-TEXT") ui.stdin.write(ch);
+      ui.stdin.write("\r");
+      await settle(250);
+      ui.stdin.write("sk-good-key-4444");
+      ui.stdin.write("\r");
+      await settle(300);
+      const last = requests.at(-1)?.messages ?? [];
+      const mentions = last.filter(
+        (m) => typeof m.content === "string" && m.content.includes("UNIQUE-TASK-TEXT"),
+      );
+      expect(mentions).toHaveLength(1); // not also in a "prior session" block of the system prompt
+      ui.unmount();
+    } finally {
+      if (prevHome === undefined) Reflect.deleteProperty(process.env, "AMB_HOME");
+      else process.env.AMB_HOME = prevHome;
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

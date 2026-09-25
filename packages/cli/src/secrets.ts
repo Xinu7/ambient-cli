@@ -117,8 +117,13 @@ export function saveApiKey(key: string, e: SecretEnv = {}): void {
     // Write a fresh private temp file (exclusive create, 0600) and rename it over the target, so the key is
     // never readable through looser permissions an existing file might have.
     const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify({ apiKey: clean })}\n`, { mode: 0o600, flag: "wx" });
-    renameSync(tmp, p);
+    try {
+      writeFileSync(tmp, `${JSON.stringify({ apiKey: clean })}\n`, { mode: 0o600, flag: "wx" });
+      renameSync(tmp, p);
+    } catch (err) {
+      rmSync(tmp, { force: true }); // never leave a stray copy of the key behind
+      throw err;
+    }
   } catch {
     throw new Error(`could not write ${p}`);
   }
@@ -137,32 +142,49 @@ export function deleteApiKey(e: SecretEnv = {}): void {
   rmSync(credentialsPath(configDir), { force: true });
 }
 
+/** The keychain account other Ambient apps save their key under (same service). */
+export const SHARED_KEYCHAIN_ACCOUNT = "api-key";
+
 /**
- * Every key available on this machine, in priority order: env AMBIENT_API_KEY, this CLI's own keychain item
- * (account `amb`), an ambient.xyz keychain item saved by another Ambient app, then the credentials file.
- * Reading the CLI's OWN item first matters: save/delete target it, so reading "whatever comes first" could
- * silently use a different app's key.
+ * Every key available on this machine, lazily and in priority order: env AMBIENT_API_KEY, this CLI's own
+ * keychain item (account `amb`), the key another Ambient app saved (account `api-key`), then the credentials
+ * file. Reading the CLI's OWN item first matters — save/delete target it — and the lazy order means another
+ * app's item is only read when nothing earlier is available.
  */
-export function apiKeyCandidates(
+export function* apiKeyCandidates(
   env: Record<string, string | undefined> = process.env,
   e: SecretEnv = {},
-): KeyCandidate[] {
-  const out: KeyCandidate[] = [];
-  const fromEnv = env.AMBIENT_API_KEY?.trim();
-  if (fromEnv) out.push({ key: fromEnv, source: "env" });
+): Generator<KeyCandidate> {
+  const seen = new Set<string>();
+  const emit = (key: string | undefined, source: KeySource): KeyCandidate | undefined => {
+    if (!key || seen.has(key)) return undefined;
+    seen.add(key);
+    return { key, source };
+  };
+  const fromEnv = emit(env.AMBIENT_API_KEY?.trim(), "env");
+  if (fromEnv) yield fromEnv;
   const { platform, run, configDir } = resolveEnv(e);
   if (platform === "darwin") {
-    const read = (args: string[]): string | undefined => {
+    const read = (account: string): string | undefined => {
       try {
-        return run("security", ["find-generic-password", ...args, "-w"]).trim() || undefined;
+        return (
+          run("security", [
+            "find-generic-password",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            account,
+            "-w",
+          ]).trim() || undefined
+        );
       } catch {
         return undefined;
       }
     };
-    const own = read(["-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT]);
-    if (own) out.push({ key: own, source: "keychain" });
-    const any = read(["-s", KEYCHAIN_SERVICE]);
-    if (any && any !== own) out.push({ key: any, source: "keychain-shared" });
+    const own = emit(read(KEYCHAIN_ACCOUNT), "keychain");
+    if (own) yield own;
+    const shared = emit(read(SHARED_KEYCHAIN_ACCOUNT), "keychain-shared");
+    if (shared) yield shared;
   }
   const p = credentialsPath(configDir);
   if (existsSync(p)) {
@@ -170,12 +192,12 @@ export function apiKeyCandidates(
       const key = String(
         (JSON.parse(readFileSync(p, "utf8")) as { apiKey?: unknown }).apiKey ?? "",
       ).trim();
-      if (key) out.push({ key, source: "file" });
+      const file = emit(key, "file");
+      if (file) yield file;
     } catch {
       // unreadable/corrupt — ignore
     }
   }
-  return out;
 }
 
 /** The key to use and where it came from (the first candidate), or undefined when signed out. */
@@ -183,7 +205,8 @@ export function resolveApiKeyWithSource(
   env: Record<string, string | undefined> = process.env,
   e: SecretEnv = {},
 ): KeyCandidate | undefined {
-  return apiKeyCandidates(env, e)[0];
+  for (const c of apiKeyCandidates(env, e)) return c;
+  return undefined;
 }
 
 /** Resolve the Ambient API key (env, keychain, credentials file). Never logs the value. */

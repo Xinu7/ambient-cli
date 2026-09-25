@@ -19,8 +19,7 @@ Requires **Node ≥ 20.18**. No compiler needed — the CLI ships as a single pr
 
 ```bash
 brew install xinu7/ambient/ambient-code
-ambient login          # paste your key from https://app.ambient.xyz/keys
-ambient                # launch the TUI
+ambient                # first launch walks you through connecting your Ambient key
 ```
 
 **From source**:
@@ -30,9 +29,20 @@ git clone https://github.com/xinu7/ambient-cli && cd ambient-cli
 ./scripts/install.sh   # builds + puts `ambient` on your PATH (~/.local/bin)
 ```
 
-Get a key at [app.ambient.xyz/keys](https://app.ambient.xyz/keys). `ambient login` stores it in your OS
-keychain; or set `AMBIENT_API_KEY` in your environment. Browsing the fleet (`ambient models`) and
-`ambient doctor` need no key. `ambient` is the primary command; `amb` is a shorter alias.
+### Your API key
+
+The first time you run `ambient`, it opens [app.ambient.xyz/keys](https://app.ambient.xyz/keys), asks you
+to paste a key (hidden), checks it with Ambient (free — no model runs), and saves it: in the macOS keychain,
+or a credentials file only you can read on Linux/Windows. `AMBIENT_API_KEY` in your environment also works
+and takes priority.
+
+- If a key stops working (revoked or mistyped), ambient tells you and asks for a new one right in the TUI,
+  then re-runs what you asked for.
+- Switch keys any time with `/login` inside ambient (or `ambient login`); `/logout` / `ambient logout`
+  removes the saved key. `ambient doctor` shows which key is in use (masked) and where it came from.
+
+Browsing the fleet (`ambient models`) and `ambient doctor` need no key. `ambient` is the primary command;
+`amb` is a shorter alias.
 
 ### Update
 
@@ -62,6 +72,9 @@ rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
   budgeted per model; failover is bounded and visible; the transcript is crash-safe and resumable.
 - **You hold the dial.** A two-axis control — **Plan ⇄ Build** (Tab) × **ask / accept-edits / bypass**
   (Shift+Tab) — with a diff-first approval prompt and a local risk classifier.
+- **Honest reasoning effort.** `auto` (default) picks per turn — none for chat, high for work, max for
+  planning, hard bugs, or after a failed check; `/effort` or `--effort off|high|max` pins it. These are the
+  levels Ambient models actually serve.
 - **A north-star you set.** `/goal` pins a session objective the agent keeps in view every turn (it survives
   compaction); the agent can propose a revision, but only you commit it.
 - **Brings your setup.** Reads your existing `.claude/agents`, skills, slash commands, `AGENTS.md`, and MCP
@@ -84,7 +97,7 @@ ambient rewind [<id|latest>] [N]    Revert the workspace to before the last N fi
 ambient config [show|path]          Show your ~/.config/amb defaults
 ambient github [status|login]       Show GitHub sign-in (or run `gh auth login`)
 ambient doctor                      Check your setup + network
-ambient login | help
+ambient login | logout | help
 ```
 
 Anything can be piped in as context: `cat error.log | ambient "explain this failure"`.

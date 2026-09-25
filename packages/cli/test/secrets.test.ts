@@ -76,11 +76,11 @@ describe("keychain read matches the write", () => {
   it("reads THIS CLI's own item (service + account) first, then another Ambient app's key", async () => {
     const { apiKeyCandidates } = await import("../src/secrets.js");
     const run: SecretRunner = (_cmd, args) => {
-      if (args.includes("-a") && args.includes("amb")) return "sk-own-cli-key-1111\n";
-      if (args.includes("find-generic-password")) return "sk-other-app-key-2222\n";
-      return "";
+      if (args.includes("amb")) return "sk-own-cli-key-1111\n";
+      if (args.includes("api-key")) return "sk-other-app-key-2222\n";
+      throw new Error("not found");
     };
-    const c = apiKeyCandidates({}, { platform: "darwin", run, configDir: dir });
+    const c = [...apiKeyCandidates({}, { platform: "darwin", run, configDir: dir })];
     expect(c).toEqual([
       { key: "sk-own-cli-key-1111", source: "keychain" },
       { key: "sk-other-app-key-2222", source: "keychain-shared" },
@@ -120,5 +120,20 @@ describe("credentials file hardening", () => {
     chmodSync(p, 0o644);
     saveApiKey("sk-REPLACED-1234", { platform: "linux", run: () => "", configDir: dir });
     expect(statSync(p).mode & 0o077).toBe(0);
+  });
+});
+
+describe("lazy key lookup", () => {
+  it("never reads another app's keychain item when this CLI's own key exists", async () => {
+    const reads: string[] = [];
+    const run: SecretRunner = (_cmd, args) => {
+      reads.push(args.join(" "));
+      if (args.includes("amb")) return "sk-own-cli-key-1111\n";
+      return "sk-other-app-key-2222\n";
+    };
+    expect(resolveApiKeyWithSource({}, { platform: "darwin", run, configDir: dir })?.source).toBe(
+      "keychain",
+    );
+    expect(reads.some((r) => r.includes("api-key"))).toBe(false);
   });
 });

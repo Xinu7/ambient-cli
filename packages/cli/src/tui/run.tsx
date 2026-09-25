@@ -28,7 +28,7 @@ import {
 import { checkForUpdate, updateCommand } from "../update-check.js";
 import { CURRENT_VERSION } from "../version.js";
 import { App } from "./App.js";
-import type { KeyCheckResult } from "./key-flow.js";
+import { checkStartupKey } from "./startup-key.js";
 import type { AgentMode, Effort, Permission } from "./state.js";
 import type { AccountPort } from "./use-key-prompt.js";
 
@@ -120,7 +120,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     openKeysPage: () => openBrowser(KEYS_URL),
     mask: maskKey,
     envKeyOverrides: Boolean(process.env.AMBIENT_API_KEY?.trim()),
-    startupCheck: startupKeyCheck(config.baseUrl, apiKey, client),
+    useKey: (key) => client.setApiKey(key),
+    sourceLabel: (source) => KEY_SOURCE_LABEL[source],
+    startupCheck: checkStartupKey(
+      resolveApiKeyWithSource() ?? { key: apiKey, source: "env" },
+      apiKeyCandidates(),
+      (key) => verifyApiKey({ baseUrl: config.baseUrl, apiKey: key }),
+    ),
   };
   const cwd = process.cwd();
   // Fetch the fleet and the update check together so neither adds latency to the splash. The update check is
@@ -240,28 +246,4 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     mcpConn.current?.close();
     restore();
   }
-}
-
-/**
- * Check the saved key at launch (free — no model runs). If it's rejected but another key on this machine works
- * (e.g. one saved by another Ambient app), switch the live client to it and say so, instead of blocking.
- */
-async function startupKeyCheck(
-  baseUrl: string,
-  current: string,
-  client: AmbientChatClient,
-): Promise<{ result: KeyCheckResult; note?: string }> {
-  const first = await verifyApiKey({ baseUrl, apiKey: current });
-  if (first !== "invalid") return { result: first };
-  for (const c of apiKeyCandidates()) {
-    if (c.key === current) continue;
-    if ((await verifyApiKey({ baseUrl, apiKey: c.key })) === "valid") {
-      client.setApiKey(c.key);
-      return {
-        result: "valid",
-        note: `Your saved key was rejected, so ambient is using ${maskKey(c.key)} from ${KEY_SOURCE_LABEL[c.source]}. Type /login to set a different one.`,
-      };
-    }
-  }
-  return { result: "invalid" };
 }
