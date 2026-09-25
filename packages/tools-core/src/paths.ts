@@ -42,7 +42,9 @@ export function fromGitBashPath(p: string): string | undefined {
 export function isReservedWindowsSegment(segment: string): boolean {
   if (segment.includes(":")) return true;
   const stem = (segment.split(".")[0] ?? "").toUpperCase();
-  return /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(stem);
+  return /^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9\u00B9\u00B2\u00B3]|LPT[1-9\u00B9\u00B2\u00B3])$/.test(
+    stem,
+  );
 }
 
 /**

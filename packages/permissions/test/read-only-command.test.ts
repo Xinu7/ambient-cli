@@ -100,3 +100,25 @@ describe("refineBashEffects", () => {
     expect(refineBashEffects("bash", null, ["process"])).toEqual(["process"]);
   });
 });
+
+describe("isReadOnlyCommand — options that run programs or write files", () => {
+  it.each([
+    "rg --pre=sh x .",
+    "rg --pre sh x .",
+    "git grep -Osh -e x",
+    "git grep --open-files-in-pager=vim x",
+    "tree -o out.txt",
+    "tree -ao out.txt",
+    "file -C -m magic",
+    "date -s 2020-01-01",
+    "hostname evil",
+  ])("%s still needs approval", (cmd) => {
+    expect(isReadOnlyCommand(cmd)).toBe(false);
+  });
+  it.each(["rg -n foo src", "git grep -n foo", "tree -L 2", "file README.md", "date", "hostname"])(
+    "%s stays read-only",
+    (cmd) => {
+      expect(isReadOnlyCommand(cmd)).toBe(true);
+    },
+  );
+});

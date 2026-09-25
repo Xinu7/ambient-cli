@@ -1,8 +1,15 @@
 import { spawn } from "node:child_process";
-import { constants, accessSync, existsSync } from "node:fs";
+import { constants, accessSync, closeSync, existsSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import type { VerifyOutcome, VerifyPort } from "@amb/runtime";
-import { type ShellInfo, killProcessTree, machineShell } from "@amb/tools-core";
+import {
+  type ShellInfo,
+  killProcessTree,
+  machineShell,
+  shellEnv,
+  windowsPowerShellExe,
+  windowsSystemExe,
+} from "@amb/tools-core";
 
 /**
  * The project's verification is an OPT-IN executable at `.ambient/verify` (a script the user provides — e.g.
@@ -17,12 +24,18 @@ const TIMEOUT_MS = 180_000;
 export interface VerifyRunner {
   command: string;
   args: string[];
+  /** Environment for the run, when it differs from ours (Git Bash needs its tool folders on PATH). */
+  env?: Record<string, string | undefined>;
 }
+
+/** Characters cmd.exe interprets even inside the quoted script path — such a path is not run through cmd. */
+const CMD_META = /[&|<>^%!()"]/;
 
 /**
  * How to run the project's verify script on this machine, or undefined when there is none we can run
  * (verification is then simply off — never a fake failure):
- *  - POSIX: `.ambient/verify`, executed directly when executable (its shebang is honored), else via /bin/sh.
+ *  - POSIX: `.ambient/verify`, executed directly when it's executable AND starts with `#!` (its interpreter is
+ *    honored), else via /bin/sh — the kernel refuses to exec a script without a `#!` line.
  *  - Windows: `.ambient/verify.ps1` (PowerShell), `.ambient/verify.cmd`/`.bat`, or a plain `.ambient/verify`
  *    through Git Bash when it's installed.
  */
@@ -32,28 +45,50 @@ export function verifyRunner(
   exists: (p: string) => boolean = existsSync,
   isExecutable: (p: string) => boolean = executable,
   shell: () => ShellInfo = machineShell,
+  hasShebang: (p: string) => boolean = startsWithShebang,
 ): VerifyRunner | undefined {
   const base = join(workspaceRoot, VERIFY_SCRIPT);
   if (platform === "win32") {
     if (exists(`${base}.ps1`)) {
       const ps = shell();
-      const exe = ps.kind === "pwsh" || ps.kind === "powershell" ? ps.path : "powershell.exe";
+      const exe = ps.kind === "pwsh" || ps.kind === "powershell" ? ps.path : windowsPowerShellExe();
       return {
         command: exe,
         args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", `${base}.ps1`],
       };
     }
     for (const ext of [".cmd", ".bat"]) {
-      if (exists(`${base}${ext}`)) {
-        return { command: process.env.ComSpec ?? "cmd.exe", args: ["/d", "/c", `${base}${ext}`] };
+      if (exists(`${base}${ext}`) && !CMD_META.test(`${base}${ext}`)) {
+        return {
+          command: process.env.ComSpec ?? windowsSystemExe("cmd.exe"),
+          args: ["/d", "/c", `${base}${ext}`],
+        };
       }
     }
     const sh = shell();
-    if (exists(base) && sh.kind === "bash") return { command: sh.path, args: [base] };
+    if (exists(base) && sh.kind === "bash") {
+      return { command: sh.path, args: [base], env: shellEnv(sh) };
+    }
     return undefined;
   }
   if (!exists(base)) return undefined;
-  return isExecutable(base) ? { command: base, args: [] } : { command: "/bin/sh", args: [base] };
+  return isExecutable(base) && hasShebang(base)
+    ? { command: base, args: [] }
+    : { command: "/bin/sh", args: [base] };
+}
+
+function startsWithShebang(p: string): boolean {
+  try {
+    const fd = openSync(p, "r");
+    try {
+      const head = Buffer.alloc(2);
+      return readSync(fd, head, 0, 2, 0) === 2 && head.toString("latin1") === "#!";
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
 }
 
 function executable(p: string): boolean {
@@ -88,6 +123,7 @@ function runVerifyScript(
     // Windows kills the tree with taskkill instead (detached there would open a console window).
     const child = spawn(runner.command, runner.args, {
       cwd,
+      ...(runner.env ? { env: runner.env } : {}),
       stdio: ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32",
       windowsHide: true,

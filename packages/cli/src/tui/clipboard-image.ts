@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { windowsPowerShellExe } from "@amb/tools-core";
 
 /**
  * Clipboard images and image resizing on Windows and Linux (macOS uses osascript/sips in capture.ts). Every
@@ -10,13 +11,15 @@ const TIMEOUT_MS = 8_000;
 
 /** Quote a value as a PowerShell single-quoted string literal. */
 export function psQuote(s: string): string {
-  return `'${s.replace(/'/g, "''")}'`;
+  // PowerShell treats the typographic single quotes as quote characters too.
+  return `'${s.replace(/['\u2018\u2019\u201A\u201B]/g, (q) => q + q)}'`;
 }
 
 /** The PowerShell program that saves the clipboard image to `out` as PNG, or prints a copied file's path. */
 export function windowsClipboardScript(out: string): string {
   return [
     "Add-Type -AssemblyName System.Windows.Forms, System.Drawing",
+    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
     "$img = [System.Windows.Forms.Clipboard]::GetImage()",
     `if ($img -ne $null) { $img.Save(${psQuote(out)}, [System.Drawing.Imaging.ImageFormat]::Png); 'ok'; exit }`,
     "$files = [System.Windows.Forms.Clipboard]::GetFileDropList()",
@@ -32,7 +35,7 @@ export function windowsClipboardScript(out: string): string {
 export async function windowsClipboardImage(out: string): Promise<string | undefined> {
   try {
     const { stdout } = await run(
-      "powershell.exe",
+      windowsPowerShellExe(),
       ["-NoProfile", "-NonInteractive", "-STA", "-Command", windowsClipboardScript(out)],
       { timeout: TIMEOUT_MS, windowsHide: true },
     );
@@ -87,7 +90,7 @@ export async function resizeImage(
         `$dst.Save(${psQuote(outPath)}, [System.Drawing.Imaging.ImageFormat]::Png)`,
         "$g.Dispose(); $dst.Dispose(); $src.Dispose()",
       ].join("; ");
-      await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+      await run(windowsPowerShellExe(), ["-NoProfile", "-NonInteractive", "-Command", script], {
         timeout: TIMEOUT_MS,
         windowsHide: true,
       });

@@ -61,6 +61,6 @@ export function applyHunk(
   }
   const next = replaceAll
     ? content.split(oldString).join(newString)
-    : content.replace(oldString, newString);
+    : content.replace(oldString, () => newString); // a function, so `$&`/`$$` in the new text stay literal
   return { content: next, replacements: replaceAll ? count : 1 };
 }

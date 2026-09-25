@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import type { ToolContext, ToolDefinition } from "@amb/protocol";
 import { z } from "zod";
 import { BoundedCapture } from "../capture.js";
-import { killProcessTree, machineShell, shellInvocation } from "../shell.js";
+import { killProcessTree, machineShell, shellEnv, shellInvocation } from "../shell.js";
 
 const SHELL = machineShell();
 
@@ -21,6 +21,10 @@ const Output = z.object({
 });
 
 const MAX_OUTPUT = 100_000; // chars per stream before truncation
+/** After the shell exits, how long to wait for its output pipes to close before returning anyway. */
+const DRAIN_AFTER_EXIT_MS = 2_000;
+/** After a kill, how long to wait for output before returning. */
+const DRAIN_AFTER_KILL_MS = 750;
 
 export const bashTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Output>> = {
   manifest: {
@@ -49,7 +53,7 @@ export const bashTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
       // tool). On Windows `detached` would open a console window; the tree is killed with `taskkill /T`.
       const child = spawn(SHELL.path, shellInvocation(SHELL, input.command), {
         cwd: ctx.cwd,
-        env: process.env,
+        env: shellEnv(SHELL),
         detached: process.platform !== "win32",
         windowsHide: true,
       });
@@ -59,10 +63,18 @@ export const bashTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
 
       let killed = false;
       let settled = false;
+      const exited = () => child.exitCode !== null || child.signalCode !== null;
       const killTree = () => {
         killed = true;
-        if (typeof child.pid === "number") killProcessTree(child.pid);
-        else child.kill("SIGKILL");
+        // On Windows a pid is free for reuse once its process has exited, so an exited shell is never
+        // targeted (that could kill an unrelated program). On POSIX the process group outlives its leader.
+        if (typeof child.pid === "number" && !(process.platform === "win32" && exited())) {
+          killProcessTree(child.pid);
+        } else if (!exited()) {
+          child.kill("SIGKILL");
+        }
+        // Don't wait on the pipes forever: something that escaped the kill may still hold them open.
+        setTimeout(() => finish(child.exitCode), DRAIN_AFTER_KILL_MS);
       };
       const finish = (code: number | null) => {
         if (settled) return;
@@ -80,10 +92,10 @@ export const bashTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
           timedOut,
         });
       };
-      // After a kill, don't wait forever for the output pipes: a stray process that escaped the kill could
-      // hold them open. Once the shell itself has exited, give output a moment to drain, then return.
+      // A background job (`npm run dev &`) keeps the output pipes open after the shell exits, so `close` may
+      // never come. Once the shell has exited, give output a moment to drain, then return what we have.
       child.on("exit", (code) => {
-        if (killed) setTimeout(() => finish(code), 750);
+        setTimeout(() => finish(code), killed ? DRAIN_AFTER_KILL_MS : DRAIN_AFTER_EXIT_MS);
       });
 
       const timer = setTimeout(() => {

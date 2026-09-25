@@ -203,9 +203,10 @@ function classifyBash(command: string): RiskAssessment {
   return { level: risk.level, reasons: [...new Set(risk.reasons)] };
 }
 
-/** Sensitive file targets for write/edit/apply_patch — writing here can grant access or hijack execution. */
+/** Sensitive file targets for write/edit/apply_patch — writing here can grant access or hijack execution
+ *  (`.ambient/verify*` runs automatically after the model edits files). */
 const SENSITIVE_PATH =
-  /(?:^|\/)(?:\.ssh\/|\.aws\/|\.gnupg\/|authorized_keys|id_[rd]sa|\.env(?:$|\.)|\.git\/(?:hooks|config)|\.github\/workflows\/|\.bashrc|\.zshrc|\.profile|\.npmrc|\.pypirc|\.netrc|sudoers|\/etc\/)/;
+  /(?:^|\/)(?:\.ssh\/|\.aws\/|\.gnupg\/|authorized_keys|id_[rd]sa|\.env(?:$|\.)|\.git\/(?:hooks|config)|\.ambient\/verify|\.github\/workflows\/|\.bashrc|\.zshrc|\.profile|\.npmrc|\.pypirc|\.netrc|sudoers|\/etc\/)/;
 
 function pathsOf(args: Record<string, unknown>): string[] {
   const out: string[] = [];

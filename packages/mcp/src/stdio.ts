@@ -76,8 +76,13 @@ export function spawnStdioTransport(cfg: StdioServerConfig): {
       // our ends of the pipes so no stream ref keeps the event loop alive. Runs even if `exit` already fired,
       // to reap any group member that outlived the leader. Best-effort: ESRCH (already gone) is fine.
       // The whole tree (Windows: including Git Bash background jobs), so no orphan keeps our pipes open.
-      if (typeof child.pid === "number") killProcessTree(child.pid);
-      else child.kill("SIGKILL");
+      const exited = child.exitCode !== null || child.signalCode !== null;
+      // On Windows an exited process's pid can already belong to an unrelated program — never target it.
+      if (typeof child.pid === "number" && !(process.platform === "win32" && exited)) {
+        killProcessTree(child.pid);
+      } else if (!exited) {
+        child.kill("SIGKILL");
+      }
       child.stdout?.destroy();
       child.stderr?.destroy();
       child.stdin?.destroy();

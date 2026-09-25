@@ -28,3 +28,10 @@ describe("line-ending helpers", () => {
     expect(matchLineEndings("a\nb\n", "x\ny\n")).toBe("a\nb\n");
   });
 });
+
+describe("applyHunk keeps the new text literal", () => {
+  it("does not expand $-patterns such as $$, $& or $'", () => {
+    const next = "echo $$ $& x=$'\\n' $`";
+    expect(applyHunk("old line\n", "old line", next, false, "f").content).toBe(`${next}\n`);
+  });
+});

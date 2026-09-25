@@ -27,4 +27,11 @@ describe("workspace containment (resource paths)", () => {
     });
     expect(d.effect).toBe("deny");
   });
+
+  it.runIf(process.platform === "win32")("reads Git Bash /c/... paths as drive paths", () => {
+    expect(isWithinWorkspace("C:\\proj", resolveResource("C:\\proj", "/c/proj/src/a.ts"))).toBe(
+      true,
+    );
+    expect(isWithinWorkspace("C:\\proj", resolveResource("C:\\proj", "/d/other"))).toBe(false);
+  });
 });

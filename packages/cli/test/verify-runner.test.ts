@@ -9,8 +9,17 @@ const bash = () => ({ kind: "bash" as const, path: "C:\\Git\\bin\\bash.exe", lab
 const pwsh = () => ({ kind: "pwsh" as const, path: "C:\\pwsh\\pwsh.exe", label: "PowerShell" });
 
 describe("verifyRunner", () => {
-  it("POSIX: runs an executable script directly (shebang honored), else through /bin/sh", () => {
-    expect(verifyRunner("/w", "linux", has(".ambient/verify"), () => true)?.args).toEqual([]);
+  it("POSIX: runs an executable script with a #! line directly, else through /bin/sh", () => {
+    const shebang = () => true;
+    const noShebang = () => false;
+    expect(
+      verifyRunner("/w", "linux", has(".ambient/verify"), () => true, undefined, shebang)?.args,
+    ).toEqual([]);
+    // Executable but no #! line: exec would fail (ENOEXEC), so it goes through /bin/sh.
+    expect(
+      verifyRunner("/w", "darwin", has(".ambient/verify"), () => true, undefined, noShebang)
+        ?.command,
+    ).toBe("/bin/sh");
     expect(verifyRunner("/w", "linux", has(".ambient/verify"), () => false)?.command).toBe(
       "/bin/sh",
     );
@@ -25,6 +34,12 @@ describe("verifyRunner", () => {
     expect(verifyRunner("C:\\w", "win32", has("verify"), () => false, bash)?.command).toBe(
       "C:\\Git\\bin\\bash.exe",
     );
+    // Git's own tool folders are put on PATH for the script.
+    const viaBash = verifyRunner("C:\\w", "win32", has("verify"), () => false, bash);
+    expect(String(viaBash?.env?.PATH ?? viaBash?.env?.Path)).toContain("C:\\Git\\usr\\bin");
+  });
+  it("Windows: a .cmd whose path cmd.exe would interpret is not run through cmd", () => {
+    expect(verifyRunner("C:\\a&b", "win32", has("verify.cmd"), () => false, pwsh)).toBeUndefined();
   });
   it("Windows with only a POSIX script and no Git Bash: verification is OFF, never a fake failure", () => {
     expect(verifyRunner("C:\\w", "win32", has("verify"), () => false, pwsh)).toBeUndefined();

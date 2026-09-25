@@ -6,8 +6,15 @@ import path from "node:path";
  * never by string prefix, which `../` and look-alike siblings (`/w/proj-evil`) would slip past. Windows paths
  * compare case-insensitively.
  */
-export function resolveResource(root: string, p: string): string {
-  return path.resolve(root, p);
+export function resolveResource(
+  root: string,
+  p: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  // Git Bash spells `C:\proj` as `/c/proj`; read it the way the file tools do.
+  const m = platform === "win32" ? /^\/([A-Za-z])(\/.*)?$/.exec(p) : null;
+  const native = m?.[1] ? `${m[1].toUpperCase()}:${(m[2] ?? "/").replace(/\//g, "\\")}` : p;
+  return path.resolve(root, native);
 }
 
 export function isWithinWorkspace(root: string, p: string): boolean {

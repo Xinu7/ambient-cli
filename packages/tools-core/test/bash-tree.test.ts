@@ -74,3 +74,33 @@ it(
   },
   SLOW,
 );
+
+// The shell exits at once but leaves a background job holding the output pipe: the tool must still return
+// (shortly after the shell exits) instead of waiting for the job — the `npm run dev &` case.
+it(
+  "returns soon after the shell exits even when a background job keeps the output open",
+  async () => {
+    const pidFile = join(dir, "bg.pid");
+    const started = Date.now();
+    const out = await bashTool.execute(
+      {
+        command: `sleep 20 & ${PID_OF_LAST} > "${posix(pidFile)}"; echo started`,
+        timeoutMs: 60_000,
+      },
+      ctx(new AbortController().signal),
+    );
+    const pid = Number(readFileSync(pidFile, "utf8").trim());
+    try {
+      expect(out.stdout).toContain("started");
+      expect(out.timedOut).toBe(false);
+      expect(Date.now() - started).toBeLessThan(SLOW);
+    } finally {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    }
+  },
+  SLOW * 3,
+);

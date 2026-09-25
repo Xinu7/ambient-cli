@@ -23,7 +23,17 @@ describe("Windows path helpers", () => {
     expect(fromGitBashPath("src/a.ts")).toBeUndefined();
   });
   it("flags reserved device names and alternate data streams", () => {
-    for (const s of ["con", "NUL.txt", "aux.js", "COM1", "lpt9.log", "file.txt:secret"])
+    for (const s of [
+      "con",
+      "NUL.txt",
+      "aux.js",
+      "COM1",
+      "lpt9.log",
+      "file.txt:secret",
+      "CONIN$",
+      "conout$.x",
+      "COM\u00B9",
+    ])
       expect(isReservedWindowsSegment(s), s).toBe(true);
     for (const s of ["console.ts", "contact.md", "src", "a.b.c"])
       expect(isReservedWindowsSegment(s), s).toBe(false);

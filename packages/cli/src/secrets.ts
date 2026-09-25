@@ -12,6 +12,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { KEYCHAIN_SERVICE } from "@amb/ambient-api";
+import { windowsPowerShellExe } from "@amb/tools-core";
 
 /** The friendly "you're not signed in" message — shown by commands that need a key in a non-interactive shell. */
 export const NOT_SIGNED_IN = [
@@ -135,33 +136,32 @@ export function saveApiKey(key: string, e: SecretEnv = {}): void {
 }
 
 /**
- * Windows DPAPI via PowerShell. The script (and the secret inside it) goes to PowerShell on STDIN
- * (`-Command -`), never on the command line. The blob only decrypts for the same Windows user.
+ * Windows DPAPI via PowerShell (by absolute path, never a same-named program in the project folder). The key
+ * travels on STDIN and the fixed script reads it from there — the key never appears on the command line or in
+ * the script text, which PowerShell logging can record. The blob only decrypts for the same Windows user.
  */
+const DPAPI_PROTECT =
+  "$k = [Console]::In.ReadLine(); $s = ConvertTo-SecureString -String $k -AsPlainText -Force; ConvertFrom-SecureString -SecureString $s";
+const DPAPI_UNPROTECT =
+  "$b = [Console]::In.ReadLine(); $s = ConvertTo-SecureString -String $b; [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))";
+
 function dpapiProtect(key: string, run: SecretRunner): string {
-  const script = `$s = ConvertTo-SecureString -String ${psLiteral(key)} -AsPlainText -Force; ConvertFrom-SecureString -SecureString $s\n`;
   const out = run(
-    "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-Command", "-"],
-    script,
+    windowsPowerShellExe(),
+    ["-NoProfile", "-NonInteractive", "-Command", DPAPI_PROTECT],
+    `${key}\n`,
   ).trim();
   if (!out) throw new Error("DPAPI encryption failed");
   return out;
 }
 
 function dpapiUnprotect(blob: string, run: SecretRunner): string | undefined {
-  const script = `$s = ConvertTo-SecureString -String ${psLiteral(blob)}; [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))\n`;
   const out = run(
-    "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-Command", "-"],
-    script,
+    windowsPowerShellExe(),
+    ["-NoProfile", "-NonInteractive", "-Command", DPAPI_UNPROTECT],
+    `${blob}\n`,
   ).trim();
   return out || undefined;
-}
-
-/** A PowerShell single-quoted string literal. */
-function psLiteral(s: string): string {
-  return `'${s.replace(/'/g, "''")}'`;
 }
 
 /** Remove the stored key (keychain entry and/or credentials file). Idempotent. */

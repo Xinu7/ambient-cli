@@ -25,6 +25,7 @@ function onPath(name: string, env: Env, platform: NodeJS.Platform, exists: (p: s
   const p = platform === "win32" ? path.win32 : path.posix;
   const dirs = (env.PATH ?? env.Path ?? "").split(platform === "win32" ? ";" : ":").filter(Boolean);
   for (const d of dirs) {
+    if (!p.isAbsolute(d)) continue; // a relative entry (".") would resolve inside the user's project
     const full = p.join(d, name);
     if (exists(full)) return full;
   }
@@ -76,11 +77,42 @@ export function detectShell(
   if (pathBash && !/\\(system32|windowsapps)\\/i.test(pathBash)) return make("bash", pathBash);
   const pwsh = onPath("pwsh.exe", env, platform, exists);
   if (pwsh) return make("pwsh", pwsh);
+  return make("powershell", windowsPowerShellExe(env));
+}
+
+/**
+ * A Windows system program by absolute path. Windows looks in the current directory before PATH when a
+ * program is started by bare name, and the current directory is the user's project — so a `taskkill.exe` or
+ * `powershell.exe` committed to a repo would run instead of the real one.
+ */
+export function windowsSystemExe(relative: string, env: Env = process.env): string {
   const root = env.SystemRoot ?? env.windir ?? "C:\\Windows";
-  return make(
-    "powershell",
-    w.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
-  );
+  return path.win32.join(root, "System32", relative);
+}
+
+/** Windows PowerShell 5.1, by absolute path (always installed). */
+export function windowsPowerShellExe(env: Env = process.env): string {
+  return windowsSystemExe("WindowsPowerShell\\v1.0\\powershell.exe", env);
+}
+
+/**
+ * The environment to run `shell` with. Git's own `bin\bash.exe` launcher normally puts Git's tool folders on
+ * PATH and sets MSYSTEM; starting its bash directly skips that, so it's done here — otherwise `ls`, `sed` or
+ * `sleep` aren't found on a machine whose PATH only has `Git\cmd`.
+ */
+export function shellEnv(shell: ShellInfo, env: Env = process.env): Env {
+  const m = /^(.*)[\\/](?:usr[\\/])?bin[\\/]bash\.exe$/i.exec(shell.path);
+  if (shell.kind !== "bash" || !m) return env;
+  const root = m[1] as string;
+  const w = path.win32;
+  const pathKey = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+  const extra = [w.join(root, "usr", "bin"), w.join(root, "mingw64", "bin")];
+  const current = env[pathKey] ?? "";
+  return {
+    ...env,
+    [pathKey]: [...extra, current].filter(Boolean).join(";"),
+    MSYSTEM: env.MSYSTEM ?? "MINGW64",
+  };
 }
 
 /** Arguments that run `command` non-interactively in `shell`. PowerShell is told to emit UTF-8. */
@@ -151,13 +183,14 @@ export function killProcessTree(pid: number, platform: NodeJS.Platform = process
             pid,
           )
         : [];
-      spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      const taskkill = windowsSystemExe("taskkill.exe");
+      spawnSync(taskkill, ["/pid", String(pid), "/T", "/F"], {
         stdio: "ignore",
         windowsHide: true,
       });
       const rest = group.filter((p) => p !== pid);
       if (rest.length > 0) {
-        spawnSync("taskkill", [...rest.flatMap((p) => ["/pid", String(p)]), "/F"], {
+        spawnSync(taskkill, [...rest.flatMap((p) => ["/pid", String(p)]), "/F"], {
           stdio: "ignore",
           windowsHide: true,
         });

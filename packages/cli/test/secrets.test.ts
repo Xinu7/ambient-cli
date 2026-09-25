@@ -143,20 +143,25 @@ describe("Windows: the key is DPAPI-encrypted, never stored in plain text", () =
     const calls: Array<{ cmd: string; args: string[]; input?: string }> = [];
     const run: SecretRunner = (cmd, args, input) => {
       calls.push({ cmd, args, ...(input !== undefined ? { input } : {}) });
-      return input?.includes("ConvertFrom-SecureString") ? "01000000d08c9ddf-ENCRYPTED\r\n" : "";
+      return args.join(" ").includes("ConvertFrom-SecureString")
+        ? "01000000d08c9ddf-ENCRYPTED\r\n"
+        : "";
     };
     saveApiKey("sk-WINDOWS-KEY-5555", { platform: "win32", run, configDir: dir });
     const file = readFileSync(join(dir, "credentials.json"), "utf8");
     expect(file).not.toContain("sk-WINDOWS-KEY-5555");
     expect(JSON.parse(file).apiKeyDpapi).toBe("01000000d08c9ddf-ENCRYPTED");
+    // The key is only ever on stdin — not on the command line, not in the script text.
     expect(calls[0]?.args.join(" ")).not.toContain("sk-WINDOWS-KEY-5555");
-    expect(calls[0]?.input).toContain("sk-WINDOWS-KEY-5555");
+    expect(calls[0]?.input).toBe("sk-WINDOWS-KEY-5555\n");
+    // PowerShell by absolute path, never a same-named program in the project folder.
+    expect(calls[0]?.cmd).toMatch(/System32[\\/]WindowsPowerShell[\\/]v1\.0[\\/]powershell\.exe$/i);
   });
   it("reads it back by decrypting through PowerShell", () => {
-    const run: SecretRunner = (_cmd, _args, input) =>
-      input?.includes("ConvertFrom-SecureString")
+    const run: SecretRunner = (_cmd, args, input) =>
+      args.join(" ").includes("ConvertFrom-SecureString")
         ? "BLOB\r\n"
-        : input?.includes("PtrToStringBSTR")
+        : args.join(" ").includes("PtrToStringBSTR") && input === "BLOB\n"
           ? "sk-WINDOWS-KEY-5555\r\n"
           : "";
     saveApiKey("sk-WINDOWS-KEY-5555", { platform: "win32", run, configDir: dir });

@@ -70,6 +70,25 @@ const READ_ONLY_GIT = new Set([
   "grep",
 ]);
 
+/** A short-option cluster (`-abc`) that includes `letter`. */
+const shortFlag = (t: string, letter: string) =>
+  /^-[A-Za-z]+$/.test(t) && t.slice(1).includes(letter);
+
+/**
+ * Options that turn an otherwise read-only command into one that runs a program or writes a file:
+ * `rg --pre=<cmd>` runs a command per file, `git grep -O<pager>` opens matches in an arbitrary program,
+ * `tree -o <file>` and `file -C` write files, and `date -s` / `hostname <name>` change the system.
+ */
+const UNSAFE_OPTION: Record<string, (argv: string[]) => boolean> = {
+  rg: (argv) => argv.some((t) => t.startsWith("--pre")),
+  tree: (argv) => argv.some((t) => shortFlag(t, "o") || t.startsWith("--output")),
+  file: (argv) => argv.some((t) => shortFlag(t, "C") || t === "--compile"),
+  date: (argv) => argv.some((t) => shortFlag(t, "s") || t.startsWith("--set")),
+  hostname: (argv) => argv.slice(1).some((t) => !t.startsWith("-")) || argv.includes("-F"),
+};
+const UNSAFE_GIT_GREP = (argv: string[]) =>
+  argv.some((t) => /^-[A-Za-z]*O/.test(t) || t.startsWith("--open-files-in-pager"));
+
 /** Metacharacters that write files or execute arbitrary commands, and which the segment tokenizer does not
  *  split on — their mere presence in the raw command disqualifies the read-only downgrade. */
 function hasDangerousMeta(command: string): boolean {
@@ -98,9 +117,11 @@ export function isReadOnlyCommand(command: string): boolean {
       // Require the SAFE subcommand immediately after `git` (no global options like `-c alias=!cmd` before it).
       const sub = seg.argv[1];
       if (!sub || sub.startsWith("-") || !READ_ONLY_GIT.has(sub)) return false;
+      if (sub === "grep" && UNSAFE_GIT_GREP(seg.argv)) return false;
       continue;
     }
     if (!READ_ONLY_CMDS.has(cmd)) return false;
+    if (UNSAFE_OPTION[cmd]?.(seg.argv)) return false;
   }
   return true;
 }

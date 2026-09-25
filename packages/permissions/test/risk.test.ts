@@ -75,6 +75,9 @@ describe("classifyToolRisk — writes to sensitive files", () => {
     expect(classifyToolRisk("write", { path: ".ssh/authorized_keys" }).level).toBe("elevated");
     expect(classifyToolRisk("edit", { path: "project/.env" }).level).toBe("elevated");
     expect(classifyToolRisk("write", { path: ".git/hooks/pre-commit" }).level).toBe("elevated");
+    // The verify script runs automatically after edits — changing it must be confirmed.
+    expect(classifyToolRisk("edit", { path: ".ambient/verify" }).level).toBe("elevated");
+    expect(classifyToolRisk("write", { path: ".ambient\\verify.ps1" }).level).toBe("elevated");
     expect(classifyToolRisk("write", { path: ".github/workflows/ci.yml" }).level).toBe("elevated");
     expect(
       classifyToolRisk("apply_patch", { edits: [{ path: "src/a.ts" }, { path: "sub/.npmrc" }] })

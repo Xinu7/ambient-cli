@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { KEYS_URL, resolveConfig, verifyApiKey } from "@amb/ambient-api";
+import { windowsSystemExe } from "@amb/tools-core";
 import { bold, cyan, dim } from "../render/color.js";
 import {
   KEY_SOURCE_LABEL,
@@ -30,7 +31,7 @@ function copyToClipboard(text: string): boolean {
     process.platform === "darwin"
       ? [["pbcopy", []]]
       : process.platform === "win32"
-        ? [["clip", []]]
+        ? [[windowsSystemExe("clip.exe"), []]]
         : [
             ["wl-copy", []],
             ["xclip", ["-selection", "clipboard"]],
