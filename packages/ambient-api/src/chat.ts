@@ -96,10 +96,47 @@ export async function* streamChat(
     // its body was being read — keep its kind and Retry-After instead of rewriting it as a stall.
     if (e instanceof AmbError) throw e;
     if (wd?.stalled) throw wd.error(req.model);
+    const network = describeNetworkFailure(e);
+    if (network) {
+      throw new AmbError({
+        kind: "transport",
+        message: network,
+        retryable: true,
+        model: req.model,
+      });
+    }
     throw e;
   } finally {
     wd?.dispose();
   }
+}
+
+/** Human wording for common socket-level causes behind Node's bare "fetch failed". */
+const NETWORK_CAUSES: Record<string, string> = {
+  ECONNRESET: "the connection was reset",
+  ECONNREFUSED: "the connection was refused",
+  ETIMEDOUT: "the connection timed out",
+  ENOTFOUND: "the address couldn't be resolved (DNS)",
+  EAI_AGAIN: "DNS lookup failed temporarily",
+  ENETUNREACH: "the network is unreachable",
+  EHOSTUNREACH: "the host is unreachable",
+  UND_ERR_SOCKET: "the connection closed unexpectedly",
+  UND_ERR_CONNECT_TIMEOUT: "connecting timed out",
+};
+
+/**
+ * Node reports every socket problem as `TypeError: fetch failed` with the real reason in `cause`. Say what
+ * actually happened ("network error reaching Ambient — the connection was reset"); undefined when `e` isn't a
+ * network failure (an abort, or any other error, is left alone).
+ */
+export function describeNetworkFailure(e: unknown): string | undefined {
+  if (!(e instanceof TypeError) || e.message !== "fetch failed") return undefined;
+  const cause = (e as { cause?: { code?: unknown; message?: unknown } }).cause;
+  const code = typeof cause?.code === "string" ? cause.code : undefined;
+  const why =
+    (code && NETWORK_CAUSES[code]) ??
+    (typeof cause?.message === "string" && cause.message ? cause.message : code);
+  return `network error reaching Ambient${why ? ` — ${why}` : ""}`;
 }
 
 /** Convenience: stream a chat completion to completion, invoking callbacks as text arrives. */

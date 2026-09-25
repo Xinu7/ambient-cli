@@ -44,6 +44,8 @@ export interface ModelBudgets {
   instructionsTotalChars: number;
   /** Characters kept from each subagent's report. */
   subagentSummaryChars: number;
+  /** Tool schemas from connected servers offered up front; beyond this they're loaded on demand (tokens). */
+  toolsOnDemandMaxTokens: number;
 }
 
 export interface ModelProfile {
@@ -90,6 +92,7 @@ export function budgetsFor(window: number, outputCap: number): ModelBudgets {
     instructionsPerFileChars: clamp(w * 0.02 * CHARS_PER_TOKEN, 4_000, 40_000),
     instructionsTotalChars: clamp(w * 0.06 * CHARS_PER_TOKEN, 12_000, 120_000),
     subagentSummaryChars: clamp(w * 0.02 * CHARS_PER_TOKEN, 4_000, 24_000),
+    toolsOnDemandMaxTokens: clamp(w * 0.05, 1_500, 25_000),
   };
 }
 

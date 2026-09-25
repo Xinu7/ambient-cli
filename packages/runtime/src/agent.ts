@@ -21,6 +21,7 @@ import {
   type Lane,
   type Mode,
   type StopReason,
+  type ToolDefinition,
   newAttemptId,
   newToolCallId,
   newTurnId,
@@ -94,6 +95,7 @@ import type {
   TurnCompletion,
 } from "./ports.js";
 import { buildSystemPrompt } from "./system-prompt.js";
+import { LOAD_TOOLS, ToolLoader, isDeferrable, makeLoadToolsTool } from "./tool-loading.js";
 import { injectDescription, relayImageToText } from "./vision-relay.js";
 
 export interface AgentResult {
@@ -228,6 +230,12 @@ export class Agent {
     // researches, records a `plan`, and stops. Must mirror the `plan` case in permissions/decide. Build offers all.
     // A model that can't see images gets `ask_vision` whenever the session has images: it can ask a vision
     // model targeted follow-up questions instead of relying only on the one-time description.
+    const profileOf = (id: string): ModelProfile =>
+      profileFor(
+        id,
+        liveCatalog.find((m) => m.id === id),
+        { ceiling: opts.capabilities?.learnedCeiling?.(id) },
+      );
     this.sessionImages = opts.sessionImages ?? opts.attachments ?? [];
     /** Offer `ask_vision` when the model being served can't see the session's images (also after a switch). */
     const ensureAskVision = (servedId: string): boolean => {
@@ -250,12 +258,34 @@ export class Agent {
       return true;
     };
     ensureAskVision(target);
+    // MCP tools beyond the served model's tool budget are loaded on demand (`load_tools`), so hundreds of
+    // connected tools never crowd out the conversation — and a small model can still run at all.
+    const toolLoader = new ToolLoader(
+      this.registry.list().filter((t) => isDeferrable(t.manifest.name)),
+      () => profileOf(target).budgets.toolsOnDemandMaxTokens,
+    );
+    if (toolLoader.onDemand && !this.registry.has(LOAD_TOOLS)) {
+      this.registry.register(makeLoadToolsTool(toolLoader));
+    }
+    let toolsVersion = toolLoader.version;
+    let toolsTarget = target;
+    const advertisedDefs = () => {
+      const offered = new Set(toolLoader.offered().map((t) => t.manifest.name));
+      const onDemand = toolLoader.onDemand;
+      const list = this.registry
+        .list()
+        .filter((t) =>
+          isDeferrable(t.manifest.name)
+            ? offered.has(t.manifest.name)
+            : t.manifest.name !== LOAD_TOOLS || onDemand,
+        )
+        .filter((t) => opts.mode !== "plan" || t.manifest.effects.every((e) => e === "read"));
+      return list;
+    };
+    let offeredDefs = advertisedDefs();
     const advertise = () => {
-      const list =
-        opts.mode === "plan"
-          ? this.registry.list().filter((t) => t.manifest.effects.every((e) => e === "read"))
-          : this.registry.list();
-      return toOpenAITools(list);
+      offeredDefs = advertisedDefs();
+      return toOpenAITools(offeredDefs);
     };
     let tools = advertise();
     let toolTokens = estimateTokens(JSON.stringify(tools));
@@ -266,12 +296,6 @@ export class Agent {
     // touches fs/clock/env, so it stays deterministic + replayable.
     // Every budget below comes from the served model's live catalog entry (ModelProfile) — no fixed ceilings,
     // so a 1M-context model gets proportionally more room than a 32K one with no code change.
-    const profileOf = (id: string): ModelProfile =>
-      profileFor(
-        id,
-        liveCatalog.find((m) => m.id === id),
-        { ceiling: opts.capabilities?.learnedCeiling?.(id) },
-      );
     const targetProfile = profileOf(target);
     const baseInstructions = opts.workspace.instructions(opts.cwd, {
       perFile: targetProfile.budgets.instructionsPerFileChars,
@@ -531,6 +555,14 @@ export class Agent {
         return { stopReason: "cancelled", turns, finalText, messages };
       }
       turns += 1;
+      // Tools loaded with load_tools (or a different model's tool budget) change what's offered — rebuild
+      // the list only then, so an unchanged tool prefix stays cacheable.
+      if (toolLoader.version !== toolsVersion || target !== toolsTarget) {
+        toolsVersion = toolLoader.version;
+        toolsTarget = target;
+        tools = advertise();
+        toolTokens = estimateTokens(JSON.stringify(tools));
+      }
       // The final allowed turn is a forced, tool-free WRAP-UP (no more investigation — report now).
       const finalWrapUp = turns >= ceiling || (opts.wrapUp?.() ?? false);
       let compactions = 0;
@@ -731,7 +763,7 @@ export class Agent {
         const reqMessages = withTurnBudget(
           withGoalReminder(
             withPlanNote(
-              assisted ? this.withAssistedProtocol(messages, opts.mode) : messages,
+              assisted ? this.withAssistedProtocol(messages, offeredDefs) : messages,
               currentPlanBlock,
             ),
             opts.goal,
@@ -1347,12 +1379,9 @@ export class Agent {
 
   /** Return a copy of `messages` whose system prompt carries the assisted-lane tool protocol as text. In
    *  PLAN mode only the read-only tools are described (parity with the native lane's filtered advertisement). */
-  private withAssistedProtocol(messages: Msg[], mode?: Mode): Msg[] {
-    const list =
-      mode === "plan"
-        ? this.registry.list().filter((t) => t.manifest.effects.every((e) => e === "read"))
-        : this.registry.list();
-    const protocol = assistedProtocol(list);
+  /** `list` is what this run offers (plan-mode filtering and on-demand tools already applied). */
+  private withAssistedProtocol(messages: Msg[], list: readonly ToolDefinition[]): Msg[] {
+    const protocol = assistedProtocol([...list]);
     const [system, ...rest] = messages;
     const base = typeof system?.content === "string" ? system.content : "";
     // Flatten any native tool turns in the history to text — an assisted request declares no tools, so native

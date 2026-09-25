@@ -65,7 +65,10 @@ function* corpus(n: number): Generator<string> {
 
 /** Run `cmd` in bash where each allowed command only records `name\x1farg\x1f…\x1e`. */
 function bashInvocations(cmd: string, cwd: string): string[][] {
-  const fns = NAMES.map((n) => `${n}() { printf '%s\\x1f' ${n} "$@"; printf '\\x1e'; }`).join("\n");
+  // One printf per record: background (&) jobs share the pipe, and a single small write never interleaves.
+  const fns = NAMES.map(
+    (n) => `${n}() { local r; r=$(printf '%s\\x1f' ${n} "$@"); printf '%s\\x1e' "$r"; }`,
+  ).join("\n");
   const script = `${fns}\ncommand_not_found_handle() { printf 'UNEXPECTED\\x1f%s\\x1e' "$1"; }\n${cmd}\nwait`;
   const r = spawnSync("/bin/bash", ["--noprofile", "--norc", "-c", script], {
     cwd,

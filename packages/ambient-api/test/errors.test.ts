@@ -30,3 +30,35 @@ describe("classifyHttpError", () => {
     expect(e.message).toContain("glm-5.2");
   });
 });
+
+describe("network failures", () => {
+  it("say what actually went wrong instead of a bare 'fetch failed'", async () => {
+    const { describeNetworkFailure } = await import("../src/chat.js");
+    const reset = Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } });
+    expect(describeNetworkFailure(reset)).toBe(
+      "network error reaching Ambient — the connection was reset",
+    );
+    const odd = Object.assign(new TypeError("fetch failed"), {
+      cause: { message: "socket hang up" },
+    });
+    expect(describeNetworkFailure(odd)).toBe("network error reaching Ambient — socket hang up");
+    expect(describeNetworkFailure(new Error("other"))).toBeUndefined();
+    expect(describeNetworkFailure(new DOMException("aborted", "AbortError"))).toBeUndefined();
+  });
+  it("a refused connection surfaces as a retryable transport error", async () => {
+    const { streamChatCompletion } = await import("../src/chat.js");
+    const { AmbError } = await import("@amb/protocol");
+    const failing = async () => {
+      throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+    };
+    const err = await streamChatCompletion(
+      { baseUrl: "https://api.ambient.xyz", apiKey: "k" },
+      { model: "m/x", messages: [{ role: "user", content: "hi" }], maxTokens: 10 },
+      { fetch: failing as never },
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AmbError);
+    expect((err as InstanceType<typeof AmbError>).kind).toBe("transport");
+    expect((err as InstanceType<typeof AmbError>).retryable).toBe(true);
+    expect((err as Error).message).toContain("the connection was refused");
+  });
+});

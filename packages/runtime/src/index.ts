@@ -8,3 +8,4 @@ export * from "./subagent.js";
 export * from "./vision-relay.js";
 export * from "./attachments.js";
 export * from "./ask-vision.js";
+export * from "./tool-loading.js";

@@ -42,14 +42,14 @@ describe("formatFleetRows", () => {
 
 describe("renderFleet", () => {
   it("renders a header + rows with no ANSI when color is off", () => {
-    const out = renderFleet([m("a/ready", true, { supportedFeatures: ["tools"] })], {
+    const out = renderFleet([m("vendor/one", true, { supportedFeatures: ["tools"] })], {
       color: false,
       resolveLane: declaredLane,
     });
     expect(out[0]).toContain("AMBIENT FLEET");
-    expect(
-      out.some((l) => l.includes("●READY") && l.includes("a/ready") && l.includes("tools:direct")),
-    ).toBe(true);
+    expect(out.some((l) => l.includes("vendor/one") && l.includes("tools:direct"))).toBe(true);
+    // No readiness labels: the catalog's flag is only a hint.
+    expect(out.join("\n")).not.toMatch(/READY|COLD|ready/);
     expect(out.every((l) => !l.includes("\x1b["))).toBe(true);
   });
   it("emits ANSI when color is on", () => {

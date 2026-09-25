@@ -57,22 +57,8 @@ export function formatFleetRows(
 
 const C = {
   reset: "\x1b[0m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-  dim: "\x1b[2m",
   bold: "\x1b[1m",
 };
-
-function colorFor(avail: FleetRow["avail"]): string {
-  if (avail === "ready") return C.green;
-  if (avail === "unknown") return C.yellow;
-  return C.dim;
-}
-function availLabel(avail: FleetRow["avail"]): string {
-  if (avail === "ready") return "●READY";
-  if (avail === "cold") return " COLD ";
-  return " WARM?";
-}
 
 function defaultColor(): boolean {
   return !process.env.NO_COLOR && Boolean(process.stdout.isTTY);
@@ -86,14 +72,14 @@ export function renderFleet(
   const useColor = opts.color ?? defaultColor();
   const resolveLane = opts.resolveLane ?? laneResolver();
   const rows = formatFleetRows(models, resolveLane);
-  const readyCount = rows.filter((r) => r.avail === "ready").length;
   const idW = Math.min(44, Math.max(4, ...rows.map((r) => r.id.length)));
   const laneW = Math.max(...rows.map((r) => laneLabel(r.lane).length), 12);
-  const header = `AMBIENT FLEET — ${models.length} models, ${readyCount} ready`;
+  // No readiness column: the catalog's flag is only a hint (flagged models serve), so it would mislead.
+  const header = `AMBIENT FLEET — ${models.length} model${models.length === 1 ? "" : "s"}`;
   const lines: string[] = [useColor ? `${C.bold}${header}${C.reset}` : header, ""];
   for (const r of rows) {
-    const line = `${availLabel(r.avail)}  ${r.id.padEnd(idW)}  ${r.ctx.padStart(6)}  ${laneLabel(r.lane).padEnd(laneW)}  ${r.vision}`;
-    lines.push(useColor ? `${colorFor(r.avail)}${line}${C.reset}` : line);
+    const line = `${r.id.padEnd(idW)}  ${r.ctx.padStart(6)}  ${laneLabel(r.lane).padEnd(laneW)}  ${r.vision}`;
+    lines.push(line);
   }
   return lines;
 }

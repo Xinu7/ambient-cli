@@ -59,16 +59,13 @@ export async function runDoctor(): Promise<void> {
 
   try {
     const models = await fetchCatalog({ baseUrl, apiKey: key });
-    const ready = models.filter((m) => m.isReady === true).length;
-    ok(`catalog reachable: ${models.length} models, ${ready} ready`);
+    // Readiness isn't reported: the catalog's flag is only a hint (flagged models serve), and a model that
+    // really can't answer is failed over at request time.
+    ok(`catalog reachable: ${models.length} model${models.length === 1 ? "" : "s"}`);
     const unsized = models.filter((m) => m.contextLength === undefined).map((m) => m.id);
     if (unsized.length > 0)
       warn(
         `${unsized.length} model(s) don't publish a context window (${unsized.slice(0, 3).join(", ")}${unsized.length > 3 ? ", …" : ""}) — ambient budgets them conservatively`,
-      );
-    if (ready === 0 && models.length > 0)
-      warn(
-        "the catalog marks no model ready — Ambient still tries them (the flag can lag) and fails over on a real 'no workers'",
       );
   } catch (err) {
     warn(`catalog unreachable: ${(err as Error).message}`);
