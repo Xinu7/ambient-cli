@@ -9,7 +9,7 @@ import type { EffortSetting, ReasoningLevel } from "./ports.js";
 
 /** Hard-work signals in a task → `auto` reasons at max. Stems accept inflections (debug → debugging). */
 const HARD_TASK =
-  /\b(debug\w*|why|fix\w*|bugs?|errors?|fail\w*|broken|crash\w*|refactor\w*|optimi[sz]\w*|architect\w*|design\w*|implement\w*|migrat\w*|race condition|regression\w*|investigat\w*|analy[sz]\w*|trac(e|ing)|root ?cause|performance|security|audit\w*|algorithm\w*|concurren\w*)\b/i;
+  /\b(debug\w*|fix\w*|bugs?|errors?|fail\w*|broken|crash\w*|refactor\w*|optimi[sz]\w*|architect\w*|design\w*|implement\w*|migrat\w*|race condition|regression\w*|investigat\w*|analy[sz]\w*|trac(e|ing)|root ?cause|performance|security|audit\w*|algorithm\w*|concurren\w*)\b/i;
 /** Social niceties — nothing to reason about. */
 const TRIVIAL_TASK =
   /^\s*(hi|hey|hello|sup|yo|hiya|thanks|thank you|ty|cool|nice|great|got it|test|ping)\b[\s!.?]*$/i;

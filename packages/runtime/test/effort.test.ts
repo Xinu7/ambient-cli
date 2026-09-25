@@ -40,6 +40,8 @@ describe("autoEffortForTask — task-adaptive auto effort over the real tiers", 
   it("hard work → max, including inflected forms the old regex missed", () => {
     expect(autoEffortForTask("fix the failing auth test", "ask")).toBe("max");
     expect(autoEffortForTask("why is this crashing?", "ask")).toBe("max");
+    // A plain factual "why" question is ordinary work, not a hard task.
+    expect(autoEffortForTask("why is the sky blue? answer in two sentences", "ask")).toBe("high");
     expect(autoEffortForTask("migrate the db layer", "ask")).toBe("max");
     expect(autoEffortForTask("investigating a concurrency issue", "ask")).toBe("max");
     expect(autoEffortForTask("debugging the parser", "ask")).toBe("max");

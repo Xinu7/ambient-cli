@@ -50,15 +50,19 @@ describe("stream watchdog", () => {
   });
 
   it("keep-alive comments count as liveness; a slow-but-steady stream completes", async () => {
+    // Each gap is well under the idle limit, but the whole stream takes longer than it — so it only completes
+    // if every chunk (keep-alive comments included) resets the clock. Wide margins keep it steady on slow CI.
+    // The real content only arrives at ~600ms, past the 450ms limit — so this passes only if the pings count.
     const f = scriptedFetch([
-      [20, enc.encode(": ping\n\n")],
-      [20, chunk({ choices: [{ delta: { content: "ok" } }] })],
-      [20, enc.encode(": ping\n\n")],
-      [20, enc.encode("data: [DONE]\n\n")],
+      [150, enc.encode(": ping\n\n")],
+      [150, enc.encode(": ping\n\n")],
+      [150, enc.encode(": ping\n\n")],
+      [150, chunk({ choices: [{ delta: { content: "ok" } }] })],
+      [150, enc.encode("data: [DONE]\n\n")],
     ]);
     const out = await streamChatCompletion(config, req, {
       fetch: f,
-      timeouts: { firstByteMs: 60, idleMs: 60 },
+      timeouts: { firstByteMs: 450, idleMs: 450 },
     });
     expect(out.content).toBe("ok");
   });
