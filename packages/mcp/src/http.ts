@@ -99,9 +99,9 @@ export function spawnHttpTransport(
           const ct = res.headers.get("content-type") ?? "";
           if (ct.includes("text/event-stream")) {
             // Parse SSE frames: each `\n\n`-separated block may carry one or more `data:` lines.
-            for (const block of body.split(/\n\n/)) {
+            for (const block of body.split(/\r?\n\r?\n/)) {
               const data = block
-                .split("\n")
+                .split(/\r?\n/)
                 .filter((l) => l.startsWith("data:"))
                 .map((l) => l.slice(5).trim())
                 .join("");

@@ -333,12 +333,12 @@ export async function runEval(args: string[]): Promise<void> {
         // Untrack only AFTER the delete actually completes — if a forced signal lands mid-rm, the dir is still
         // in activeWs and the synchronous purge removes it; if rm rejects, it stays tracked.
         cleanup: async () => {
-          await rm(ws, { recursive: true, force: true });
+          await rm(ws, { recursive: true, force: true, maxRetries: 5 });
           activeWs.delete(ws);
         },
       };
     } catch (err) {
-      await rm(ws, { recursive: true, force: true }); // never leak the scratch dir on a setup/run throw
+      await rm(ws, { recursive: true, force: true, maxRetries: 5 }); // never leak the scratch dir on a throw
       activeWs.delete(ws);
       throw err;
     }

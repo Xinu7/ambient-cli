@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { githubStatus, githubSummary } from "../agent/github.js";
+import { ghInstallCommand, githubStatus, githubSummary } from "../agent/github.js";
 import { bold, dim } from "../render/color.js";
 
 const USAGE = "usage: ambient github [status|login]";
@@ -19,7 +19,7 @@ export async function runGitHub(args: string[]): Promise<void> {
     if (!s.authed) {
       if (!s.ghInstalled) {
         process.stdout.write(
-          dim("\nInstall the GitHub CLI:  brew install gh\nThen:  ambient github login\n"),
+          dim(`\nInstall the GitHub CLI:  ${ghInstallCommand()}\nThen:  ambient github login\n`),
         );
       } else {
         process.stdout.write(dim("\nSign in:  ambient github login\n"));
@@ -32,7 +32,7 @@ export async function runGitHub(args: string[]): Promise<void> {
     const s = githubStatus();
     if (!s.ghInstalled) {
       process.stderr.write(
-        "ambient: the GitHub CLI (gh) isn't installed. Install it with `brew install gh`, then run `ambient github login`.\n",
+        `ambient: the GitHub CLI (gh) isn't installed. Install it with \`${ghInstallCommand()}\`, then run \`ambient github login\`.\n`,
       );
       process.exitCode = 1;
       return;

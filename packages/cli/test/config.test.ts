@@ -136,3 +136,23 @@ describe("effort in config (legacy values normalize to real tiers)", () => {
     expect(AmbConfigSchema.safeParse({ effort: "banana" }).success).toBe(false);
   });
 });
+
+describe("update hint by install kind", () => {
+  it("recognizes a global npm install (the Windows/Linux path) and suggests npm", async () => {
+    const { installKind, updateCommand } = await import("../src/update-check.js");
+    expect(
+      installKind(
+        String.raw`C:\Users\me\AppData\Roaming\npm\node_modules\ambient-code\dist\amb.js`,
+      ),
+    ).toBe("npm");
+    expect(installKind("/usr/local/lib/node_modules/ambient-code/dist/amb.js")).toBe("npm");
+    expect(
+      installKind(
+        "/opt/homebrew/Cellar/ambient-code/0.8.0/libexec/lib/node_modules/ambient-code/dist/amb.js",
+      ),
+    ).toBe("brew");
+    expect(updateCommand("npm")).toBe(
+      "npm install -g https://github.com/xinu7/ambient-cli/releases/latest/download/ambient-code.tgz",
+    );
+  });
+});

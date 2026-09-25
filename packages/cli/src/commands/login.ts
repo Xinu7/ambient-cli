@@ -24,15 +24,30 @@ export function openBrowser(url: string): boolean {
   }
 }
 
-/** Best-effort copy text to the clipboard (macOS pbcopy). Returns false if unavailable. */
+/** Best-effort copy text to the clipboard (pbcopy / clip.exe / wl-copy / xclip). False if unavailable. */
 function copyToClipboard(text: string): boolean {
-  try {
-    if (process.platform !== "darwin") return false;
-    execFileSync("pbcopy", [], { input: text });
-    return true;
-  } catch {
-    return false;
+  const tools: Array<[string, string[]]> =
+    process.platform === "darwin"
+      ? [["pbcopy", []]]
+      : process.platform === "win32"
+        ? [["clip", []]]
+        : [
+            ["wl-copy", []],
+            ["xclip", ["-selection", "clipboard"]],
+          ];
+  for (const [cmd, args] of tools) {
+    try {
+      execFileSync(cmd, args, {
+        input: text,
+        stdio: ["pipe", "ignore", "ignore"],
+        windowsHide: true,
+      });
+      return true;
+    } catch {
+      // not installed — try the next one
+    }
   }
+  return false;
 }
 
 /** Paste attempts before giving up (a mistyped key gets a second and third chance, not a dead end). */

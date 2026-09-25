@@ -61,6 +61,7 @@ export interface KeyCandidate {
 const defaultRun: SecretRunner = (cmd, args, input) =>
   execFileSync(cmd, args, {
     encoding: "utf8",
+    windowsHide: true,
     ...(input !== undefined ? { input } : {}),
     stdio: [input !== undefined ? "pipe" : "ignore", "pipe", "ignore"],
   });
@@ -114,11 +115,15 @@ export function saveApiKey(key: string, e: SecretEnv = {}): void {
     chmodSync(dirname(p), 0o700);
     // Never follow a planted symlink at the credentials path.
     if (existsSync(p) && lstatSync(p).isSymbolicLink()) throw new Error("symlink");
+    // Windows ignores the 0600 mode, so there the key is stored DPAPI-encrypted (bound to this Windows
+    // account); POSIX gets a plain 0600 file.
+    const record =
+      platform === "win32" ? { apiKeyDpapi: dpapiProtect(clean, run) } : { apiKey: clean };
     // Write a fresh private temp file (exclusive create, 0600) and rename it over the target, so the key is
     // never readable through looser permissions an existing file might have.
     const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
     try {
-      writeFileSync(tmp, `${JSON.stringify({ apiKey: clean })}\n`, { mode: 0o600, flag: "wx" });
+      writeFileSync(tmp, `${JSON.stringify(record)}\n`, { mode: 0o600, flag: "wx" });
       renameSync(tmp, p);
     } catch (err) {
       rmSync(tmp, { force: true }); // never leave a stray copy of the key behind
@@ -127,6 +132,36 @@ export function saveApiKey(key: string, e: SecretEnv = {}): void {
   } catch {
     throw new Error(`could not write ${p}`);
   }
+}
+
+/**
+ * Windows DPAPI via PowerShell. The script (and the secret inside it) goes to PowerShell on STDIN
+ * (`-Command -`), never on the command line. The blob only decrypts for the same Windows user.
+ */
+function dpapiProtect(key: string, run: SecretRunner): string {
+  const script = `$s = ConvertTo-SecureString -String ${psLiteral(key)} -AsPlainText -Force; ConvertFrom-SecureString -SecureString $s\n`;
+  const out = run(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", "-"],
+    script,
+  ).trim();
+  if (!out) throw new Error("DPAPI encryption failed");
+  return out;
+}
+
+function dpapiUnprotect(blob: string, run: SecretRunner): string | undefined {
+  const script = `$s = ConvertTo-SecureString -String ${psLiteral(blob)}; [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))\n`;
+  const out = run(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", "-"],
+    script,
+  ).trim();
+  return out || undefined;
+}
+
+/** A PowerShell single-quoted string literal. */
+function psLiteral(s: string): string {
+  return `'${s.replace(/'/g, "''")}'`;
 }
 
 /** Remove the stored key (keychain entry and/or credentials file). Idempotent. */
@@ -189,13 +224,18 @@ export function* apiKeyCandidates(
   const p = credentialsPath(configDir);
   if (existsSync(p)) {
     try {
-      const key = String(
-        (JSON.parse(readFileSync(p, "utf8")) as { apiKey?: unknown }).apiKey ?? "",
-      ).trim();
+      const rec = JSON.parse(readFileSync(p, "utf8")) as {
+        apiKey?: unknown;
+        apiKeyDpapi?: unknown;
+      };
+      const key =
+        typeof rec.apiKeyDpapi === "string"
+          ? dpapiUnprotect(rec.apiKeyDpapi, run)
+          : String(rec.apiKey ?? "").trim();
       const file = emit(key, "file");
       if (file) yield file;
     } catch {
-      // unreadable/corrupt — ignore
+      // unreadable/corrupt/undecryptable — ignore
     }
   }
 }

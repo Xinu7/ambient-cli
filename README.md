@@ -22,6 +22,16 @@ brew install xinu7/ambient/ambient-code
 ambient                # first launch walks you through connecting your Ambient key
 ```
 
+**Windows, Linux, or anywhere with Node** (npm):
+
+```bash
+npm install -g https://github.com/xinu7/ambient-cli/releases/latest/download/ambient-code.tgz
+ambient
+```
+
+On Windows it runs in Windows Terminal, PowerShell or the classic console. Commands run in Git Bash when it's
+installed (recommended), otherwise in PowerShell — ambient tells the model which one it's using.
+
 **From source**:
 
 ```bash
@@ -33,7 +43,7 @@ git clone https://github.com/xinu7/ambient-cli && cd ambient-cli
 
 The first time you run `ambient`, it opens [app.ambient.xyz/keys](https://app.ambient.xyz/keys), asks you
 to paste a key (hidden), checks it with Ambient (free — no model runs), and saves it: in the macOS keychain,
-or a credentials file only you can read on Linux/Windows. `AMBIENT_API_KEY` in your environment also works
+a credentials file only you can read on Linux, or encrypted with your Windows account (DPAPI) on Windows. `AMBIENT_API_KEY` in your environment also works
 and takes priority.
 
 - If a key stops working (revoked or mistyped), ambient tells you and asks for a new one right in the TUI,
@@ -47,8 +57,9 @@ Browsing the fleet (`ambient models`) and `ambient doctor` need no key. `ambient
 ### Update
 
 ```bash
-brew upgrade ambient-code          # Homebrew
-git pull && ./scripts/install.sh   # from source
+brew upgrade ambient-code                                                                    # Homebrew
+npm install -g https://github.com/xinu7/ambient-cli/releases/latest/download/ambient-code.tgz  # npm
+git pull && ./scripts/install.sh                                                             # from source
 ```
 
 `ambient` checks for a newer release on launch (and in `ambient doctor`) and shows a one-line `brew upgrade`
@@ -59,6 +70,7 @@ or `"checkUpdates": false` in `~/.config/amb/config.json`.
 
 ```bash
 brew uninstall ambient-code                # Homebrew
+npm uninstall -g ambient-code              # npm
 rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
 ```
 

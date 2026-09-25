@@ -123,15 +123,25 @@ export async function checkForUpdate(deps: UpdateCheckDeps = {}): Promise<Update
 }
 
 /** How this binary was installed, inferred from the running script path — so the upgrade hint gives the RIGHT
- *  command. A Homebrew install runs from a Cellar/…/homebrew path; anything else is a source / dev build. */
-export type InstallKind = "brew" | "source";
+ *  command. Homebrew runs from a Cellar/…/homebrew path; an npm global install from a node_modules folder
+ *  (the Windows and Linux install path); anything else is a source / dev build. */
+export type InstallKind = "brew" | "npm" | "source";
 export function installKind(execPath: string = process.argv[1] ?? ""): InstallKind {
-  return /\/(Cellar|homebrew|linuxbrew)\//.test(execPath) ? "brew" : "source";
+  const p = execPath.replace(/\\/g, "/");
+  if (/\/(Cellar|homebrew|linuxbrew)\//.test(p)) return "brew";
+  if (/\/node_modules\/ambient-code\//.test(p)) return "npm";
+  return "source";
 }
 
-/** The command a user runs to update, matched to how they installed (brew vs a from-source/dev build). */
+/** The latest release's installable tarball (a stable, version-free asset attached to every release). */
+export const LATEST_TARBALL_URL =
+  "https://github.com/xinu7/ambient-cli/releases/latest/download/ambient-code.tgz";
+
+/** The command a user runs to update, matched to how they installed. */
 export function updateCommand(kind: InstallKind = installKind()): string {
-  return kind === "brew" ? "brew upgrade ambient-code" : "git pull && ./scripts/install.sh";
+  if (kind === "brew") return "brew upgrade ambient-code";
+  if (kind === "npm") return `npm install -g ${LATEST_TARBALL_URL}`;
+  return "git pull && ./scripts/install.sh";
 }
 
 /** The one-line upgrade hint shown when an update is available, with the install-appropriate command. */

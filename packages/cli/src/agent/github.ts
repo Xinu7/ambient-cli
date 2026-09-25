@@ -76,10 +76,17 @@ export function githubStatus(
   };
 }
 
+/** The command that installs the GitHub CLI on this OS. */
+export function ghInstallCommand(platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") return "winget install GitHub.cli";
+  if (platform === "linux") return "see https://cli.github.com (e.g. sudo apt install gh)";
+  return "brew install gh";
+}
+
 /** A one-line human summary of GitHub sign-in state (for `doctor` + `github status`). */
 export function githubSummary(s: GitHubStatus): string {
   if (!s.ghInstalled && !s.authed) {
-    return "GitHub: gh CLI not installed (brew install gh) — or set GITHUB_TOKEN";
+    return `GitHub: gh CLI not installed (${ghInstallCommand()}) — or set GITHUB_TOKEN`;
   }
   if (s.authed) {
     const who = s.account ? ` as ${s.account}` : "";

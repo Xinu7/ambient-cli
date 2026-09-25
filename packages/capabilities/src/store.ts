@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
 import { type CapabilityRecord, PROVENANCE_RANK, isFresh } from "./evidence.js";
@@ -96,8 +96,30 @@ export class CapabilityStore {
     for (const [id, rec] of this.records) obj[id] = rec;
     const data = JSON.stringify({ version: 1, records: obj }, null, 2);
     mkdirSync(dirname(this.path), { recursive: true });
-    const tmp = `${this.path}.tmp`;
+    // A unique temp name so two ambient processes can't clobber each other's write; the rename is retried
+    // briefly because Windows refuses it while an antivirus or indexer holds the target open.
+    const tmp = `${this.path}.${process.pid}.${Date.now()}.tmp`;
     writeFileSync(tmp, data, "utf8");
-    renameSync(tmp, this.path);
+    renameWithRetry(tmp, this.path);
+  }
+}
+
+/** rename(), retried a few times on the transient EPERM/EBUSY/EACCES Windows returns while a file is held. */
+export function renameWithRetry(from: string, to: string, attempts = 5): void {
+  for (let i = 0; ; i++) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (i >= attempts - 1 || !["EPERM", "EBUSY", "EACCES"].includes(code ?? "")) {
+        rmSync(from, { force: true });
+        throw e;
+      }
+      const until = Date.now() + 20 * (i + 1);
+      while (Date.now() < until) {
+        // brief synchronous back-off (persist() is synchronous by design)
+      }
+    }
   }
 }

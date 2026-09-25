@@ -29,6 +29,7 @@ import {
 import { checkForUpdate, updateCommand } from "../update-check.js";
 import { CURRENT_VERSION } from "../version.js";
 import { App } from "./App.js";
+import { installAsciiFallback, needsAsciiFallback } from "./ascii-console.js";
 import { checkStartupKey } from "./startup-key.js";
 import type { AgentMode, Effort, Permission } from "./state.js";
 import type { AccountPort } from "./use-key-prompt.js";
@@ -192,6 +193,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       else process.kill(process.pid, sig);
     });
   }
+
+  // Legacy Windows console: draw glyphs as ASCII so nothing renders as empty boxes.
+  const restoreGlyphs = needsAsciiFallback() ? installAsciiFallback(process.stdout) : () => {};
+  process.once("exit", restoreGlyphs);
 
   const instance = render(
     createElement(App, {
