@@ -39,7 +39,7 @@ interface Mutation {
 /**
  * Collapse path aliases (`./a`, `a//b`, `a/../b`) to one canonical identity via posix normalization. We do
  * NOT reinterpret backslashes as separators — on POSIX `a\b` is a real single-segment filename distinct from
- * `a/b`, and treating them as the same would delete the wrong file (audit). Trailing `/` is trimmed.
+ * `a/b`, and treating them as the same would delete the wrong file. Trailing `/` is trimmed.
  */
 export function canonicalRel(p: string): string {
   const n = posix.normalize(p);

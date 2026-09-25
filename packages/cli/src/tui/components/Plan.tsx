@@ -36,7 +36,7 @@ export function Plan({ tasks, max = 8 }: { tasks: PlanTask[]; max?: number }): R
       {shown.map((t, i) => {
         const { g, color } = glyph(t.status);
         const active = t.status === "active";
-        const n = start + i + 1; // 1-based step number → the "phase 1 / 2 / 3" the user asked for
+        const n = start + i + 1; // 1-based step number → reads as "step 1 / 2 / 3"
         return (
           // biome-ignore lint/suspicious/noArrayIndexKey: the plan is a stable ordered list within a render
           <Box key={start + i}>

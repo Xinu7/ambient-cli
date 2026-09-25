@@ -139,7 +139,7 @@ describe("runSubagents", () => {
     expect(reg.list().some((t) => t.manifest.name === "subagent")).toBe(false);
   });
 
-  it("routes an `auto` oracle child to a reviewer model; an explicit model overrides routing (#27)", async () => {
+  it("routes an `auto` oracle child to a reviewer model; an explicit model overrides routing", async () => {
     const base = (over: Partial<CatalogModel>): CatalogModel => ({
       id: "x",
       name: "x",

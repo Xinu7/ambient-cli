@@ -136,7 +136,7 @@ export function Approval({
   req: ApprovalRequest;
   width: number;
   selected: number;
-  /** Preview-line budget — the App shrinks this on a short terminal so the CHOICES never scroll off (audit). */
+  /** Preview-line budget — the App shrinks this on a short terminal so the CHOICES never scroll off. */
   maxPreview?: number;
 }): ReactNode {
   const args = req.args as { command?: string; path?: string } | undefined;

@@ -8,7 +8,7 @@ const base = { schemaVersion: 1 as const, sessionId: "ses_a", turnId: "trn_a" };
 const init = () =>
   initialState({ agentMode: "build", permission: "ask", effort: "auto", requestedModel: "m" });
 
-describe("vision.relay reducer notice (slice 10)", () => {
+describe("vision.relay reducer notice", () => {
   it("NATIVE (model saw the image) adds no transcript line — it just works", () => {
     const s = reduce(init(), {
       ...base,
@@ -47,7 +47,7 @@ describe("vision.relay reducer notice (slice 10)", () => {
   });
 });
 
-describe("Composer attachment chip (slice 9)", () => {
+describe("Composer attachment chip", () => {
   it("shows a single-image chip with its size + remove hint", () => {
     const { lastFrame, unmount } = render(
       <Composer value="" running={false} width={80} attachments={[{ bytes: 20_480 }]} />,

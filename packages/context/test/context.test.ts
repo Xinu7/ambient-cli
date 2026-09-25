@@ -51,7 +51,7 @@ describe("budget + preflight", () => {
     expect(p.overflow).toBe(false);
     expect(p.remainingShared).toBe(262_144 - 1000 - 8192);
   });
-  it("toolResultCharBudget scales with the REMAINING window (compress harder as it fills) — D-T2.6", async () => {
+  it("toolResultCharBudget scales with the REMAINING window (compress harder as it fills)", async () => {
     const { toolResultCharBudget } = await import("../src/budget.js");
     const small = budgetFromCatalog(model({ contextLength: 32_768 }));
     const big = budgetFromCatalog(model({ contextLength: 262_144 }));

@@ -72,7 +72,7 @@ export async function compact(
   const factsBody = facts.replace(/^## [^\n]*\n?/, "").trim(); // drop its own marker header
   let summary = facts;
   if (!signal.aborted) {
-    // Fleet-routed compaction (#27): summarization is a mechanical utility task, so route it to a CHEAP
+    // Fleet-routed compaction: summarization is a mechanical utility task, so route it to a CHEAP
     // model from the live fleet instead of burning the run's (often flagship/coding) `target` — a real
     // per-token cost win on a pay-per-token network. Falls back to `target` if nothing cheaper is warm, and
     // the whole call falls back to the deterministic summary on any failure, so a cold cheap model is safe.

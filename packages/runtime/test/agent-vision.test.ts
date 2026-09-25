@@ -96,7 +96,7 @@ const relayEvent = () =>
     | { outcome: string; visionModel?: string; imageCount: number }
     | undefined;
 
-describe("agent vision wiring (slice 7)", () => {
+describe("agent vision wiring", () => {
   it("VISION served model → the image rides as content-parts to the wire (native)", async () => {
     const client = new MockClient(
       [model("vendor/m", { inputModalities: ["text", "image"] })],

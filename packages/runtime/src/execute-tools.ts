@@ -341,7 +341,7 @@ export async function executeTools(
     });
     // Emit a durable file.mutation for each changed file. A {files:[...]} result (apply_patch) carries the
     // per-file records; otherwise a top-level {path, operation} (write/edit) is the single mutation. Prefer
-    // files[] when present so a hybrid shape can't double-emit the same file (audit).
+    // files[] when present so a hybrid shape can't double-emit the same file.
     if (r && Array.isArray(r.files)) {
       for (const f of r.files)
         if (f && typeof f === "object") emitMutation(f as Record<string, unknown>);

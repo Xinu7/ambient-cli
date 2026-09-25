@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { HARD_MAX_IMAGES, estimateImageTokens, fitImages, planImages } from "../src/images.js";
 
-describe("adaptive image planning (slice 4)", () => {
+describe("adaptive image planning", () => {
   it("a small window → low detail, 1 image; a big window → high detail, up to the hard max", () => {
     const small = planImages(8_000);
     expect(small.detail).toBe("low");

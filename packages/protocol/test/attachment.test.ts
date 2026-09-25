@@ -6,7 +6,7 @@ import {
   toAttachmentRef,
 } from "../src/index.js";
 
-describe("supportsVision (slice 3)", () => {
+describe("supportsVision", () => {
   it("is true iff inputModalities includes 'image' (case-insensitive), never hardcoded", () => {
     expect(supportsVision({ inputModalities: ["text", "image"] })).toBe(true);
     expect(supportsVision({ inputModalities: ["text", "IMAGE"] })).toBe(true);

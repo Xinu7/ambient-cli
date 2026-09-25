@@ -16,7 +16,7 @@ function m(id: string, over: Partial<CatalogModel> = {}): CatalogModel {
   };
 }
 
-describe("pickVisionModel (slice 5)", () => {
+describe("pickVisionModel", () => {
   it("prefers a READY vision model and excludes non-image models", () => {
     const fleet = [
       m("vendor/coder"), // no image → not eligible

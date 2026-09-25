@@ -103,7 +103,7 @@ const TIMEOUT_MS: Record<SubagentRole, number> = {
 const MAX_TURNS: Record<SubagentRole, number> = { scout: 30, oracle: 30, builder: 50 };
 /** Hard ceiling on an orchestrator-requested per-child `maxTurns`, so a runaway spec can't burn unbounded turns. */
 const MAX_TURNS_CEILING = 80;
-/** Fleet phase routing (#27): a subagent role maps to a routed role, so an `auto` child auto-picks a
+/** Fleet phase routing: a subagent role maps to a routed role, so an `auto` child auto-picks a
  *  role-appropriate model from the live fleet — the oracle gets a strong reviewer, a builder the best coder. */
 const ROUTED_ROLE: Record<SubagentRole, RoutedRole> = {
   scout: "planner",

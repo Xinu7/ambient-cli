@@ -38,7 +38,7 @@ import { makeWorkspaceContextPort } from "../agent/workspace-context-port.js";
 import { bold, dim } from "../render/color.js";
 import { NOT_SIGNED_IN } from "../secrets.js";
 
-/** Per-task wall-clock deadline: bounds a stalled catalog/SSE that `maxTurns` (iteration count) can't (MED#3). */
+/** Per-task wall-clock deadline: bounds a stalled catalog/SSE that `maxTurns` (iteration count) can't. */
 const TASK_DEADLINE_MS = 300_000;
 const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
 
@@ -211,7 +211,7 @@ export async function runEval(args: string[]): Promise<void> {
       return;
     }
     try {
-      baseline = parseReport(JSON.parse(readFileSync(baselineFile, "utf8"))); // validated, not cast (MED#6)
+      baseline = parseReport(JSON.parse(readFileSync(baselineFile, "utf8"))); // validated, not cast
     } catch (err) {
       process.stderr.write(`ambient: unreadable baseline: ${(err as Error).message}\n`);
       process.exitCode = 1;
@@ -268,7 +268,7 @@ export async function runEval(args: string[]): Promise<void> {
     activeWs.add(ws);
     // Per-task signal = the global abort OR a wall-clock deadline. AbortSignal.any also fires immediately if the
     // global is ALREADY aborted (e.g. SIGINT arrived before this task started) — a manual addEventListener would
-    // miss that and let the task hang to its deadline (audit cancellation gap).
+    // miss that and let the task hang to its deadline (a cancellation gap).
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(TASK_DEADLINE_MS)]);
     try {
       for (const f of task.setup?.files ?? []) {
@@ -327,10 +327,10 @@ export async function runEval(args: string[]): Promise<void> {
             shell: true,
             encoding: "utf8",
             timeout: 120_000,
-            killSignal: "SIGKILL", // a command that traps SIGTERM can't dodge the timeout (MED#2)
+            killSignal: "SIGKILL", // a command that traps SIGTERM can't dodge the timeout
           });
           // A spawn error (ETIMEDOUT/ENOENT) or a killed-by-signal command is a FAILURE regardless of `status`
-          // — a process killed at the deadline can still report status 0 via a trap (MED#2).
+          // — a process killed at the deadline can still report status 0 via a trap.
           if (r.error || r.signal) return 1;
           return r.status ?? 1; // null status (no exit) counts as a failure
         },

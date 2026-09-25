@@ -54,7 +54,7 @@ export function parseSkill(raw: string): { meta: Omit<SkillMeta, "path">; body: 
     const key = kv[1];
     const rawVal = (kv[2] ?? "").trim();
     // YAML block scalars — real Claude / plugin skills write `description: >-` (folded) or `|` (literal)
-    // with indented continuation lines. Gather them instead of storing the literal `>-` (audit).
+    // with indented continuation lines. Gather them instead of storing the literal `>-`.
     const folded = rawVal === ">" || rawVal === ">-" || rawVal === ">+";
     const literal = rawVal === "|" || rawVal === "|-" || rawVal === "|+";
     if (folded || literal) {

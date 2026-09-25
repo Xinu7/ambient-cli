@@ -33,7 +33,7 @@ export function mcpToolToDefinition(
   if (!SAFE_NAME.test(server) || !SAFE_NAME.test(tool.name)) return null;
   // NOTE: a server name MAY contain `__` (e.g. `prod__db`). In the rare case two servers/tools alias to the
   // same `mcp__…__…` id, the manager's dedupe skips the second with a log — rejecting valid names outright
-  // (losing every tool from a legitimately-named server) would be a worse regression than that edge (audit).
+  // (losing every tool from a legitimately-named server) would be a worse regression than that edge.
   const readOnly = tool.annotations?.readOnlyHint === true;
   const effects: Effect[] = readOnly ? ["read"] : ["process"];
   const Input = jsonSchemaToZod(tool.inputSchema);

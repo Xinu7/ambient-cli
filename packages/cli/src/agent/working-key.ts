@@ -18,7 +18,11 @@ export async function resolveWorkingApiKey(
   if (r.alternative) {
     return {
       key: r.alternative.key,
-      note: `The key from ${KEY_SOURCE_LABEL[first.source]} was rejected — using ${maskKey(r.alternative.key)} from ${KEY_SOURCE_LABEL[r.alternative.source]}. Run \`ambient login\` to fix it.`,
+      note: `The key from ${KEY_SOURCE_LABEL[first.source]} was rejected — using ${maskKey(r.alternative.key)} from ${KEY_SOURCE_LABEL[r.alternative.source]}. ${
+        first.source === "env"
+          ? "Update or unset AMBIENT_API_KEY to stop seeing this."
+          : "Run `ambient login` to fix it."
+      }`,
     };
   }
   return { key: first.key };

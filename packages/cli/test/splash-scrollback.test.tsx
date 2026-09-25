@@ -63,7 +63,7 @@ describe("splash and scrollback", () => {
 });
 
 describe("/clear", () => {
-  it("starts the token counts over", async () => {
+  it("starts the token counts, context use and run status over", async () => {
     const client = {
       fetchCatalog: async () => catalog,
       chat: async (): Promise<TurnCompletion> =>
@@ -95,8 +95,12 @@ describe("/clear", () => {
     await settle(40);
     await send("ping");
     expect(lastFrame()).toMatch(/5\.1k tok/);
+    expect(lastFrame()).toMatch(/complete/);
     await send("/clear");
     expect(lastFrame()).not.toMatch(/5\.1k tok/);
+    // The last run's outcome and context use belong to the cleared conversation.
+    expect(lastFrame()).not.toMatch(/complete/);
+    expect(lastFrame()).toMatch(/ready/);
     unmount();
   });
 });

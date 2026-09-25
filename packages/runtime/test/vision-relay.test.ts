@@ -32,7 +32,7 @@ const sig = new AbortController().signal;
 
 beforeEach(() => clearRelayCache());
 
-describe("vision relay (slice 6)", () => {
+describe("vision relay", () => {
   it("describes via a ready vision model and injects the labelled description", async () => {
     let sawModel = "";
     const c = client(async (p) => {

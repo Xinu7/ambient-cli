@@ -35,7 +35,7 @@ describe("parseAssistedResponse", () => {
     }
   });
 
-  it("parses a SINGLE-LINE fence (some weak models emit the whole envelope on one line) — audit", () => {
+  it("parses a SINGLE-LINE fence (some weak models emit the whole envelope on one line)", () => {
     for (const reply of [
       '```amb-action {"tool":"read","args":{"path":"a.ts"}}```',
       '```amb-action{"tool":"read","args":{"path":"a.ts"}}```',
@@ -59,7 +59,7 @@ describe("parseAssistedResponse", () => {
     if (r.kind === "final") expect(r.text).toBe("All done — the file compiles.");
   });
 
-  it("does NOT execute a bare ```json code block (only the explicit amb-action fence acts) — audit HIGH", () => {
+  it("does NOT execute a bare ```json code block (only the explicit amb-action fence acts)", () => {
     // A model showing example code must never be run as a real action.
     const r = parseAssistedResponse(
       'Here is how you would call it:\n```json\n{"tool":"list","args":{"path":"."}}\n```',

@@ -1,7 +1,7 @@
 /**
  * A tiny, LINEAR, quote-aware shell tokenizer for the risk classifier. It exists so risk matching operates on
  * real command tokens instead of backtracking regexes over the raw line (which were O(n²) and mis-fired on
- * quoted text — audit). Not a real shell parser: it splits a command into pipeline/sequence segments, strips
+ * quoted text). Not a real shell parser: it splits a command into pipeline/sequence segments, strips
  * quotes, records whether the first word was FULLY quoted (⇒ data, not an invocation), and bounds the input.
  */
 

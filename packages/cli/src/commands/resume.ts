@@ -178,7 +178,7 @@ export async function runResume(args: string[]): Promise<void> {
       dim(`  the prior session ended abruptly (${droppedTail} unfinished log line(s))\n`),
     );
 
-  // Crash recovery (#38): reconcile any tool whose intent was recorded but whose result never landed (a crash
+  // Crash recovery: reconcile any tool whose intent was recorded but whose result never landed (a crash
   // mid-tool or the torn tail above). Classify with the builtin manifests (never blind-replay), then for a
   // `write` compare the intended content to the file ON DISK — the one fs read happens here at the CLI edge.
   // Reconcile against the workspace the ORIGINAL session recorded — NOT the cwd we happen to be resuming from

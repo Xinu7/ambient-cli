@@ -109,7 +109,7 @@ The activity line narrates what the agent is actually doing — `Reading src/app
 ```
 /model [id]      switch model (also mid-task)      /compact [focus]  summarize the conversation now
 /effort          auto · off · high · max           /context          how full the model's context is
-/plan  /build    plan first, or just build         /usage            tokens sent and received (never money)
+/plan  /build    plan first, or just build         /usage            tokens sent and received this session
 /goal <text>     a north-star kept every turn      /skills           browse and pin your skills
 /attach <path>   attach an image                   /login  /logout   add, change or remove your API key
 /tools           what the agent can use            /clear            start a fresh conversation

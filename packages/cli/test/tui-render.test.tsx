@@ -46,8 +46,8 @@ describe("tui render", () => {
       />,
     );
     const frame = lastFrame() ?? "";
-    // The test terminal is 24 rows — too short for the full banner plus the composer — so the one-line lockup.
-    expect(frame).toContain("◉ AMBIENT");
+    // With no launch notes the full banner and the composer fit a 24-row terminal exactly.
+    expect(frame).toContain("█"); // the block "AMBIENT" wordmark
     expect(frame.toLowerCase()).toContain("terminal coding agent");
     expect(frame).toContain("4"); // live model count ("4 models on Ambient")
     expect(frame).toContain("models on Ambient");
@@ -169,7 +169,7 @@ describe("tui render", () => {
     unmount();
   });
 
-  it("bounds a very long SINGLE-LINE input so the composer can't grow past a few rows (audit CRITICAL)", () => {
+  it("bounds a very long SINGLE-LINE input so the composer can't grow past a few rows", () => {
     const { lastFrame, unmount } = render(
       <Composer value={"x".repeat(2000)} running={false} width={80} />,
     );
@@ -477,7 +477,7 @@ describe("tui render", () => {
     unmount();
   });
 
-  it("ActivityLine shows the PHASE clock next to the verb and the run total after it (P1.10)", () => {
+  it("ActivityLine shows the PHASE clock next to the verb and the run total after it", () => {
     const { lastFrame, unmount } = render(
       <ActivityLine activity={{ verb: "Thinking" }} elapsed={105} phaseElapsed={12} frame={0} />,
     );
@@ -618,7 +618,7 @@ describe("tui render", () => {
     expect(off).not.toContain("think"); // OFF → no marker
   });
 
-  it("ActivityLine keeps the phase clock on a narrow row — the long verb truncates, the clock does not (audit)", () => {
+  it("ActivityLine keeps the phase clock on a narrow row — the long verb truncates, the clock does not", () => {
     // The longest real verb ("Fixing failed verification") at width 36: the verb must give way, not the clock.
     const { lastFrame, unmount } = render(
       <ActivityLine
@@ -638,7 +638,7 @@ describe("tui render", () => {
     unmount();
   });
 
-  it("Transcript keeps a failed-tool header on one row on a narrow terminal — drops the preview, never splits the exit suffix (audit)", () => {
+  it("Transcript keeps a failed-tool header on one row on a narrow terminal — drops the preview, never splits the exit suffix", () => {
     const items: TranscriptItem[] = [
       {
         kind: "tool",

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_IMAGE_TOKENS, estimateMessagesTokens, estimateTokens } from "../src/tokens.js";
 
-describe("image-aware token estimation (slice 2)", () => {
+describe("image-aware token estimation", () => {
   it("counts an image content-part as a fixed cost, NOT its (huge) base64 length", () => {
     const bigBase64 = "A".repeat(500_000); // ~500KB base64 → ~143k tokens if counted as text
     const messages = [

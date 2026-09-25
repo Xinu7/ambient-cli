@@ -249,14 +249,23 @@ function appReducer(state: ViewState, action: Action): ViewState {
             plan: [],
             contextWarned: undefined,
             // A fresh conversation starts its token counts from zero too.
-            status: { ...state.status, usage: undefined, tokensUsed: undefined },
+            status: {
+              ...state.status,
+              usage: undefined,
+              tokensUsed: undefined,
+              // Nothing is in the (empty) conversation yet, and the last run's outcome belongs to the old one.
+              promptEstimate: undefined,
+              stopReason: undefined,
+            },
           }
         : clearTranscript(state);
   }
 }
 
 /** Rows the full splash banner takes (globe + wordmark, tagline, fleet line, rule, margins). */
-const FULL_BANNER_ROWS = 16;
+const FULL_BANNER_ROWS = 15;
+/** Rows under the banner on the idle screen: mode label, composer box, hint line and status line. */
+const COMPOSER_ROWS = 8;
 
 /** Most lines of launch notes that may sit under the splash banner. */
 const SPLASH_NOTE_LINES = 4;
@@ -951,7 +960,7 @@ export function App(deps: AppDeps): ReactNode {
     };
   }, [stdout]);
 
-  // Reset the per-phase clock whenever the live activity verb changes (P1.10 — thinking-duration timer).
+  // Reset the per-phase clock whenever the live activity verb changes (a thinking-duration timer).
   // biome-ignore lint/correctness/useExhaustiveDependencies: the verb is the CHANGE TRIGGER, not a value used
   useEffect(() => {
     phaseStartRef.current = Date.now();
@@ -1900,8 +1909,8 @@ export function App(deps: AppDeps): ReactNode {
   // The banner steps aside for any menu, so the menu gets the room (a squeezed menu overlaps its own rows).
   const onSplash = !conversationStarted && picker === null && !showSlash && !showFiles;
   const elapsed = runActive && runStartRef.current ? (Date.now() - runStartRef.current) / 1000 : 0;
-  // Per-PHASE clock (P1.10): reset whenever the current activity verb changes, so "Thinking · 0:12" means
-  // thinking FOR 0:12, not 0:12 into the whole run (the user wanted both readouts).
+  // Per-PHASE clock: reset whenever the current activity verb changes, so "Thinking · 0:12" means
+  // thinking FOR 0:12, not 0:12 into the whole run.
   const phaseElapsed =
     runActive && phaseStartRef.current ? (Date.now() - phaseStartRef.current) / 1000 : 0;
   const readyCount = fleet ? fleet.filter((r) => r.avail === "ready").length : undefined;
@@ -1916,20 +1925,29 @@ export function App(deps: AppDeps): ReactNode {
   const commitCount = onSplash ? Math.min(committedRef.current, settledCount) : settledCount;
   // The full banner only when it fits with the launch notes and the composer; otherwise the one-line lockup,
   // so nothing on the first screen gets cut off.
+  // Rows a notice takes: a blank line above, then its text word-wrapped beside the 2-column "· " mark.
+  const noticeRows = (text: string) =>
+    1 +
+    text
+      .split("\n")
+      .reduce((r, l) => r + Math.max(1, Math.ceil(l.length / Math.max(10, width - 5))), 0);
   const splashNoteRows = onSplash
-    ? state.transcript.reduce(
-        (n, t) =>
-          n +
-          1 +
-          ("text" in t
-            ? t.text
-                .split("\n")
-                .reduce((r, l) => r + Math.max(1, Math.ceil(l.length / Math.max(20, width - 4))), 0)
-            : 1),
-        0,
+    ? state.transcript.reduce((n, t) => n + ("text" in t ? noticeRows(t.text) : 2), 0)
+    : 0;
+  const updateRows = deps.update
+    ? Math.ceil(
+        `▲ ${deps.update.latest} available — ${deps.update.command}`.length /
+          Math.max(10, width - 2),
       )
     : 0;
-  const bannerShort = rows < FULL_BANNER_ROWS + splashNoteRows + 10;
+  const bannerShort =
+    FULL_BANNER_ROWS +
+      updateRows +
+      splashNoteRows +
+      (state.goal ? 1 : 0) +
+      (attachments.length > 0 ? 1 : 0) +
+      COMPOSER_ROWS >
+    rows - 1;
   committedRef.current = Math.max(committedRef.current, commitCount);
   const settledItems = state.transcript.slice(0, commitCount);
   const liveItems = state.transcript.slice(commitCount);

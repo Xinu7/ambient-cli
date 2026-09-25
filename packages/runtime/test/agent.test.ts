@@ -495,7 +495,7 @@ describe("Agent loop", () => {
     expect(res.stopReason).toBe("verify_failed");
   });
 
-  it("verify gate: does NOT fail open when maxTurns is hit mid-fix (audit — no complete/max_turns)", async () => {
+  it("verify gate: does NOT fail open when maxTurns is hit mid-fix (no complete/max_turns)", async () => {
     const wcall = {
       content: "",
       toolCalls: [
@@ -571,7 +571,7 @@ describe("Agent loop", () => {
     expect(injectionErr).toBe(false);
   });
 
-  it("STILL wraps untrusted external output as data — bash can carry network/downloaded bytes (D-T3.15)", async () => {
+  it("STILL wraps untrusted external output as data — bash can carry network/downloaded bytes", async () => {
     // `bash` stays guarded (a `curl`/`cat downloaded-file` carries external bytes yet is tagged process/read/
     // write) — so its output that looks like an injection MUST be wrapped, unlike a trusted local read.
     const client = new MockClient([
@@ -723,7 +723,7 @@ describe("Agent loop", () => {
     ).toBe(false);
   });
 
-  it("does NOT execute a tool call from a TRUNCATED response — re-asks for complete args (D-T2.7)", async () => {
+  it("does NOT execute a tool call from a TRUNCATED response — re-asks for complete args", async () => {
     const client = new MockClient([
       {
         // Cut off at the output cap mid tool-call → args may be incomplete → must NOT run.

@@ -10,7 +10,7 @@ const imgMsg: Msg = {
   ],
 };
 
-describe("wire vision pass-through (slice 1)", () => {
+describe("wire vision pass-through", () => {
   it("passes a content-parts ARRAY through VERBATIM (does not collapse it to a JSON string)", () => {
     const wire = toWireMessages([imgMsg]) as { role: string; content: unknown }[];
     expect(Array.isArray(wire[0]?.content)).toBe(true); // the image part survives

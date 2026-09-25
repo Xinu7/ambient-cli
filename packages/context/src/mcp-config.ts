@@ -77,7 +77,7 @@ function looksLikeServerEntry(v: unknown): boolean {
  * `mcpServers` in a bare file. The disambiguation is by the GRANDCHILDREN: a wrapper's values are themselves
  * server-entry objects; a bare server's values are its own fields (strings/booleans/arrays). This correctly
  * handles a wrapped config whose server is named `env`/`enabled`/… (values ARE server entries ⇒ wrapper) AND
- * a bare disabled `{mcpServers:{enabled:false}}` (value `false` is NOT a server entry ⇒ bare). (audit)
+ * a bare disabled `{mcpServers:{enabled:false}}` (value `false` is NOT a server entry ⇒ bare).
  */
 function isWrapperMap(v: unknown): boolean {
   if (!v || typeof v !== "object") return false;

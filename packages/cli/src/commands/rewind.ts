@@ -102,7 +102,7 @@ export async function runRewind(argv: string[]): Promise<void> {
       const link = lstatSafe(target);
 
       // A final-component symlink is NEVER followed — restoring THROUGH it could write outside the workspace
-      // (CRIT), so we refuse it regardless of --force (that only overrides a content conflict).
+      // (critical), so we refuse it regardless of --force (that only overrides a content conflict).
       if (r.action === "restore" && link?.isSymbolicLink()) {
         warn(`${r.path} is now a symlink — skipped`);
         continue;

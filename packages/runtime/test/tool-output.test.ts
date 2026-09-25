@@ -6,7 +6,7 @@ import { MAX_TOOL_RESULT_CHARS, capToolResult } from "../src/agent-support.js";
 
 const utf8 = (s: string) => new TextEncoder().encode(s).length;
 
-describe("capToolResult (D-T2.6 audit fixes — byte-based, marker-inside-cap, NaN-safe)", () => {
+describe("capToolResult (byte-based, marker-inside-cap, NaN-safe)", () => {
   it("returns short text unchanged", () => {
     expect(capToolResult("hello", 1000)).toBe("hello");
   });

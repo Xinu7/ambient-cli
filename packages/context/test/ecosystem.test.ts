@@ -87,7 +87,7 @@ describe("loadMcpConfig — unified Claude + Codex", () => {
   });
 });
 
-describe("ecosystem loaders — symlink + expansion hardening (audit)", () => {
+describe("ecosystem loaders — symlink + expansion hardening", () => {
   it("does NOT follow a symlinked command file (no arbitrary-file exfiltration)", () => {
     const secret = join(ws, "secret.txt");
     writeFileSync(secret, "TOP SECRET PRIVATE KEY");

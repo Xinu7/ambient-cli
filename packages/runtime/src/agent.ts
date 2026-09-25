@@ -1223,7 +1223,7 @@ export class Agent {
       if (planCall) currentPlanBlock = renderPlanAnchor(planCall.args);
 
       // A successful mutating tool means the workspace changed → the completion gate should verify. Detect
-      // by result shape (write/edit/apply_patch) OR by declared effects (bash/process can mutate too — audit).
+      // by result shape (write/edit/apply_patch) OR by declared effects (bash/process can mutate too).
       const mutated = outcomes.some((o) => {
         if (!o.ok) return false;
         if (isMutationOutcome(o.result)) return true;
@@ -1355,7 +1355,7 @@ export class Agent {
     }
 
     // No fail-open at the boundary: if the loop expired (max_turns) or fell through with a FAILED last
-    // verification, the run did NOT verify — never report a clean complete/max_turns (audit).
+    // verification, the run did NOT verify — never report a clean complete/max_turns.
     if (verifyPassed === false && (stopReason === "complete" || stopReason === "max_turns")) {
       stopReason = "verify_failed";
     }
@@ -1399,7 +1399,7 @@ export class Agent {
     capabilities?: CapabilityPort,
     routedRole?: RoutedRole,
   ): string {
-    // Fleet PHASE routing (#27): when a caller wants a specific role AND left the model on `auto`, resolve a
+    // Fleet PHASE routing: when a caller wants a specific role AND left the model on `auto`, resolve a
     // role-appropriate model from the LIVE fleet (planner/reviewer → strongest reasoner, executor → best coder)
     // instead of the generic best pick. pickForRole prefers WARM models, so this self-heals like auto-best;
     // if it can't resolve (empty pool), we fall through to the normal resolution below.

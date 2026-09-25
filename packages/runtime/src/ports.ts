@@ -258,7 +258,7 @@ export interface RunOptions {
    */
   goal?: string;
   /**
-   * Optional PHASE role for fleet routing (#27). When set AND `requestedModel` is `auto`, the run resolves a
+   * Optional PHASE role for fleet routing. When set AND `requestedModel` is `auto`, the run resolves a
    * role-appropriate model from the live fleet (planner/reviewer → strongest reasoner, executor → best coder)
    * instead of the generic best pick. Used by subagent children (scout→planner, oracle→reviewer,
    * builder→executor); an explicit `--model`/preset model always wins (this is ignored unless model is auto).

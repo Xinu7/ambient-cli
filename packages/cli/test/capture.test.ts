@@ -63,7 +63,7 @@ const png = new Uint8Array([
 const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
 const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
 
-describe("capture pure helpers (slice 8)", () => {
+describe("capture pure helpers", () => {
   it("normalizeDroppedPath strips quotes + backslash-escaped spaces", () => {
     expect(normalizeDroppedPath("'/Users/alice/My Shots/a.png'")).toBe(
       "/Users/alice/My Shots/a.png",
@@ -80,7 +80,7 @@ describe("capture pure helpers (slice 8)", () => {
     expect(looksLikeImagePath("just some typed words")).toBe(false);
     expect(looksLikeImagePath("/Users/alice/a.png\nsecond line")).toBe(false);
     expect(looksLikeImagePath("/Users/alice/notes.txt")).toBe(false);
-    // The audit's bug: prose or an image URL ending in ".png" must NOT be diverted to attach (text-loss).
+    // Regression: prose or an image URL ending in ".png" must NOT be diverted to attach (text-loss).
     expect(looksLikeImagePath("here is the file photo.png")).toBe(false); // no path prefix → not a path
     expect(looksLikeImagePath("https://example.com/photo.png")).toBe(false); // URL, not a local path
     expect(looksLikeImagePath("check out cover.jpg for details")).toBe(false);
