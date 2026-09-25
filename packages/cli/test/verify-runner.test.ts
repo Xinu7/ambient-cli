@@ -4,7 +4,7 @@ import { verifyRunner } from "../src/agent/verify-port.js";
 const has =
   (...files: string[]) =>
   (p: string) =>
-    files.some((f) => p.endsWith(f));
+    files.some((f) => p.replace(/\\/g, "/").endsWith(f));
 const bash = () => ({ kind: "bash" as const, path: "C:\\Git\\bin\\bash.exe", label: "bash" });
 const pwsh = () => ({ kind: "pwsh" as const, path: "C:\\pwsh\\pwsh.exe", label: "PowerShell" });
 

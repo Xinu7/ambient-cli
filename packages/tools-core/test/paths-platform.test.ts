@@ -9,7 +9,7 @@ describe("absolute paths through a symlinked root (macOS /var → /private/var, 
     const typed = mkdtempSync(join(tmpdir(), "amb-root-"));
     try {
       const out = resolveInWorkspace(typed, join(typed, "src", "a.ts"));
-      expect(out).toBe(join(realpathSync(typed), "src", "a.ts"));
+      expect(out).toBe(join(realpathSync.native(typed), "src", "a.ts"));
     } finally {
       rmSync(typed, { recursive: true, force: true });
     }

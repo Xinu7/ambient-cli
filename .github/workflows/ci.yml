@@ -38,6 +38,9 @@ jobs:
 
       - name: Test
         run: pnpm test
+        env:
+          # Ink renders nothing live when it detects CI; the TUI tests drive a real render.
+          CI: "false"
 
       - name: Build
         run: pnpm build

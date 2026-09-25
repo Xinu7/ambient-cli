@@ -62,6 +62,7 @@ describe("walkFiles — .gitignore + secret skipping", () => {
   it("SKIPS an unreadable directory (EACCES) and keeps walking — one denied dir never fails the whole walk", async () => {
     // root bypasses permission bits, so chmod 000 wouldn't produce EACCES there — skip in that (CI) case.
     if (typeof process.getuid === "function" && process.getuid() === 0) return;
+    if (process.platform === "win32") return; // Windows ignores POSIX permission bits
     write("src/a.ts");
     write("locked/secret.ts");
     write("src/b.ts");

@@ -268,6 +268,7 @@ describe("App: approval interaction end to end", () => {
 
   it("bypass: pressing [b] lets a SECOND gated call EXECUTE with NO further prompt (bypass wiring)", async () => {
     let secondExecuted = false;
+    let toolOutputs: string[] = [];
     const c = client(async (p) => {
       const toolMsgs = p.messages.filter((m) => m.role === "tool" && typeof m.content === "string");
       // A tee pipeline WRITES (not read-only → it prompts) yet still echoes a detectable marker to stdout.
@@ -275,6 +276,7 @@ describe("App: approval interaction end to end", () => {
       if (toolMsgs.length === 1) return bashCall("b", "echo two | tee /dev/null"); // 2nd gated call — must NOT prompt again
       // both settled: did `echo two` actually RUN (bypass → allow) or get silently DENIED? Its stdout proves it.
       secondExecuted = toolMsgs.some((m) => (m.content as string).includes("two"));
+      toolOutputs = toolMsgs.map((m) => String(m.content).slice(0, 300));
       return { content: "ALL-DONE", toolCalls: [] };
     });
     const { stdin, lastFrame, unmount } = renderApp({ client: c, permission: "ask" });
@@ -282,7 +284,8 @@ describe("App: approval interaction end to end", () => {
     stdin.write("b"); // Bypass session — one keystroke, no more input after this
     // If bypass DIDN'T short-circuit the 2nd call, the run would hang on a new modal and this would TIME OUT.
     await waitFor(() => (lastFrame() ?? "").includes("ALL-DONE"));
-    expect(secondExecuted).toBe(true); // the 2nd gated command EXECUTED (bypass allowed it, not silent-deny)
+    // the 2nd gated command EXECUTED (bypass allowed it, not silent-deny); on failure, show what the tools returned
+    expect(secondExecuted, JSON.stringify(toolOutputs)).toBe(true);
     expect((lastFrame() ?? "").toLowerCase()).toContain("bypass"); // the session flipped to bypass
     unmount();
   });

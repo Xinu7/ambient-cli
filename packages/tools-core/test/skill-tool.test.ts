@@ -28,6 +28,7 @@ const writeSkill = (dir: string, name: string, body: string) => {
 
 let ws: string;
 let fakeHome: string;
+let realProfile: string | undefined;
 let realHome: string | undefined;
 
 beforeEach(() => {
@@ -38,9 +39,13 @@ beforeEach(() => {
   // out-of-workspace skill can be planted for the honesty test below.
   fakeHome = realpathSync(mkdtempSync(join(tmpdir(), "amb-skilltool-home-")));
   realHome = process.env.HOME;
+  realProfile = process.env.USERPROFILE;
   process.env.HOME = fakeHome;
+  process.env.USERPROFILE = fakeHome; // os.homedir() reads USERPROFILE on Windows
 });
 afterEach(() => {
+  if (realProfile === undefined) Reflect.deleteProperty(process.env, "USERPROFILE");
+  else process.env.USERPROFILE = realProfile;
   if (realHome === undefined) process.env.HOME = "";
   else process.env.HOME = realHome;
   rmSync(ws, { recursive: true, force: true });

@@ -1,9 +1,10 @@
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { decide, isWithinWorkspace, resolveResource } from "../src/index.js";
 
 describe("workspace containment (resource paths)", () => {
   it("resolves relative paths against the root and normalizes ..", () => {
-    expect(resolveResource("/w/proj", "src/a.ts")).toBe("/w/proj/src/a.ts");
+    expect(resolveResource("/w/proj", "src/a.ts")).toBe(resolve("/w/proj", "src/a.ts"));
     expect(isWithinWorkspace("/w/proj", resolveResource("/w/proj", "src/../b.ts"))).toBe(true);
     expect(isWithinWorkspace("/w/proj", resolveResource("/w/proj", "../secret.txt"))).toBe(false);
     expect(isWithinWorkspace("/w/proj", resolveResource("/w/proj", "/w/proj/../other/x"))).toBe(

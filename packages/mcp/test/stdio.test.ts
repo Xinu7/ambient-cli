@@ -17,19 +17,23 @@ const alive = (pid: number): boolean => {
 it("close() kills the whole process group — no orphaned grandchild, pipes released", async () => {
   const { transport, child } = spawnStdioTransport({
     command: "sh",
-    args: ["-c", "sleep 30 & echo $! ; wait"],
+    // Git Bash's `sh` reports an MSYS pid for `$!`; the real Windows pid is in /proc/<pid>/winpid.
+    args: [
+      "-c",
+      `sleep 30 & ${process.platform === "win32" ? "cat /proc/$!/winpid" : "echo $!"} ; wait`,
+    ],
   });
   // Read the grandchild pid off stdout (a second listener; the framer also sees it and ignores the non-JSON).
   let out = "";
   child.stdout?.on("data", (d: string) => {
     out += d;
   });
-  for (let i = 0; i < 40 && !/\d/.test(out); i++) await settle(25);
+  for (let i = 0; i < 200 && !/\d/.test(out); i++) await settle(25);
   const gcPid = Number.parseInt(out.trim(), 10);
   expect(Number.isInteger(gcPid)).toBe(true);
   expect(alive(gcPid)).toBe(true); // the grandchild sleep is running
 
   transport.close();
-  for (let i = 0; i < 40 && alive(gcPid); i++) await settle(25);
+  for (let i = 0; i < 200 && alive(gcPid); i++) await settle(25);
   expect(alive(gcPid)).toBe(false); // …and dies with the group (not orphaned)
-});
+}, 30_000);

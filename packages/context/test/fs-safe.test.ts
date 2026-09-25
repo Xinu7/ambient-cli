@@ -1,7 +1,7 @@
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, parse } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readTextCappedSafe } from "../src/fs-safe.js";
 
@@ -54,6 +54,7 @@ describe("readTextCappedSafe", () => {
   it("allows a real file under a root that ends in the separator (e.g. filesystem root)", () => {
     const p = join(dir, "f.txt");
     writeFileSync(p, "ok");
-    expect(readTextCappedSafe(p, { root: "/" })).toBe("ok"); // "/" + sep must not become "//"
+    // The filesystem root ("/" or a drive like "C:\\") ends in the separator — root + sep must not double it.
+    expect(readTextCappedSafe(p, { root: parse(p).root })).toBe("ok");
   });
 });

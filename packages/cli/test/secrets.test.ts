@@ -34,7 +34,7 @@ describe("saving the API key", () => {
     saveApiKey("sk-LINUX", { platform: "linux", run: () => "", configDir: dir });
     const p = join(dir, "credentials.json");
     expect(JSON.parse(readFileSync(p, "utf8")).apiKey).toBe("sk-LINUX");
-    expect(statSync(p).mode & 0o077).toBe(0);
+    if (process.platform !== "win32") expect(statSync(p).mode & 0o077).toBe(0); // Windows: no POSIX modes
     expect(
       resolveApiKeyWithSource({}, { platform: "linux", run: () => "", configDir: dir }),
     ).toEqual({
@@ -119,7 +119,7 @@ describe("credentials file hardening", () => {
     writeFileSync(p, "{}");
     chmodSync(p, 0o644);
     saveApiKey("sk-REPLACED-1234", { platform: "linux", run: () => "", configDir: dir });
-    expect(statSync(p).mode & 0o077).toBe(0);
+    if (process.platform !== "win32") expect(statSync(p).mode & 0o077).toBe(0); // Windows: no POSIX modes
   });
 });
 

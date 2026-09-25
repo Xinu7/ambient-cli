@@ -1,7 +1,7 @@
 import { mkdirSync, realpathSync, symlinkSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import type { ToolContext } from "@amb/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -41,9 +41,9 @@ afterEach(async () => {
 describe("resolveInWorkspace", () => {
   it("resolves relative paths (to the real workspace path) and blocks escapes", () => {
     const resolved = resolveInWorkspace(ws, "a.ts");
-    expect(resolved.endsWith("/a.ts")).toBe(true);
+    expect(resolved.endsWith(`${sep}a.ts`)).toBe(true);
     // The returned path is inside the (realpath-resolved) workspace root.
-    expect(resolved).toBe(join(realpathSync(ws), "a.ts"));
+    expect(resolved).toBe(join(realpathSync.native(ws), "a.ts"));
     expect(() => resolveInWorkspace(ws, "../evil")).toThrow();
     expect(() => resolveInWorkspace(ws, "/etc/passwd")).toThrow();
   });
@@ -69,7 +69,7 @@ describe("resolveInWorkspace", () => {
   it("allows a symlink whose target stays INSIDE the workspace (returns canonical path)", () => {
     mkdirSync(join(ws, "real"), { recursive: true });
     symlinkSync("real", join(ws, "alias"));
-    expect(resolveInWorkspace(ws, "alias")).toBe(join(realpathSync(ws), "real"));
+    expect(resolveInWorkspace(ws, "alias")).toBe(join(realpathSync.native(ws), "real"));
   });
 });
 
