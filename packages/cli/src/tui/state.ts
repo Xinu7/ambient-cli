@@ -193,6 +193,18 @@ export interface Status {
   /** The model call in flight: characters streamed so far (answer + reasoning), when it started, and the
    *  exact completion tokens once the response reports them. Drives the live "↓ 1.2k tok · 40 tok/s". */
   stream?: { chars: number; since?: number; tokens?: number };
+  /** Token counts for this session (never money): requests, prompt/completion totals, and how much of the
+   *  prompt came from the provider's cache — plus the latest request's prompt, for /context. */
+  usage?: SessionUsage;
+}
+
+export interface SessionUsage {
+  requests: number;
+  promptTokens: number;
+  completionTokens: number;
+  cachedTokens: number;
+  lastPromptTokens?: number;
+  lastCachedTokens?: number;
 }
 
 /** One step in the agent's visible task list (maintained via the `plan` tool). */
@@ -335,7 +347,7 @@ function previewArgs(toolName: string, args: unknown): string {
 }
 
 /** Short model name — drop the vendor prefix (defensive against a non-string from a malformed event). */
-function shortName(id: string): string {
+export function shortName(id: string): string {
   const s = typeof id === "string" ? id : String(id ?? "");
   const i = s.lastIndexOf("/");
   return i >= 0 ? s.slice(i + 1) : s;
@@ -449,6 +461,24 @@ function settleThought(state: ViewState, now: number): ViewState {
     seconds: Math.max(0, (now - since) / 1000),
     ...(effort ? { effort } : {}),
   }));
+}
+
+/** Fold one response's token counts into the session totals. */
+function addUsage(
+  usage: SessionUsage | undefined,
+  ev: { promptTokens?: number; completionTokens?: number; cachedTokens?: number },
+): SessionUsage {
+  const u = usage ?? { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0 };
+  return {
+    requests: u.requests + 1,
+    promptTokens: u.promptTokens + (ev.promptTokens ?? 0),
+    completionTokens: u.completionTokens + (ev.completionTokens ?? 0),
+    cachedTokens: u.cachedTokens + (ev.cachedTokens ?? 0),
+    // The latest request's own figures (a response without cache info had nothing from cache).
+    ...(ev.promptTokens !== undefined
+      ? { lastPromptTokens: ev.promptTokens, lastCachedTokens: ev.cachedTokens ?? 0 }
+      : {}),
+  };
 }
 
 /** Count streamed characters toward the in-flight call's live token readout. */
@@ -565,6 +595,7 @@ export function reduce(state: ViewState, ev: NewEvent, now = 0): ViewState {
           ...(settled.status.stream && ev.completionTokens !== undefined
             ? { stream: { ...settled.status.stream, tokens: ev.completionTokens } }
             : {}),
+          usage: addUsage(settled.status.usage, ev),
         },
       };
     }

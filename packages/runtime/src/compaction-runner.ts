@@ -45,17 +45,23 @@ export async function compact(
   persistMemory: (summary: string) => void,
   windowTokens: number,
   priorMemory: string,
+  /** `/compact`: keep less recent history than automatic compaction would, and focus the summary. */
+  opts: { keepRecentTokens?: number; focus?: string } = {},
 ): Promise<Msg[] | null> {
   // Retention scaled to the SERVED model's window — a small model keeps proportionally less so the
   // transcript can actually shrink below its ceiling (a fixed 20k-recent floor can't fit a ≤32k model). The
   // window is the caller's LEARNED-ceiling-aware budget: using the raw catalog window here
   // while the trigger used the learned window made compaction retain too much and re-overflow → "blocked".
   const served = catalog.find((m) => m.id === target);
-  const cfg = compactionConfigForWindow(
+  const auto = compactionConfigForWindow(
     windowTokens,
     undefined,
     Math.min(served?.maxOutputLength ?? UNKNOWN_OUTPUT, windowTokens),
   );
+  const cfg =
+    opts.keepRecentTokens !== undefined
+      ? { ...auto, keepRecentTokens: Math.min(auto.keepRecentTokens, opts.keepRecentTokens) }
+      : auto;
   const before = estimateMessagesTokens(messages);
   const plan = planCompaction(messages, cfg);
   if (plan.toSummarize.length === 0) return null;
@@ -95,6 +101,7 @@ export async function compact(
       windowTokens,
       signal,
       compactor === target,
+      opts.focus,
     );
     // Use the model's NARRATIVE but ALWAYS append the AUTHORITATIVE facts from the log (files touched, tool
     // ok/fail, last error) so a weak compactor can't fabricate "all tests pass" or drop real errors and then
@@ -165,6 +172,7 @@ async function rollingSummary(
   fallbackWindow: number,
   signal: AbortSignal,
   sameAsTarget: boolean,
+  focus?: string,
 ): Promise<string | undefined> {
   // When the compactor IS the served model, the caller's window already includes its learned ceiling; a
   // different compactor uses its own catalog window, or a conservative default when it doesn't publish one.
@@ -188,7 +196,10 @@ async function rollingSummary(
   }
   for (const chunk of chunks) {
     if (signal.aborted) return undefined;
-    const req = buildSummaryRequest(chunk, rolling, { maxCharsPerMessage });
+    const req = buildSummaryRequest(chunk, rolling, {
+      maxCharsPerMessage,
+      ...(focus ? { focus } : {}),
+    });
     try {
       const out = await client.chat({
         model: compactor,

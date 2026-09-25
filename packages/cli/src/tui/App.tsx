@@ -9,6 +9,7 @@ import {
   type ToolDefinition,
   newSessionId,
 } from "@amb/protocol";
+import { UNKNOWN_OUTPUT, budgetsFor } from "@amb/reliability";
 import {
   Agent,
   type CapabilityPort,
@@ -30,6 +31,7 @@ import { createBuiltinRegistry } from "@amb/tools-core";
 import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { compactNow } from "../agent/compact-now.js";
 import { createDurableEventSink } from "../agent/event-sink.js";
 import { buildRegistry } from "../agent/registry.js";
 import { makeSubagentTool } from "../agent/subagent-tool.js";
@@ -96,7 +98,9 @@ import {
 } from "./editor.js";
 import { fleetChanges } from "./fleet-diff.js";
 import { helpText } from "./help.js";
+import { contextReport, tokens, usageReport } from "./reports.js";
 import {
+  type Activity,
   type AgentMode,
   EFFORTS,
   type Effort,
@@ -114,6 +118,7 @@ import {
   setEffort,
   setGoal,
   setRequestedModel,
+  shortName,
   toRuntimeMode,
   toggleAgentMode,
   withStop,
@@ -178,7 +183,8 @@ type Action =
   | { t: "echo"; text: string }
   | { t: "toggleThinking" }
   | { t: "goal"; text: string }
-  | { t: "clear"; fresh?: boolean };
+  | { t: "clear"; fresh?: boolean }
+  | { t: "activity"; activity?: Activity };
 
 function appReducer(state: ViewState, action: Action): ViewState {
   switch (action.t) {
@@ -210,9 +216,13 @@ function appReducer(state: ViewState, action: Action): ViewState {
         `reasoning view ${next ? "ON — the model's thinking will show as it works" : "OFF"}`,
       );
     }
+    case "activity":
+      return { ...state, status: { ...state.status, activity: action.activity } };
     case "clear":
       // A fresh conversation (idle /clear) also retires the plan; a mid-run clear only wipes the screen.
-      return action.fresh ? { ...clearTranscript(state), plan: [] } : clearTranscript(state);
+      return action.fresh
+        ? { ...clearTranscript(state), plan: [], status: { ...state.status, usage: undefined } }
+        : clearTranscript(state);
   }
 }
 
@@ -935,6 +945,56 @@ export function App(deps: AppDeps): ReactNode {
     setBuffer("");
   };
 
+  /** `/compact [focus]`: summarize the carried conversation now so the next message starts lighter. */
+  const runCompact = async (focus: string): Promise<void> => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId || conversationRef.current.length === 0) {
+      dispatch({ t: "notice", level: "info", text: "nothing to compact yet" });
+      return;
+    }
+    busyRef.current = true;
+    setRunActive(true);
+    runStartRef.current = Date.now();
+    dispatch({ t: "activity", activity: { verb: "Compacting the conversation" } });
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    try {
+      const res = await compactNow({
+        client: deps.client,
+        conversation: conversationRef.current,
+        model: state.status.reportedModel ?? state.status.targetModel ?? modelRef.current,
+        workspace: workspacePortRef.current,
+        workspaceRoot: deps.workspaceRoot,
+        sessionId,
+        focus,
+        signal: controller.signal,
+        // The receipt below says what changed; the automatic-compaction notice would repeat it.
+        emit: (ev) => {
+          if (ev.kind !== "context.compacted") dispatch({ t: "event", ev, at: Date.now() });
+        },
+        ...(deps.capabilities ? { capabilities: deps.capabilities } : {}),
+      });
+      if (controller.signal.aborted) {
+        dispatch({ t: "notice", level: "info", text: "compaction cancelled — nothing changed" });
+      } else if (res.ok) {
+        conversationRef.current = res.messages;
+        dispatch({
+          t: "notice",
+          level: "info",
+          text: `compacted the conversation · ${tokens(res.before)} → ${tokens(res.after)} tokens`,
+        });
+      } else {
+        dispatch({ t: "notice", level: "info", text: res.reason });
+      }
+    } finally {
+      controllerRef.current = null;
+      cancellingRef.current = false;
+      busyRef.current = false;
+      setRunActive(false);
+      dispatch({ t: "stop", stopReason: controller.signal.aborted ? "cancelled" : "complete" });
+    }
+  };
+
   /** Pick a model: the next run uses it, and a run in flight switches to it at its next step. */
   const chooseModel = (id: string): void => {
     modelRef.current = id;
@@ -1056,6 +1116,36 @@ export function App(deps: AppDeps): ReactNode {
       }
       case "/thinking":
         dispatch({ t: "toggleThinking" });
+        break;
+      case "/compact": {
+        if (busyRef.current) {
+          dispatch({ t: "notice", level: "warn", text: "busy — /compact after the current run" });
+          break;
+        }
+        void runCompact(arg);
+        break;
+      }
+      case "/context": {
+        const model = state.status.reportedModel ?? state.status.targetModel;
+        const window = state.status.contextWindow;
+        dispatch({
+          t: "notice",
+          level: "info",
+          text: contextReport({
+            ...(model ? { model: shortName(model) } : {}),
+            ...(window
+              ? { window, compactsAt: window - budgetsFor(window, UNKNOWN_OUTPUT).compactReserve }
+              : {}),
+            ...(state.status.promptEstimate !== undefined
+              ? { inUse: state.status.promptEstimate }
+              : {}),
+            ...(state.status.usage ? { usage: state.status.usage } : {}),
+          }),
+        });
+        break;
+      }
+      case "/usage":
+        dispatch({ t: "notice", level: "info", text: usageReport(state.status.usage) });
         break;
       case "/goal": {
         const a = arg.trim();

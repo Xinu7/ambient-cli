@@ -169,9 +169,12 @@ function clipMiddle(text: string, maxChars: number | undefined): string {
 export function buildSummaryRequest(
   toSummarize: CompactableMessage[],
   priorSummary?: string,
-  opts: { maxCharsPerMessage?: number } = {},
+  opts: { maxCharsPerMessage?: number; focus?: string } = {},
 ): { role: "system" | "user"; content: string }[] {
-  const instruction = `Summarize the conversation below into the exact sections that follow. Preserve the original goal verbatim, every file path touched, test/build outcomes, and decisions with rationale. Be concise but lossless on those. Do not invent progress.\n\n${SUMMARY_SKELETON}`;
+  const focus = opts.focus?.trim()
+    ? `\n\nThe user asked this summary to focus on: ${opts.focus.trim().slice(0, 500)}. Keep everything related to that in full detail.`
+    : "";
+  const instruction = `Summarize the conversation below into the exact sections that follow. Preserve the original goal verbatim, every file path touched, test/build outcomes, and decisions with rationale. Be concise but lossless on those. Do not invent progress.${focus}\n\n${SUMMARY_SKELETON}`;
   const parts: { role: "system" | "user"; content: string }[] = [
     { role: "system", content: instruction },
   ];
