@@ -78,6 +78,8 @@ describe("classifyToolRisk — writes to sensitive files", () => {
     // The verify script runs automatically after edits — changing it must be confirmed.
     expect(classifyToolRisk("edit", { path: ".ambient/verify" }).level).toBe("elevated");
     expect(classifyToolRisk("write", { path: ".ambient\\verify.ps1" }).level).toBe("elevated");
+    expect(classifyToolRisk("edit", { path: ".ambient//verify" }).level).toBe("elevated");
+    expect(classifyToolRisk("edit", { path: "src/../.ambient/./verify" }).level).toBe("elevated");
     expect(classifyToolRisk("write", { path: ".github/workflows/ci.yml" }).level).toBe("elevated");
     expect(
       classifyToolRisk("apply_patch", { edits: [{ path: "src/a.ts" }, { path: "sub/.npmrc" }] })
@@ -257,6 +259,31 @@ describe("classifyToolRisk — Windows destructive commands", () => {
   ])("treats %s as critical", (cmd) => {
     expect(bash(cmd).level).toBe("critical");
   });
+  it("reads the script after powershell -Command (and skips parameter values)", () => {
+    expect(bash(String.raw`powershell -Command "Remove-Item -Recurse -Force C:\"`).level).toBe(
+      "critical",
+    );
+    expect(bash("pwsh -c Remove-Item -Recurse -Force node_modules").level).toBe("elevated");
+    expect(
+      bash(String.raw`powershell -ExecutionPolicy Bypass Remove-Item -Recurse -Force C:\ `).level,
+    ).toBe("critical");
+  });
+  it.each([
+    "rm -rf /c/Users/zach",
+    String.raw`Remove-Item -Recurse:$true -Force C:\ `,
+    String.raw`rd /s /q \\?\C:\ `,
+    "rm -rf ~/*",
+    "rm -rf $HOME/*",
+  ])("also treats %s as critical", (cmd) => {
+    expect(bash(cmd).level).toBe("critical");
+  });
+  it.each(["rm -r -f dist", "rm -R -f build", "rm -rf /Users/z/proj/node_modules", "rm -rf dist"])(
+    "does not escalate an ordinary cleanup: %s",
+    (cmd) => {
+      expect(bash(cmd).level).not.toBe("critical");
+      expect(bash(cmd).reasons.join(" ")).not.toMatch(/force-deletes a folder tree/);
+    },
+  );
   it("flags an encoded PowerShell command it can't read", () => {
     expect(bash("powershell -EncodedCommand ZQBjAGgAbwA=").level).toBe("elevated");
     expect(bash("pwsh -enc ZQBjAGgAbwA=").level).toBe("elevated");

@@ -17,17 +17,24 @@ export function historyPath(workspaceRoot: string, home: string = ambHome()): st
 /** Entries oldest → newest, de-duplicated against the immediately previous entry, capped. */
 export function loadHistory(path: string): string[] {
   if (!existsSync(path)) return [];
+  let raw: string;
   try {
-    const out: string[] = [];
-    for (const line of readFileSync(path, "utf8").split("\n")) {
-      if (!line.trim()) continue;
-      const text = (JSON.parse(line) as { text?: unknown }).text;
-      if (typeof text === "string" && text.trim() && out[out.length - 1] !== text) out.push(text);
-    }
-    return out.slice(-MAX_ENTRIES);
+    raw = readFileSync(path, "utf8");
   } catch {
     return [];
   }
+  const out: string[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    let text: unknown;
+    try {
+      text = (JSON.parse(line) as { text?: unknown }).text;
+    } catch {
+      continue; // one damaged line (e.g. a write cut short) never loses the rest
+    }
+    if (typeof text === "string" && text.trim() && out[out.length - 1] !== text) out.push(text);
+  }
+  return out.slice(-MAX_ENTRIES);
 }
 
 export function appendHistory(path: string, text: string): void {

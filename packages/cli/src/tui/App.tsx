@@ -673,8 +673,9 @@ export function App(deps: AppDeps): ReactNode {
             : [];
         for (const a of sized) saveObject(sessionId, a.dataBase64);
 
-        sessionImagesRef.current = [...sessionImagesRef.current, ...sized];
-        const sessionImages = sessionImagesRef.current;
+        // This run's images join the session's numbered list only if the run is kept (below) — a run cancelled
+        // before it starts, or retried after a key problem, must not shift the numbers ask_vision uses.
+        const sessionImages = [...sessionImagesRef.current, ...sized];
         const opts: RunOptions = {
           sessionId,
           mode: runtimeMode,
@@ -748,6 +749,7 @@ export function App(deps: AppDeps): ReactNode {
         if (result.messages && result.messages.length > 1) {
           conversationRef.current = result.messages.slice(1);
           skipLogReplayRef.current = false;
+          sessionImagesRef.current = sessionImages;
         }
         dispatch({ t: "stop", stopReason: result.stopReason });
       } catch (err) {
@@ -1277,7 +1279,10 @@ export function App(deps: AppDeps): ReactNode {
       !approvalResolver.current &&
       !questionRef.current &&
       pickerRef.current === null &&
-      !inputRef.current.startsWith("/");
+      // The slash menu owns the arrows only while it's showing (a recalled "/Users/…" prompt has no menu).
+      (!inputRef.current.startsWith("/") ||
+        hist.browsing() ||
+        matchSlash(inputRef.current, customCommands.palette).length === 0);
     // Composer caret motion. Left/Right/Home/End always move the caret; Up/Down move it only when the buffer
     // spans multiple visual rows — otherwise they fall through to the subagent-expand shortcut below (so
     // watching a wave keeps ↑/↓ = expand/collapse; Ctrl+O toggles it regardless). Precedence:

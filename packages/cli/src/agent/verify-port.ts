@@ -28,14 +28,12 @@ export interface VerifyRunner {
   env?: Record<string, string | undefined>;
 }
 
-/** Characters cmd.exe interprets even inside the quoted script path — such a path is not run through cmd. */
-const CMD_META = /[&|<>^%!()"]/;
-
 /**
  * How to run the project's verify script on this machine, or undefined when there is none we can run
  * (verification is then simply off — never a fake failure):
- *  - POSIX: `.ambient/verify`, executed directly when it's executable AND starts with `#!` (its interpreter is
- *    honored), else via /bin/sh — the kernel refuses to exec a script without a `#!` line.
+ *  - POSIX: `.ambient/verify`, executed directly when it's executable and either starts with `#!` (its
+ *    interpreter is honored) or is a compiled program; otherwise via /bin/sh — the kernel won't exec a
+ *    script without a `#!` line.
  *  - Windows: `.ambient/verify.ps1` (PowerShell), `.ambient/verify.cmd`/`.bat`, or a plain `.ambient/verify`
  *    through Git Bash when it's installed.
  */
@@ -45,7 +43,7 @@ export function verifyRunner(
   exists: (p: string) => boolean = existsSync,
   isExecutable: (p: string) => boolean = executable,
   shell: () => ShellInfo = machineShell,
-  hasShebang: (p: string) => boolean = startsWithShebang,
+  runsDirectly: (p: string) => boolean = isDirectlyExecutable,
 ): VerifyRunner | undefined {
   const base = join(workspaceRoot, VERIFY_SCRIPT);
   if (platform === "win32") {
@@ -58,10 +56,12 @@ export function verifyRunner(
       };
     }
     for (const ext of [".cmd", ".bat"]) {
-      if (exists(`${base}${ext}`) && !CMD_META.test(`${base}${ext}`)) {
+      if (exists(`${base}${ext}`)) {
+        // Run it by its path RELATIVE to the workspace (the run's cwd): cmd.exe re-reads its command line, so
+        // characters in the workspace path (`&`, `(`, `^`) must never reach it.
         return {
           command: process.env.ComSpec ?? windowsSystemExe("cmd.exe"),
-          args: ["/d", "/c", `${base}${ext}`],
+          args: ["/d", "/c", `.ambient\\verify${ext}`],
         };
       }
     }
@@ -72,17 +72,29 @@ export function verifyRunner(
     return undefined;
   }
   if (!exists(base)) return undefined;
-  return isExecutable(base) && hasShebang(base)
+  return isExecutable(base) && runsDirectly(base)
     ? { command: base, args: [] }
     : { command: "/bin/sh", args: [base] };
 }
 
-function startsWithShebang(p: string): boolean {
+/** A script with a `#!` line or a compiled program (ELF / Mach-O) — what the kernel can exec directly. */
+function isDirectlyExecutable(p: string): boolean {
   try {
     const fd = openSync(p, "r");
     try {
-      const head = Buffer.alloc(2);
-      return readSync(fd, head, 0, 2, 0) === 2 && head.toString("latin1") === "#!";
+      const head = Buffer.alloc(4);
+      const n = readSync(fd, head, 0, 4, 0);
+      if (n >= 2 && head[0] === 0x23 && head[1] === 0x21) return true; // #!
+      if (n < 4) return false;
+      const magic = head.readUInt32BE(0);
+      return (
+        magic === 0x7f454c46 || // ELF
+        magic === 0xfeedface ||
+        magic === 0xfeedfacf ||
+        magic === 0xcefaedfe ||
+        magic === 0xcffaedfe ||
+        magic === 0xcafebabe // Mach-O (thin / universal)
+      );
     } finally {
       closeSync(fd);
     }

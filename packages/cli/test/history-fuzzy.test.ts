@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -30,12 +30,21 @@ describe("slash menu matching", () => {
   it("falls back to loose matching only when no command starts with what was typed", () => {
     expect(matchSlash("/mod").map((c) => c.name)).toEqual(["/model"]);
     expect(matchSlash("/thnk")[0]?.name).toBe("/thinking");
-    expect(matchSlash("/lgot")[0]?.name).toBe("/logout");
+    expect(matchSlash("/mdl")[0]?.name).toBe("/model");
   });
   it("never loosely matches a path typed at the start of a prompt", () => {
     expect(matchSlash("/tmp/shot.png what is this")).toEqual([]);
     expect(matchSlash("/Users/me/notes.md")).toEqual([]);
     expect(matchSlash("/q")).toEqual([{ name: "/quit", desc: "Exit ambient" }]);
+  });
+  it("never loosely picks a command with side effects, a user command, or prose", () => {
+    expect(matchSlash("/ps")).toEqual([]); // not /bypass
+    expect(matchSlash("/pass")).toEqual([]);
+    expect(matchSlash("/out")).toEqual([]); // not /logout
+    expect(matchSlash("/lgt")).toEqual([]);
+    expect(matchSlash("/tmp is full", [{ name: "/template", desc: "t" }])).toEqual([]);
+    expect(matchSlash("/etc hosts is wrong", [{ name: "/fetch-context", desc: "f" }])).toEqual([]);
+    expect(matchSlash("/thnk now")).toEqual([]);
   });
 });
 
@@ -75,6 +84,18 @@ describe("history navigation", () => {
     expect(n.text).toBe("half-typed");
     expect(n.nav.index).toBeUndefined();
     expect(navNewer(entries, n.nav).text).toBeUndefined();
+  });
+  it("keeps the rest of the history when one line is damaged", () => {
+    const home = mkdtempSync(join(tmpdir(), "amb-hist-"));
+    try {
+      const p = historyPath("/w/proj", home);
+      appendHistory(p, "first");
+      appendFileSync(p, '{"text":"cut sho\n');
+      appendHistory(p, "second");
+      expect(loadHistory(p)).toEqual(["first", "second"]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
   it("does nothing with an empty history", () => {
     expect(navOlder([], IDLE_NAV, "x").text).toBeUndefined();

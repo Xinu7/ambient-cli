@@ -124,7 +124,7 @@ export async function relayImageToText(deps: RelayDeps): Promise<RelayResult> {
     // Room for a thorough description: the vision model's own output cap, with ALL batches together bounded
     // by a tenth of what the READER can hold.
     const descTokens = Math.max(
-      512,
+      Math.min(512, Math.floor(((deps.targetWindow ?? UNKNOWN_WINDOW) * 0.1) / batches)),
       Math.min(
         model?.maxOutputLength ?? UNKNOWN_OUTPUT,
         Math.floor(((deps.targetWindow ?? UNKNOWN_WINDOW) * 0.1) / batches),

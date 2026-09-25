@@ -75,19 +75,38 @@ const shortFlag = (t: string, letter: string) =>
   /^-[A-Za-z]+$/.test(t) && t.slice(1).includes(letter);
 
 /**
+ * A long option that could mean `name` — the option itself, `--name=value`, or (for tools that accept
+ * unambiguous abbreviations, like git and GNU coreutils) any shorter prefix of it.
+ */
+const longOption = (t: string, name: string) => {
+  if (!t.startsWith("--") || t.length < 3) return false;
+  const opt = t.slice(2).split("=")[0] as string;
+  return name.startsWith(opt);
+};
+
+/**
  * Options that turn an otherwise read-only command into one that runs a program or writes a file:
- * `rg --pre=<cmd>` runs a command per file, `git grep -O<pager>` opens matches in an arbitrary program,
- * `tree -o <file>` and `file -C` write files, and `date -s` / `hostname <name>` change the system.
+ * `rg --pre=<cmd>` / `--hostname-bin=<cmd>` run programs, `git grep -O<pager>` opens matches in an arbitrary
+ * program, `tree -o <file>` and `file -C` write files, and `date`/`hostname` with arguments change the system.
  */
 const UNSAFE_OPTION: Record<string, (argv: string[]) => boolean> = {
-  rg: (argv) => argv.some((t) => t.startsWith("--pre")),
-  tree: (argv) => argv.some((t) => shortFlag(t, "o") || t.startsWith("--output")),
-  file: (argv) => argv.some((t) => shortFlag(t, "C") || t === "--compile"),
-  date: (argv) => argv.some((t) => shortFlag(t, "s") || t.startsWith("--set")),
-  hostname: (argv) => argv.slice(1).some((t) => !t.startsWith("-")) || argv.includes("-F"),
+  rg: (argv) => argv.some((t) => t.startsWith("--pre") || t.startsWith("--hostname-bin")),
+  tree: (argv) => argv.some((t) => shortFlag(t, "o") || longOption(t, "output")),
+  file: (argv) => argv.some((t) => shortFlag(t, "C") || longOption(t, "compile")),
+  // Only a display format (`date +%s`) or read-only flags; a bare operand or -s/--set changes the clock.
+  date: (argv) =>
+    argv
+      .slice(1)
+      .some(
+        (t) =>
+          shortFlag(t, "s") || longOption(t, "set") || (!t.startsWith("-") && !t.startsWith("+")),
+      ),
+  // Printing the name takes no operand; any operand or a file option sets it.
+  hostname: (argv) =>
+    argv.slice(1).some((t) => !t.startsWith("-") || shortFlag(t, "F") || longOption(t, "file")),
 };
 const UNSAFE_GIT_GREP = (argv: string[]) =>
-  argv.some((t) => /^-[A-Za-z]*O/.test(t) || t.startsWith("--open-files-in-pager"));
+  argv.some((t) => /^-[A-Za-z]*O/.test(t) || longOption(t, "open-files-in-pager"));
 
 /** Metacharacters that write files or execute arbitrary commands, and which the segment tokenizer does not
  *  split on — their mere presence in the raw command disqualifies the read-only downgrade. */

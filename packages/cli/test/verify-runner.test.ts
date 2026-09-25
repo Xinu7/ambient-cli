@@ -38,10 +38,36 @@ describe("verifyRunner", () => {
     const viaBash = verifyRunner("C:\\w", "win32", has("verify"), () => false, bash);
     expect(String(viaBash?.env?.PATH ?? viaBash?.env?.Path)).toContain("C:\\Git\\usr\\bin");
   });
-  it("Windows: a .cmd whose path cmd.exe would interpret is not run through cmd", () => {
-    expect(verifyRunner("C:\\a&b", "win32", has("verify.cmd"), () => false, pwsh)).toBeUndefined();
+  it("Windows: a .cmd runs by its relative path, so the workspace path never reaches cmd.exe", () => {
+    const r = verifyRunner("C:\\Work (x86) & co", "win32", has("verify.cmd"), () => false, pwsh);
+    expect(r?.args).toEqual(["/d", "/c", ".ambient\\verify.cmd"]);
   });
   it("Windows with only a POSIX script and no Git Bash: verification is OFF, never a fake failure", () => {
     expect(verifyRunner("C:\\w", "win32", has("verify"), () => false, pwsh)).toBeUndefined();
   });
+});
+
+describe("verifyRunner on disk", () => {
+  it.runIf(process.platform !== "win32")(
+    "runs a compiled verify program directly, and a #!-less script through /bin/sh",
+    async () => {
+      const { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } = await import("node:fs");
+      const { tmpdir } = await import("node:os");
+      const { join } = await import("node:path");
+      const dir = mkdtempSync(join(tmpdir(), "amb-verify-"));
+      try {
+        mkdirSync(join(dir, ".ambient"));
+        const file = join(dir, ".ambient", "verify");
+        writeFileSync(file, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0, 0, 0, 0]));
+        chmodSync(file, 0o755);
+        expect(verifyRunner(dir)?.command).toBe(file);
+        writeFileSync(file, "pnpm test\n");
+        expect(verifyRunner(dir)?.command).toBe("/bin/sh");
+        writeFileSync(file, "#!/bin/sh\npnpm test\n");
+        expect(verifyRunner(dir)?.command).toBe(file);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });

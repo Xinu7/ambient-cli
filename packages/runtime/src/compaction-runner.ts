@@ -6,7 +6,13 @@ import {
   planCompaction,
 } from "@amb/context";
 import type { CatalogModel } from "@amb/protocol";
-import { UNKNOWN_OUTPUT, UNKNOWN_WINDOW, pickForRole, streamTimeouts } from "@amb/reliability";
+import {
+  SAFE_MAX_OUTPUT_TOKENS,
+  UNKNOWN_OUTPUT,
+  UNKNOWN_WINDOW,
+  pickForRole,
+  streamTimeouts,
+} from "@amb/reliability";
 import { SPILL_NOTE, SUMMARY_MARKER, deterministicSummary, planSpill } from "./agent-support.js";
 import { MAX_COMPACTIONS } from "./constants.js";
 import { summaryEffort } from "./effort.js";
@@ -140,7 +146,7 @@ export function summaryOutputTokens(
   window: number,
   readerWindow: number = window,
 ): number {
-  const cap = model?.maxOutputLength ?? UNKNOWN_OUTPUT;
+  const cap = Math.min(model?.maxOutputLength ?? UNKNOWN_OUTPUT, SAFE_MAX_OUTPUT_TOKENS);
   return Math.max(1024, Math.min(cap, Math.floor(window * 0.15), Math.floor(readerWindow * 0.15)));
 }
 

@@ -52,7 +52,9 @@ export function matchSlash(input: string, extra: SlashCommand[] = []): SlashComm
     seen.add(name);
     matched.push(c);
   }
-  if (matched.length === 0 && isFuzzyToken(token)) return fuzzySlash(token, extra);
+  // Loose matching only for a lone command-shaped word: text after it means the user is writing a prompt.
+  const lone = !/\s/.test(input.slice(1).trim());
+  if (matched.length === 0 && lone && isFuzzyToken(token)) return fuzzySlash(token);
   // Exact match first, then the rest in their original (builtins-then-discovered) order.
   return matched.sort((a, b) => {
     const ae = a.name.slice(1).toLowerCase() === token ? 0 : 1;
@@ -66,16 +68,19 @@ function isFuzzyToken(token: string): boolean {
   return token.length >= 2 && /^[a-z0-9:_-]+$/.test(token);
 }
 
-/** No prefix hit → rank every command by a loose in-order match of the name (e.g. `/cmpt` → `/compact`). */
-function fuzzySlash(token: string, extra: SlashCommand[]): SlashCommand[] {
-  const seen = new Set<string>();
-  const unique = [...SLASH_COMMANDS, ...extra].filter((c) => {
-    const name = c.name.toLowerCase();
-    if (seen.has(name)) return false;
-    seen.add(name);
-    return true;
-  });
-  return fuzzyRank(token, unique, (c) => c.name.slice(1));
+/** Commands a loose match must never pick: they change permissions, sign out, or end the session. */
+const EXACT_ONLY = new Set(["/bypass", "/accept", "/ask", "/logout", "/login", "/clear", "/quit"]);
+
+/**
+ * No prefix hit → rank the built-in commands by a loose in-order match (e.g. `/cmpt` → `/compact`). The
+ * user's own discovered commands and anything with side effects need their exact name.
+ */
+function fuzzySlash(token: string): SlashCommand[] {
+  return fuzzyRank(
+    token,
+    SLASH_COMMANDS.filter((c) => !EXACT_ONLY.has(c.name)),
+    (c) => c.name.slice(1),
+  );
 }
 
 /**

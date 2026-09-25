@@ -122,3 +122,20 @@ describe("isReadOnlyCommand — options that run programs or write files", () =>
     },
   );
 });
+
+describe("isReadOnlyCommand — abbreviated and lesser-known options", () => {
+  it.each([
+    "git grep --op=rm hello",
+    "git grep --open hello",
+    "rg --hostname-bin=./evil.sh --hyperlink-format=default hello",
+    "date --se 2020-01-01",
+    "date 0101000030",
+    "hostname --file=/tmp/name",
+    "tree --out=x.txt",
+  ])("%s still needs approval", (cmd) => {
+    expect(isReadOnlyCommand(cmd)).toBe(false);
+  });
+  it.each(["date +%s", "date -u", "git grep --count foo"])("%s stays read-only", (cmd) => {
+    expect(isReadOnlyCommand(cmd)).toBe(true);
+  });
+});

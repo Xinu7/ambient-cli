@@ -7,7 +7,9 @@ export async function runModels(args: string[]): Promise<void> {
   const config = resolveConfig();
   const models = await fetchCatalog(config);
   if (json) {
-    process.stdout.write(`${JSON.stringify(models, null, 2)}\n`);
+    // Capabilities only — prices are never shown by the CLI, in any format.
+    const shown = models.map(({ pricing: _pricing, ...rest }) => rest);
+    process.stdout.write(`${JSON.stringify(shown, null, 2)}\n`);
     return;
   }
   process.stdout.write(`${renderFleet(models).join("\n")}\n`);

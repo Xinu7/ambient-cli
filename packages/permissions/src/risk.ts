@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import { baseName, parseShellCommands } from "./shell-tokens.js";
 
 /**
@@ -23,22 +24,28 @@ const FORK_BOMB = /:\s*\(\s*\)\s*\{[^}]{0,60}[|][^}]{0,60}&[^}]{0,60}\}\s*;?\s*:
 
 /** Delete targets that are catastrophic regardless of intent: the root, home, or a top-level system dir. */
 function isCatastrophicTarget(a: string): boolean {
-  if (a === "/" || a === "/*" || a === "~" || a === "~/" || a === "$HOME" || a === "$HOME/")
-    return true;
+  if (/^(\/|~|\$HOME|\$\{HOME\})\/?\*?$/.test(a)) return true;
+  // System folders at any depth; home folders only at the top (a project deep inside one is ordinary work).
   if (
-    /^\/(bin|boot|dev|etc|lib|lib64|proc|root|sbin|sys|usr|var|System|Applications|Users|home)(\/|$)/.test(
-      a,
-    )
+    /^\/(bin|boot|dev|etc|lib|lib64|proc|root|sbin|sys|usr|var|System|Applications)(\/|$)/.test(a)
   ) {
     return true;
   }
-  // Git Bash spellings of a Windows drive root or its system folders (`/c/`, `/c/Users`).
-  return /^\/[a-z](\/(\*|users|windows|program files|programdata)?)?\/?$/i.test(a);
+  if (/^\/(Users|home)(\/[^/]+)?\/?\*?$/.test(a)) return true;
+  // Git Bash spellings of a Windows drive root, its system folders, or one user's profile.
+  return (
+    /^\/[a-z](\/(\*|windows|program files|programdata))?\/?$/i.test(a) ||
+    /^\/[a-z]\/users(\/[^/]+)?\/?\*?$/i.test(a)
+  );
 }
 
 /** Windows delete targets that are catastrophic: a drive root, the user profile, or a system folder. */
 function isCatastrophicWindowsTarget(a: string): boolean {
-  const t = a.trim().replace(/^["']|["']$/g, "");
+  // `\\?\C:\` is the same drive root with Windows' long-path prefix.
+  const t = a
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .replace(/^\\\\\?\\/, "");
   return (
     /^[a-z]:[\\/]?\*?$/i.test(t) ||
     /^(%userprofile%|\$env:userprofile|%homedrive%%homepath%|%systemroot%|\$env:systemroot|\$home|~)([\\/]\*?)?$/i.test(
@@ -47,6 +54,43 @@ function isCatastrophicWindowsTarget(a: string): boolean {
     /^[a-z]:[\\/](windows|users|program files( \(x86\))?|programdata)[\\/]?$/i.test(t) ||
     /^[a-z]:[\\/]users[\\/][^\\/]+[\\/]?$/i.test(t) // one user's whole profile
   );
+}
+
+/** powershell.exe parameters that take a value (the value is not the start of the script). */
+const PS_VALUE_PARAMS = [
+  "-executionpolicy",
+  "-windowstyle",
+  "-workingdirectory",
+  "-version",
+  "-outputformat",
+  "-inputformat",
+  "-configurationname",
+  "-psconsolefile",
+  "-settingsfile",
+  "-custompipename",
+];
+
+/**
+ * The script a `powershell`/`pwsh` invocation runs: what follows -Command, or the first non-parameter word
+ * onward. An encoded command can't be read, so it's flagged instead.
+ */
+function powershellScript(argv: string[], risk: Risk): string | undefined {
+  const args = argv.slice(1);
+  for (let i = 0; i < args.length; i++) {
+    const o = (args[i] as string).toLowerCase();
+    if (o === "-ec" || psParam(o, "-encodedcommand", 2)) {
+      risk.add("elevated", "runs an encoded PowerShell command that can't be read here");
+      return undefined;
+    }
+    if (o === "-c" || psParam(o, "-command", 4)) return args.slice(i + 1).join(" ");
+    if (psParam(o, "-file", 3)) return undefined; // a script file — its contents aren't visible here
+    if (PS_VALUE_PARAMS.some((p) => psParam(o, p, 3))) {
+      i++; // skip the value
+      continue;
+    }
+    if (!o.startsWith("-")) return args.slice(i).join(" ");
+  }
+  return undefined;
 }
 
 /** cmd options may be written together (`/s/q`); split them so each is recognized. */
@@ -79,18 +123,8 @@ function windowsCommandRisk(command: string, risk: Risk, depth = 0): void {
       continue;
     }
     if (depth < 2 && (base === "powershell" || base === "pwsh")) {
-      const opts = argv.slice(1).map((a) => a.toLowerCase());
-      if (
-        opts.some((o) =>
-          psParam(o, "-encodedcommand", 2) && o !== "-e" ? true : o === "-e" || o === "-ec",
-        )
-      ) {
-        risk.add("elevated", "runs an encoded PowerShell command that can't be read here");
-      }
-      // The script follows -Command, or is simply the rest of the line when no parameter names it.
-      const i = opts.findIndex((o) => o === "-c" || psParam(o, "-command", 4));
-      const start = i >= 0 ? i + 1 : opts.findIndex((o) => !o.startsWith("-")) + 1;
-      if (start > 0) windowsCommandRisk(argv.slice(start).join(" "), risk, depth + 1);
+      const script = powershellScript(argv, risk);
+      if (script) windowsCommandRisk(script, risk, depth + 1);
       continue;
     }
     windowsRisk(base, argv, risk);
@@ -99,13 +133,19 @@ function windowsCommandRisk(command: string, risk: Risk, depth = 0): void {
 
 /** Classify one Windows command. `base` is lower-cased without `.exe`. */
 function windowsRisk(base: string, argv: string[], risk: Risk): void {
-  const opts = splitCmdOptions(argv.slice(1)).map((a) => a.toLowerCase());
+  // `-Recurse:$true` is -Recurse.
+  const opts = splitCmdOptions(argv.slice(1)).map((a) =>
+    a.toLowerCase().replace(/^(-[a-z]+):.*$/, "$1"),
+  );
   // A target is anything that isn't an option (a drive-rooted path like C:\ is a target, never an option).
   const targets = argv.slice(1).filter((a) => !/^-/.test(a) && !/^\/[a-z?]{1,2}$/i.test(a));
   const has = (...names: string[]) => opts.some((o) => names.includes(o));
   const catastrophic = targets.some(isCatastrophicWindowsTarget);
   const psRecurse = opts.some((o) => psParam(o, "-recurse", 2));
   const psForce = opts.some((o) => o === "-f" || psParam(o, "-force", 3));
+  // `rm`/`del`/`rd` are also POSIX or cmd commands; only read them as Remove-Item when a parameter is
+  // spelled the PowerShell way (`-Rec`, `-Fo`), so `rm -r -f dist` in bash isn't mistaken for it.
+  const psSpelled = opts.some((o) => psParam(o, "-recurse", 3) || psParam(o, "-force", 3));
   if ((base === "rd" || base === "rmdir") && has("/s")) {
     risk.add(
       catastrophic ? "critical" : "elevated",
@@ -114,7 +154,9 @@ function windowsRisk(base: string, argv: string[], risk: Risk): void {
   } else if ((base === "del" || base === "erase") && has("/s")) {
     risk.add(catastrophic ? "critical" : "elevated", "recursively deletes files");
   } else if (
-    ["remove-item", "ri", "rm", "del", "erase", "rd", "rmdir"].includes(base) &&
+    (base === "remove-item" ||
+      base === "ri" ||
+      (["rm", "del", "erase", "rd", "rmdir"].includes(base) && psSpelled)) &&
     psRecurse &&
     (psForce || catastrophic)
   ) {
@@ -273,7 +315,8 @@ export function classifyToolRisk(toolName: string, args: Record<string, unknown>
     for (const p of pathsOf(args)) {
       // Normalize Windows separators + case before matching. Over-flagging a case-variant (`.ENV`) on a
       // case-sensitive host is an acceptable false positive (a harmless extra ask), never a security hole.
-      if (SENSITIVE_PATH.test(p.replace(/\\/g, "/").toLowerCase())) {
+      // Normalized first, so `.ambient//verify` or `a/../.ssh/x` can't slip past the pattern.
+      if (SENSITIVE_PATH.test(posix.normalize(p.replace(/\\/g, "/")).toLowerCase())) {
         reasons.push(`writes a sensitive file: ${p}`);
       }
     }

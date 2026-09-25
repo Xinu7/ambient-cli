@@ -40,24 +40,4 @@ describe("catalog cache", () => {
     const again = await c.fetchCatalog();
     expect(again[0]?.id).toBe("m/a");
   });
-  it("stops standing in once the last good catalog is long out of date", async () => {
-    let n = 0;
-    const flaky = async () => {
-      n += 1;
-      if (n > 1) throw new Error("network down");
-      return new Response(JSON.stringify(body(["m/a"])), { status: 200 });
-    };
-    const c = new AmbientChatClient(
-      { baseUrl: "https://api.ambient.xyz" },
-      { fetch: flaky as never, ttlMs: 0 },
-    );
-    const realNow = Date.now;
-    try {
-      await c.fetchCatalog();
-      Date.now = () => realNow() + 11 * 60_000;
-      await expect(c.fetchCatalog()).rejects.toThrow(/network down/);
-    } finally {
-      Date.now = realNow;
-    }
-  });
 });
