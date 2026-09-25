@@ -79,7 +79,7 @@ async function runOne(
       toolName: call.name,
       ok: false,
       result: null,
-      error: `invalid arguments: ${parsed.error.message}`,
+      error: argumentRepairHint(call, parsed.error.issues),
       durationMs: dur(),
     };
   }
@@ -461,4 +461,23 @@ function capDiff(diff: string): string {
 function previewOf(o: ToolOutcome): string | undefined {
   // Tool-aware, human-readable preview (file contents / stdout / matches …) — NEVER a raw JSON envelope.
   return previewResult(o.toolName, o.result, o.error);
+}
+
+/**
+ * A specific, actionable message for a call whose arguments failed validation, so the model can fix the call
+ * on the next turn instead of guessing: malformed JSON quotes what it sent; a schema miss names each field.
+ */
+export function argumentRepairHint(
+  call: { name: string; args: unknown; rawArgs: string },
+  issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>,
+): string {
+  if (call.args === undefined) {
+    const raw = call.rawArgs.length > 300 ? `${call.rawArgs.slice(0, 300)}…` : call.rawArgs;
+    return `invalid arguments: your arguments for \`${call.name}\` were not valid JSON (${raw}). Re-send the call with a single complete JSON object.`;
+  }
+  const fields = issues
+    .slice(0, 6)
+    .map((i) => `${i.path.length > 0 ? i.path.map(String).join(".") : "(arguments)"}: ${i.message}`)
+    .join("; ");
+  return `invalid arguments for \`${call.name}\`: ${fields}. Fix these fields and call it again.`;
 }

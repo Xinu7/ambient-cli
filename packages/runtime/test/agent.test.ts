@@ -293,7 +293,7 @@ describe("Agent loop", () => {
     expect(learned[0]?.[1]).toBeCloseTo(4, 0); // ~4 bytes/token, from the request bytes ÷ reported tokens
   });
 
-  it("learns a NEGATIVE signal when native tool-call args are malformed (args undefined)", async () => {
+  it("does NOT demote a model to the assisted lane on a single malformed native call", async () => {
     const learned: Array<[string, boolean]> = [];
     const capabilities = {
       laneFor: () => "direct" as const,
@@ -307,7 +307,7 @@ describe("Agent loop", () => {
       { content: "done", toolCalls: [] },
     ]);
     await new Agent(client).run("go", baseOpts({ capabilities }));
-    expect(learned[0]).toEqual(["moonshotai/kimi-k2.7-code", false]);
+    expect(learned.some(([, w]) => w === false)).toBe(false); // one bad call is noise, not evidence
   });
 
   it("executes a tool call then finishes; write tool actually creates the file", async () => {

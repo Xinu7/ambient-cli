@@ -129,6 +129,28 @@ describe("overflow synthesis + detection", () => {
     expect(isContextOverflowError("invalid image payload", { hasImage: true })).toBe(false);
     expect(isContextOverflowError("unsupported parameter: temperature")).toBe(false);
   });
+  it("an 'invalid request' wrapper around a REAL overflow is still an overflow", () => {
+    expect(
+      isContextOverflowError(
+        "Invalid request: This model's maximum context length is 32768 tokens. However, you requested 40000 tokens.",
+      ),
+    ).toBe(true);
+    expect(isContextOverflowError('{"code":"context_length_exceeded"}')).toBe(true);
+    expect(isContextOverflowError("input is longer than the model's context length")).toBe(true);
+  });
+  it("a real token overflow is detected even when the request carries images", () => {
+    expect(
+      isContextOverflowError("maximum context length is 32768 tokens, requested 50000", {
+        hasImage: true,
+      }),
+    ).toBe(true);
+    expect(isContextOverflowError("model does not support image input", { hasImage: true })).toBe(
+      false,
+    );
+    expect(
+      isContextOverflowError("image too large: exceeds maximum context", { hasImage: true }),
+    ).toBe(false);
+  });
   it("parseOverflowMax extracts the provider's real reported ceiling (the number after '>')", () => {
     expect(parseOverflowMax("prompt is too long: 300000 tokens > 262144 maximum")).toBe(262_144);
     expect(parseOverflowMax("requested 5000 tokens > 4096 max")).toBe(4096);

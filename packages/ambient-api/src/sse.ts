@@ -100,7 +100,11 @@ export class ChatAccumulator {
   private finishReason: string | undefined;
   private reportedModel: string | undefined;
   private usage: AccumulatedCompletion["usage"];
-  private readonly toolMap = new Map<number, AccumulatedToolCall>();
+  /** Tool calls in first-seen order. Keyed by stream index when the provider sends one, else by call id —
+   *  a provider that omits `index` must not have its parallel calls merged into one broken call. */
+  private readonly toolMap = new Map<string, AccumulatedToolCall>();
+  private readonly idToKey = new Map<string, string>();
+  private lastToolKey: string | undefined;
 
   constructor(private readonly cb: AccumulatorCallbacks = {}) {}
 
@@ -128,12 +132,16 @@ export class ChatAccumulator {
       }
       if (delta.tool_calls) {
         for (const tc of delta.tool_calls) {
-          const idx = tc.index ?? 0;
-          const cur = this.toolMap.get(idx) ?? { id: "", name: "", arguments: "" };
-          if (tc.id) cur.id = tc.id;
+          const key = this.toolKey(tc);
+          const cur = this.toolMap.get(key) ?? { id: "", name: "", arguments: "" };
+          if (tc.id) {
+            cur.id = tc.id;
+            this.idToKey.set(tc.id, key);
+          }
           if (tc.function?.name) cur.name = tc.function.name;
           if (tc.function?.arguments) cur.arguments += tc.function.arguments;
-          this.toolMap.set(idx, cur);
+          this.toolMap.set(key, cur);
+          this.lastToolKey = key;
         }
       }
     }
@@ -147,8 +155,15 @@ export class ChatAccumulator {
     return true;
   }
 
+  /** Stream index when present; else a previously-seen id; else a new id; else continue the latest call. */
+  private toolKey(tc: { index?: number | null; id?: string | null }): string {
+    if (typeof tc.index === "number") return `i${tc.index}`;
+    if (tc.id) return this.idToKey.get(tc.id) ?? `id:${tc.id}`;
+    return this.lastToolKey ?? "i0";
+  }
+
   result(): AccumulatedCompletion {
-    const toolCalls = [...this.toolMap.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v);
+    const toolCalls = [...this.toolMap.values()];
     return {
       content: this.content,
       reasoning: this.reasoning,

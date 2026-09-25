@@ -91,6 +91,31 @@ export function withTurnBudget(
  * appends a full result batch before the next generation). Assisted-lane turns record results as plain text
  * (no `toolCalls`/`toolCallId`), so they are never trimmed. Returns a copy; a no-op when already valid.
  */
+/**
+ * Replace image parts carried in from EARLIER messages with numbered text stubs. Images are sent once, on the
+ * message they were attached to: re-sending base64 every turn wastes the window, and after a switch to a
+ * blind model the stale parts would make every request 400.
+ */
+export function stubCarriedImages(msgs: readonly Msg[]): Msg[] {
+  let n = 0;
+  return msgs.map((m) => {
+    if (!Array.isArray(m.content)) return m;
+    const parts = m.content as Array<{ type?: string; text?: string }>;
+    if (!parts.some((p) => p?.type === "image_url")) return m;
+    const text = parts
+      .map((p) =>
+        p?.type === "image_url"
+          ? `[image #${++n} from an earlier message — not re-sent]`
+          : typeof p?.text === "string"
+            ? p.text
+            : "",
+      )
+      .filter((t) => t.length > 0)
+      .join("\n");
+    return { ...m, content: text };
+  });
+}
+
 export function sanitizeContinuation(msgs: readonly Msg[]): Msg[] {
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i];

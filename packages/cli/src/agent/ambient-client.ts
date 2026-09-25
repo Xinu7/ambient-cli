@@ -39,7 +39,7 @@ export class AmbientChatClient implements ChatClient {
       // parallel calls OR across turns — a per-response index alone repeats as tc_read_0.
       id: tc.id || `tc_${tc.name}_${randomUUID().slice(0, 8)}`,
       name: tc.name,
-      args: safeParse(tc.arguments),
+      args: parseToolArgs(tc.arguments),
       rawArgs: tc.arguments,
     }));
     return {
@@ -52,7 +52,12 @@ export class AmbientChatClient implements ChatClient {
   }
 }
 
-function safeParse(json: string): unknown {
+/**
+ * Parse streamed tool arguments. Empty/whitespace means a zero-argument call (`list()`), which is valid and
+ * must not be mistaken for malformed JSON. Returns undefined only for genuinely unparseable input.
+ */
+export function parseToolArgs(json: string): unknown {
+  if (json.trim().length === 0) return {};
   try {
     return JSON.parse(json);
   } catch {

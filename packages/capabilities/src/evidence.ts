@@ -40,6 +40,8 @@ export const PROVENANCE_RANK: Record<CapabilityProvenance, number> = {
 /** Default TTLs (ms): learned/probed facts last a day; declared refreshes with the catalog. */
 export const TTL = {
   learned: 24 * 60 * 60 * 1000,
+  /** A learned NEGATIVE expires fast: a demotion should be re-tested soon, not pin a model for a day. */
+  learnedNo: 2 * 60 * 60 * 1000,
   probed: 24 * 60 * 60 * 1000,
   declared: 60 * 60 * 1000,
   assumed: 60 * 60 * 1000,
@@ -118,7 +120,7 @@ export function learnedRecord(modelId: string, worked: boolean, now: number): Ca
     toolCalling: worked ? "yes" : "no",
     provenance: "learned",
     observedAt: now,
-    expiresAt: now + TTL.learned,
+    expiresAt: now + (worked ? TTL.learned : TTL.learnedNo),
   };
 }
 

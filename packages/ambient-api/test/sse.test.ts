@@ -123,3 +123,25 @@ describe("readSSEStream", () => {
     expect(seen).toEqual(['{"a":1}', '{"b":2}']);
   });
 });
+
+describe("tool-call deltas without an index", () => {
+  it("keys parallel calls by id instead of merging them into one broken call", () => {
+    const acc = new ChatAccumulator();
+    const tc = (o: unknown) => ev({ choices: [{ delta: { tool_calls: [o] } }] });
+    acc.push(tc({ id: "a", function: { name: "read", arguments: '{"path":' } }));
+    acc.push(tc({ id: "b", function: { name: "list", arguments: "{}" } }));
+    acc.push(tc({ id: "a", function: { arguments: '"x"}' } }));
+    const { toolCalls } = acc.result();
+    expect(toolCalls.map((t) => [t.id, t.name, t.arguments])).toEqual([
+      ["a", "read", '{"path":"x"}'],
+      ["b", "list", "{}"],
+    ]);
+  });
+  it("an id-less, index-less continuation appends to the most recent call", () => {
+    const acc = new ChatAccumulator();
+    const tc = (o: unknown) => ev({ choices: [{ delta: { tool_calls: [o] } }] });
+    acc.push(tc({ id: "a", function: { name: "read", arguments: '{"pa' } }));
+    acc.push(tc({ function: { arguments: 'th":"x"}' } }));
+    expect(acc.result().toolCalls[0]?.arguments).toBe('{"path":"x"}');
+  });
+});

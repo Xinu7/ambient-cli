@@ -33,3 +33,6 @@ export const SKILLS_MIN_TOKENS = 150;
  *  repo-map + resume) may occupy — the rest is for tools + the conversation + the output reserve. Keeps a
  * small-window model from being blocked before turn 1 by an over-large anchor. */
 export const INJECTED_CONTEXT_FRACTION = 0.4;
+
+/** Consecutive turns with malformed native tool-call JSON before a model is demoted to the assisted lane. */
+export const MALFORMED_STRIKES_TO_DEMOTE = 3;

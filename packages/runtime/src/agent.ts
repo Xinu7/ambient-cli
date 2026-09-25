@@ -47,6 +47,7 @@ import {
   renderPlanAnchor,
   sanitizeContinuation,
   stringifyResult,
+  stubCarriedImages,
   withGoalReminder,
   withTurnBudget,
 } from "./agent-support.js";
@@ -56,6 +57,7 @@ import { compact, reduceContext } from "./compaction-runner.js";
 import {
   DESIRED_OUTPUT,
   INJECTED_CONTEXT_FRACTION,
+  MALFORMED_STRIKES_TO_DEMOTE,
   MAX_COMPACTIONS,
   MAX_IDENTICAL_TOOL_BATCHES,
   MAX_VERIFY_ATTEMPTS,
@@ -353,7 +355,9 @@ export class Agent {
     // by the last run if it grew), then this message's new user turn. On the first message priorMessages is
     // empty → the classic [system, user] pair. The runtime's own compaction manages growth from here.
     // sanitizeContinuation trims any dangling tool-call turn so appending the new user message stays wire-valid.
-    const carried = opts.priorMessages ? sanitizeContinuation(opts.priorMessages) : [];
+    const carried = opts.priorMessages
+      ? stubCarriedImages(sanitizeContinuation(opts.priorMessages))
+      : [];
     let messages: Msg[] = [
       // Fold the seeded plan (if any) into the anchor from turn 1 so a multi-message session adheres to it
       // before the model re-calls `plan`; the in-loop fold keeps it current as the model updates the plan.
@@ -389,6 +393,7 @@ export class Agent {
     // several times running with no progress, stop early with `looping` instead of burning to max_turns.
     let lastBatchSig = "";
     let batchRepeat = 0;
+    let malformedStrikes = 0;
 
     // ── Turn budget ──────────────────────────────────────────────────────────────────────────────────────
     // `maxTurns` is a SEGMENT, not a hard cap. When a segment fills while the task is still progressing,
@@ -883,9 +888,17 @@ export class Agent {
 
       // Learn ONLY in the direct lane: did the served model emit well-formed NATIVE tool calls? (Assisted
       // tool calls are synthesized from text, so they say nothing about native tool-calling.)
+      // One malformed call is noise (a dropped chunk, a truncated arg), not evidence the model can't do native
+      // tools — so only CONSECUTIVE malformed turns demote it; a clean turn clears the strikes.
       if (opts.capabilities && !assistedTurn) {
         const allParsed = completion.toolCalls.every((tc) => tc.args !== undefined);
-        opts.capabilities.learn(target, allParsed);
+        if (allParsed) {
+          malformedStrikes = 0;
+          opts.capabilities.learn(target, true);
+        } else if (++malformedStrikes >= MALFORMED_STRIKES_TO_DEMOTE) {
+          malformedStrikes = 0;
+          opts.capabilities.learn(target, false);
+        }
       }
 
       // record the assistant tool-call turn + execute + append results. The two lanes record differently:

@@ -156,3 +156,13 @@ describe("CapabilityStore", () => {
     expect(new CapabilityStore(path).get("m/x")?.verifyRuns).toBe(3);
   });
 });
+
+describe("learned negative TTL", () => {
+  it("a learned 'no' expires much sooner than a learned 'yes' so a demoted model is re-tested", async () => {
+    const { learnedRecord, TTL } = await import("../src/index.js");
+    const now = 1_000;
+    expect(learnedRecord("m", false, now).expiresAt).toBe(now + TTL.learnedNo);
+    expect(learnedRecord("m", true, now).expiresAt).toBe(now + TTL.learned);
+    expect(TTL.learnedNo).toBeLessThan(TTL.learned);
+  });
+});
