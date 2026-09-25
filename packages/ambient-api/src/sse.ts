@@ -85,7 +85,7 @@ export interface AccumulatedCompletion {
   finishReason?: string;
   /** The model the provider actually served (from the response `model`), observed during the stream. */
   reportedModel?: string;
-  usage?: { promptTokens?: number; completionTokens?: number };
+  usage?: { promptTokens?: number; completionTokens?: number; cachedTokens?: number };
 }
 
 export interface AccumulatorCallbacks {
@@ -147,9 +147,11 @@ export class ChatAccumulator {
     }
     if (choice?.finish_reason) this.finishReason = choice.finish_reason;
     if (chunk.usage) {
+      const cached = chunk.usage.prompt_tokens_details?.cached_tokens;
       this.usage = {
         promptTokens: chunk.usage.prompt_tokens,
         completionTokens: chunk.usage.completion_tokens,
+        ...(typeof cached === "number" ? { cachedTokens: cached } : {}),
       };
     }
     return true;

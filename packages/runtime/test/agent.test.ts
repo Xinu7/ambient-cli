@@ -1014,10 +1014,9 @@ describe("Agent loop", () => {
     expect(systemLens[1] ?? 0).toBeLessThan(systemLens[0] ?? 0);
   });
 
-  it("pins the model's plan into the system anchor each turn so it survives compaction", async () => {
-    // Snapshot the system content STRING per call (strings are immutable) — the shared mock captures the
-    // messages array by reference, which the in-place anchor rebuild would otherwise confound.
+  it("re-sends the model's plan on every request, keeping the system prompt byte-stable (cacheable)", async () => {
     const systemPerCall: string[] = [];
+    const sentPerCall: string[] = [];
     const script: TurnCompletion[] = [
       {
         content: "",
@@ -1040,15 +1039,17 @@ describe("Agent loop", () => {
     const client: ChatClient = {
       fetchCatalog: async () => catalog,
       chat: async (p) => {
-        systemPerCall.push(String(p.messages.find((m) => m.role === "system")?.content ?? ""));
+        systemPerCall.push(String(p.messages[0]?.content ?? ""));
+        sentPerCall.push(p.messages.map((m) => String(m.content ?? "")).join("\n"));
         return script.shift() ?? { content: "done", toolCalls: [] };
       },
     };
     await new Agent(client).run("build it", baseOpts());
-    expect(systemPerCall[0]).not.toContain("Current plan"); // no plan on the first request
-    expect(systemPerCall[1]).toContain("Current plan"); // …re-injected after the model declared one
-    expect(systemPerCall[1]).toContain("step one");
-    expect(systemPerCall[1]).toContain("step two");
+    expect(sentPerCall[0]).not.toContain("Current plan"); // no plan on the first request
+    expect(sentPerCall[1]).toContain("Current plan"); // …in view after the model declared one
+    expect(sentPerCall[1]).toContain("step one");
+    expect(sentPerCall[1]).toContain("step two");
+    expect(systemPerCall[1]).toBe(systemPerCall[0]); // the system prompt never changed (prompt-cache friendly)
   });
 
   it("injects the workspace repo map (budgeted) into the system prompt when the port provides one", async () => {

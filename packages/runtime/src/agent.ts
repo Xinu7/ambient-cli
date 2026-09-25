@@ -61,6 +61,7 @@ import {
   stubCarriedImages,
   stubImageParts,
   withGoalReminder,
+  withPlanNote,
   withTurnBudget,
 } from "./agent-support.js";
 import { makeAskVisionTool } from "./ask-vision.js";
@@ -336,7 +337,6 @@ export class Agent {
         platform: opts.workspace.platform(),
         shell: machineShell().label,
         ...(opts.goal ? { goal: opts.goal } : {}),
-        ...(gitBlock ? { git: gitBlock } : {}),
         ...(combined ? { instructions: combined } : {}),
       });
     };
@@ -429,12 +429,21 @@ export class Agent {
     const carried = opts.priorMessages
       ? stubCarriedImages(sanitizeContinuation(opts.priorMessages))
       : [];
+    // The git snapshot changes after every edit, so it rides with THIS request's task message rather than the
+    // system prompt: the system prompt + earlier conversation then stay a byte-identical, cacheable prefix.
+    if (gitBlock) {
+      const note = `\n\n<repository_state note="at the start of this request — re-check with git as you go">\n${gitBlock}\n</repository_state>`;
+      firstUserContent =
+        typeof firstUserContent === "string"
+          ? `${firstUserContent}${note}`
+          : [...firstUserContent, { type: "text", text: note.trim() }];
+    }
     let messages: Msg[] = [
       // Fold the seeded plan (if any) into the anchor from turn 1 so a multi-message session adheres to it
       // before the model re-calls `plan`; the in-loop fold keeps it current as the model updates the plan.
       {
         role: "system",
-        content: currentPlanBlock ? `${baseSystem}\n\n${currentPlanBlock}` : baseSystem,
+        content: baseSystem,
       },
       ...carried,
       // Pinned: compaction keeps the CURRENT task verbatim however long the session grows.
@@ -535,7 +544,7 @@ export class Agent {
           baseSystem = buildBaseAnchor(nextWindow);
           messages[0] = {
             role: "system",
-            content: currentPlanBlock ? `${baseSystem}\n\n${currentPlanBlock}` : baseSystem,
+            content: baseSystem,
           };
           emit({
             schemaVersion: 1,
@@ -565,7 +574,7 @@ export class Agent {
         baseSystem = buildBaseAnchor(budget.contextWindow);
         messages[0] = {
           role: "system",
-          content: currentPlanBlock ? `${baseSystem}\n\n${currentPlanBlock}` : baseSystem,
+          content: baseSystem,
         };
       }
       if (
@@ -677,7 +686,10 @@ export class Agent {
         // north-star + its turn budget in view right before it generates. Transient; never persisted.
         const reqMessages = withTurnBudget(
           withGoalReminder(
-            assisted ? this.withAssistedProtocol(messages, opts.mode) : messages,
+            withPlanNote(
+              assisted ? this.withAssistedProtocol(messages, opts.mode) : messages,
+              currentPlanBlock,
+            ),
             opts.goal,
           ),
           { turn: turns, ceiling, finalWrapUp },
@@ -1108,17 +1120,10 @@ export class Agent {
         break;
       }
 
-      // Pin the model's own plan into the SYSTEM anchor: when the model calls `plan`, re-fold its
-      // latest checklist onto the base system prompt (never compacted), so it keeps adhering to it on a long
-      // run instead of losing it into compacted history. Rebuilt from baseSystem so the block never compounds.
+      // Keep the model's latest plan (re-sent on every request as a trailing note, so it survives compaction
+      // and stays in view) — without rewriting the system prompt, whose byte-stable prefix Ambient caches.
       const planCall = toolCalls.find((tc) => tc.name === "plan");
-      if (planCall) {
-        currentPlanBlock = renderPlanAnchor(planCall.args);
-        messages[0] = {
-          role: "system",
-          content: currentPlanBlock ? `${baseSystem}\n\n${currentPlanBlock}` : baseSystem,
-        };
-      }
+      if (planCall) currentPlanBlock = renderPlanAnchor(planCall.args);
 
       // A successful mutating tool means the workspace changed → the completion gate should verify. Detect
       // by result shape (write/edit/apply_patch) OR by declared effects (bash/process can mutate too — audit).

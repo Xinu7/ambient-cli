@@ -134,7 +134,7 @@ describe("interactive conversation carry-forward (long-thread memory)", () => {
 });
 
 describe("plan anchor across interactive messages (adherence)", () => {
-  it("pins the outstanding plan into the system anchor from turn 1 — before the model re-calls plan", async () => {
+  it("sends the outstanding plan with the very first request — before the model re-calls plan", async () => {
     const client = new MockClient([model("vendor/m")], [{ content: "done", toolCalls: [] }]);
     await new Agent(client).run(
       "keep going",
@@ -147,10 +147,12 @@ describe("plan anchor across interactive messages (adherence)", () => {
         },
       }),
     );
-    const sys = String(client.calls[0]?.messages.find((m) => m.role === "system")?.content);
-    expect(sys).toContain("## Current plan"); // the checklist is resident from the first turn
-    expect(sys).toContain("Wire the parser");
-    expect(sys).toContain("Add tests");
+    const sent = (client.calls[0]?.messages ?? []).map((m) => String(m.content)).join("\n");
+    expect(sent).toContain("## Current plan"); // the checklist is in view from the first turn
+    expect(sent).toContain("Wire the parser");
+    expect(sent).toContain("Add tests");
+    // …but NOT inside the system prompt, which stays a stable, cacheable prefix.
+    expect(String(client.calls[0]?.messages[0]?.content)).not.toContain("## Current plan");
   });
 });
 

@@ -38,6 +38,17 @@ export function renderPlanAnchor(args: unknown): string {
  * keeps even an 8B model aligned. Transient — built per attempt, never persisted. Returns a NEW array (never
  * mutates the caller's messages); a no-op when there's no goal.
  */
+/**
+ * The model's current plan, appended to the OUTBOUND messages on every request (recency slot, like the goal
+ * reminder). Kept out of the system prompt so that prompt stays byte-identical across turns — Ambient caches
+ * a repeated prompt prefix, and rewriting the system prompt on every plan update would miss that cache for
+ * the whole conversation. Transient; never persisted. Returns a NEW array.
+ */
+export function withPlanNote(messages: Msg[], planBlock: string): Msg[] {
+  if (!planBlock) return messages;
+  return [...messages, { role: "system", content: planBlock }];
+}
+
 export function withGoalReminder(messages: Msg[], goal: string | undefined): Msg[] {
   if (!goal || !goal.trim()) return messages;
   return [

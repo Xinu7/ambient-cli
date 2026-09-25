@@ -53,7 +53,7 @@ export interface TurnCompletion {
   toolCalls: ToolCall[];
   finishReason?: string;
   reportedModel?: string;
-  usage?: { promptTokens?: number; completionTokens?: number };
+  usage?: { promptTokens?: number; completionTokens?: number; cachedTokens?: number };
 }
 
 /** A single chat message in the transcript we send to the model. */

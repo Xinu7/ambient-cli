@@ -42,6 +42,11 @@ export const UsageSchema = z.object({
   prompt_tokens: z.number().optional(),
   completion_tokens: z.number().optional(),
   total_tokens: z.number().optional(),
+  /** Prompt-cache detail: how many prompt tokens were served from the provider's cache. */
+  prompt_tokens_details: z
+    .object({ cached_tokens: z.number().nullable().optional() })
+    .nullable()
+    .optional(),
 });
 export type Usage = z.infer<typeof UsageSchema>;
 

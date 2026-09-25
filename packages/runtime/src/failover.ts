@@ -204,6 +204,9 @@ export async function runChatWithFailover(
         ...(result.usage?.completionTokens !== undefined
           ? { completionTokens: result.usage.completionTokens }
           : {}),
+        ...(result.usage?.cachedTokens !== undefined
+          ? { cachedTokens: result.usage.cachedTokens }
+          : {}),
         ...(reqEffort ? { effort: reqEffort } : {}),
         empty,
         truncated: result.finishReason === "length",

@@ -31,10 +31,13 @@ async function waitFor(lastFrame: () => string | undefined, needle: string): Pro
   }
   return lastFrame() ?? "";
 }
-const systemText = (p: ChatParams): string => {
-  const s = p.messages.find((m) => m.role === "system");
-  return typeof s?.content === "string" ? s.content : "";
-};
+/** Everything the model is given as system context for this request (the prompt plus trailing notes such as
+ *  the current plan). */
+const systemText = (p: ChatParams): string =>
+  p.messages
+    .filter((m) => m.role === "system" && typeof m.content === "string")
+    .map((m) => m.content as string)
+    .join("\n");
 const lastUserText = (p: ChatParams): string => {
   const users = p.messages.filter((m) => m.role === "user");
   const last = users[users.length - 1];
