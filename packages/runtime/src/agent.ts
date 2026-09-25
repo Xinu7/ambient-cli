@@ -8,6 +8,7 @@ import {
   fitInjectedBlocks,
   planImages,
   preflight,
+  renderRelevantSkills,
   renderSkillIndex,
   shouldCompact,
   toolResultCharBudget,
@@ -489,9 +490,20 @@ export class Agent {
       : [];
     // The git snapshot changes after every edit, so it rides with THIS request's task message rather than the
     // system prompt: the system prompt + earlier conversation then stay a byte-identical, cacheable prefix.
+    // Skills that look relevant to this task ride with the task message too (the system prompt stays stable).
+    const relevantSkills =
+      skillsBudget >= SKILLS_MIN_TOKENS
+        ? renderRelevantSkills(opts.workspace.skills(opts.workspaceRoot), userInput)
+        : "";
     const withGitNote = (content: string | ContentPart[]): string | ContentPart[] => {
-      if (!gitBlock) return content;
-      const note = `\n\n<repository_state note="at the start of this request — re-check with git as you go">\n${gitBlock}\n</repository_state>`;
+      const parts = [
+        gitBlock
+          ? `<repository_state note="at the start of this request — re-check with git as you go">\n${gitBlock}\n</repository_state>`
+          : "",
+        relevantSkills,
+      ].filter(Boolean);
+      if (parts.length === 0) return content;
+      const note = `\n\n${parts.join("\n\n")}`;
       return typeof content === "string"
         ? `${content}${note}`
         : [...content, { type: "text", text: note.trim() }];

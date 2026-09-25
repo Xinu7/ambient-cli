@@ -405,8 +405,25 @@ export function App(deps: AppDeps): ReactNode {
     } catch {
       /* best-effort — a bad command dir never breaks the TUI */
     }
+    // Skills run as `/skill-name [args]` too (unless a skill opts out, or a command already has the name).
+    const taken = new Set([...SLASH_COMMANDS.map((c) => c.name), ...bodies.keys()]);
+    for (const sk of deps.skills ?? []) {
+      const name = `/${sk.name}`;
+      if (sk.userInvocable === false || taken.has(name) || !/^[a-zA-Z0-9_.:-]+$/.test(sk.name))
+        continue;
+      taken.add(name);
+      palette.push({
+        name,
+        desc: `skill · ${sk.description}`,
+        ...(sk.argumentHint ? { args: sk.argumentHint } : {}),
+      });
+      bodies.set(
+        name,
+        `Use the "${sk.name}" skill: load it with the skill tool and follow its instructions.\n\n$ARGUMENTS`,
+      );
+    }
     return { palette, bodies };
-  }, [deps.workspaceRoot]);
+  }, [deps.workspaceRoot, deps.skills]);
   const [picker, setPickerState] = useState<"model" | "effort" | "skills" | null>(null);
   const [pickerSel, setPickerSelState] = useState(0);
   const [approvalSel, setApprovalSelState] = useState(0);

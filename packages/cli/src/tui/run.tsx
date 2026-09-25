@@ -150,6 +150,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     source: skillSource(s.path),
     description: s.description,
     pinned: pinnedNames.has(s.name),
+    ...(s.userInvocable === false ? { userInvocable: false } : {}),
+    ...(s.argumentHint ? { argumentHint: s.argumentHint } : {}),
   }));
   const skillsInfo = { total: skillRows.length, pinned: pinnedNames.size };
   const onTogglePin = (name: string): boolean => {

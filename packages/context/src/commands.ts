@@ -1,7 +1,9 @@
 import { readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { parseFrontmatter, textField } from "./frontmatter.js";
 import { MAX_DIR_ENTRIES, isRealDir, isRealFile, readTextCappedSafe } from "./fs-safe.js";
+import { installedPlugins } from "./plugins.js";
 
 /**
  * Discover reusable SLASH COMMANDS from a user's existing Claude Code (`.claude/commands/**.md`) and Codex
@@ -22,13 +24,9 @@ export interface SlashCommand {
 const MAX_BODY = 20_000;
 
 function parse(name: string, text: string, source: "project" | "user"): SlashCommand {
-  const m = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
-  const front = m ? (m[1] ?? "") : "";
-  const body = (m ? (m[2] ?? "") : text).trim();
-  const field = (key: string): string | undefined => {
-    const fm = front.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
-    return fm ? fm[1]?.trim().replace(/^["']|["']$/g, "") : undefined;
-  };
+  const fm = parseFrontmatter(text);
+  const body = (fm ? fm.body : text.replace(/\r\n?/g, "\n")).trim();
+  const field = (key: string): string | undefined => (fm ? textField(fm.data, key) : undefined);
   // When there's no frontmatter `description`, summarise from the body — so the palette shows what a command
   // DOES, not a generic "custom command" label. Prefer the first prose sentence (usually the real summary,
   // e.g. under a `# Title`); fall back to the heading title itself.
@@ -81,18 +79,26 @@ function walk(dir: string, prefix: string, depth: number): { rel: string; full: 
   return out;
 }
 
-/** Discover slash commands across roots (precedence: Claude project/user → Codex → ambient), first-wins. */
+/**
+ * Discover slash commands across roots (precedence: Claude project/user → Codex → ambient → enabled Claude
+ * plugins, whose commands are named `plugin:command`), first-wins.
+ */
 export function discoverCommands(workspaceRoot: string, home: string = homedir()): SlashCommand[] {
-  const roots: { dir: string; source: "project" | "user" }[] = [
+  const roots: { dir: string; source: "project" | "user"; prefix?: string }[] = [
     { dir: join(workspaceRoot, ".claude", "commands"), source: "project" },
     { dir: join(home, ".claude", "commands"), source: "user" },
     { dir: join(workspaceRoot, ".codex", "prompts"), source: "project" },
     { dir: join(home, ".codex", "prompts"), source: "user" },
     { dir: join(workspaceRoot, ".ambient", "commands"), source: "project" },
+    ...installedPlugins(workspaceRoot, home).map((p) => ({
+      dir: join(p.root, "commands"),
+      source: "user" as const,
+      prefix: `${p.name}:`,
+    })),
   ];
   const byName = new Map<string, SlashCommand>();
-  for (const { dir, source } of roots) {
-    for (const { rel, full } of walk(dir, "", 0)) {
+  for (const { dir, source, prefix } of roots) {
+    for (const { rel, full } of walk(dir, prefix ?? "", 0)) {
       if (byName.has(rel) || !/^[a-zA-Z0-9_.:-]+$/.test(rel)) continue;
       // no symlink follow (leaf or ancestor), contained under the command root, size-bounded, no giant read
       const text = readTextCappedSafe(full, { root: dir });

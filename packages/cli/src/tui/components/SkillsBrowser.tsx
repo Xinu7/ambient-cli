@@ -7,6 +7,10 @@ export interface SkillRow {
   source: string;
   description: string;
   pinned: boolean;
+  /** False when the skill opts out of being run as `/name`. */
+  userInvocable?: boolean;
+  /** What to type after `/name`. */
+  argumentHint?: string;
 }
 
 /**
