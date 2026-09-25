@@ -4,10 +4,12 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   type HookCommand,
+  type McpServerSpec,
   type RuleLists,
   discoverHooks,
   discoverRuleLists,
   hooksFingerprint,
+  loadMcpConfig,
 } from "@amb/context";
 import { type PermissionRules, parseRules } from "@amb/permissions";
 import type { HooksPort } from "@amb/runtime";
@@ -42,13 +44,27 @@ function readTrust(file: string): Record<string, string> {
   }
 }
 
-/** Trust is granted to exactly this configuration: the project's hooks and its allow rules. */
+/** What identifies a project MCP server for trust: what it runs or where it connects (not secret values). */
+function mcpIdentity(s: McpServerSpec): unknown[] {
+  return [
+    s.name,
+    s.transport,
+    s.command ?? "",
+    s.args ?? [],
+    s.url ?? "",
+    Object.keys(s.env ?? {}).sort(),
+    Object.keys(s.headers ?? {}).sort(),
+  ];
+}
+
+/** Trust is granted to exactly this configuration: the project's hooks, allow rules and MCP servers. */
 export function projectFingerprint(
   hooks: readonly HookCommand[],
   allow: readonly string[],
+  mcp: readonly McpServerSpec[] = [],
 ): string {
   return createHash("sha256")
-    .update(JSON.stringify([hooksFingerprint(hooks), allow]))
+    .update(JSON.stringify([hooksFingerprint(hooks), allow, mcp.map(mcpIdentity)]))
     .digest("hex")
     .slice(0, 32);
 }
@@ -86,6 +102,7 @@ interface Snapshot {
   offAllow: number;
   projectHooks: HookCommand[];
   projectAllow: string[];
+  projectMcp: McpServerSpec[];
   trusted: boolean;
 }
 
@@ -99,10 +116,14 @@ export interface WorkspaceSettings {
   hooksSummary(): string[];
   /** What `/permissions` shows. */
   permissionsSummary(): string[];
+  /** What the project's own settings would add if trusted (for review before `/trust yes`). */
+  trustSummary(): string[];
   /** Trust the project's current hooks and allow rules; returns what happened. */
   trust(): string;
-  /** How many project hooks and allow rules are waiting to be trusted. */
+  /** How many project hooks, allow rules and MCP servers are waiting to be trusted. */
   untrustedCount(): number;
+  /** Whether the project's own settings (hooks, allow rules, MCP servers) are trusted as they are now. */
+  projectTrusted(): boolean;
 }
 
 export function makeWorkspaceSettings(opts: {
@@ -126,10 +147,13 @@ export function makeWorkspaceSettings(opts: {
       deny: opts.config.permissions?.deny ?? [],
       ask: opts.config.permissions?.ask ?? [],
     };
+    const projectMcp = loadMcpConfig(opts.workspaceRoot, process.env, home).filter(
+      (m) => m.source === "project",
+    );
     const trusted =
-      (hooks.project.length > 0 || lists.project.allow.length > 0) &&
+      (hooks.project.length > 0 || lists.project.allow.length > 0 || projectMcp.length > 0) &&
       readTrust(opts.trustFile)[opts.workspaceRoot] ===
-        projectFingerprint(hooks.project, lists.project.allow);
+        projectFingerprint(hooks.project, lists.project.allow, projectMcp);
     const ruleSources = [
       { label: "ambient config", lists: ambient, allowApplies: true },
       { label: "this project (.claude/settings)", lists: lists.project, allowApplies: trusted },
@@ -154,6 +178,7 @@ export function makeWorkspaceSettings(opts: {
       offAllow: claude ? 0 : lists.claudeUser.allow.length,
       projectHooks: hooks.project,
       projectAllow: lists.project.allow,
+      projectMcp,
       trusted,
     };
   };
@@ -162,7 +187,7 @@ export function makeWorkspaceSettings(opts: {
     const waiting = s.waitingHooks.length + s.waitingAllow.length;
     if (waiting === 0) return;
     lines.push(
-      "Review, then trust this project's settings with /hooks trust (ambient hooks trust in a shell). A later change needs trusting again.",
+      "Review them with /trust (ambient trust in a shell). A later change needs trusting again.",
     );
   };
   const gap = (lines: string[]) => {
@@ -240,19 +265,50 @@ export function makeWorkspaceSettings(opts: {
     },
     untrustedCount() {
       const s = snapshot();
-      return s.waitingHooks.length + s.waitingAllow.length;
+      return s.trusted ? 0 : s.projectHooks.length + s.projectAllow.length + s.projectMcp.length;
+    },
+    projectTrusted: () => snapshot().trusted,
+    trustSummary() {
+      const s = snapshot();
+      const total = s.projectHooks.length + s.projectAllow.length + s.projectMcp.length;
+      if (total === 0) return ["This project has no hooks, allow rules or MCP servers of its own."];
+      const lines: string[] = [
+        s.trusted
+          ? "This project's settings are trusted:"
+          : "This project's settings ask for the following, which won't apply until you trust them:",
+      ];
+      if (s.projectHooks.length > 0) {
+        lines.push(" Hooks (commands that run on your machine):");
+        for (const h of s.projectHooks) lines.push(describeHook(h));
+      }
+      if (s.projectAllow.length > 0) {
+        lines.push(" Allow rules (calls that run without asking):");
+        for (const r of s.projectAllow) lines.push(`  ${r}`);
+      }
+      if (s.projectMcp.length > 0) {
+        lines.push(" MCP servers:");
+        for (const m of s.projectMcp) {
+          const what = m.command ? [m.command, ...(m.args ?? [])].join(" ") : (m.url ?? "");
+          lines.push(`  ${m.name} → ${what.length > 70 ? `${what.slice(0, 69)}…` : what}`);
+        }
+      }
+      if (!s.trusted)
+        lines.push("", "Type /trust yes to trust exactly this (ambient trust yes in a shell).");
+      return lines;
     },
     trust() {
       const s = snapshot();
       const hooks = s.projectHooks.length;
       const allow = s.projectAllow.length;
-      if (hooks + allow === 0) return "This project has no hooks or allow rules to trust.";
+      const mcp = s.projectMcp.length;
+      if (hooks + allow + mcp === 0)
+        return "This project has no hooks, allow rules or MCP servers to trust.";
       if (s.trusted) return "This project's settings are already trusted.";
       try {
         saveTrust(
           opts.trustFile,
           opts.workspaceRoot,
-          projectFingerprint(s.projectHooks, s.projectAllow),
+          projectFingerprint(s.projectHooks, s.projectAllow, s.projectMcp),
         );
       } catch (e) {
         return `Couldn't save the trust setting: ${(e as Error).message}`;
@@ -260,8 +316,11 @@ export function makeWorkspaceSettings(opts: {
       const parts = [
         ...(hooks > 0 ? [plural(hooks, "hook")] : []),
         ...(allow > 0 ? [plural(allow, "allow rule")] : []),
+        ...(mcp > 0 ? [plural(mcp, "MCP server")] : []),
       ];
-      return `Trusted this project's ${parts.join(" and ")}. They apply from the next message.`;
+      const list =
+        parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
+      return `Trusted this project's ${list}. ${mcp > 0 ? "MCP servers connect the next time ambient starts; the rest apply" : "They apply"} from the next message.`;
     },
   };
 }
@@ -277,8 +336,7 @@ export function workspaceSettings(
 
 /** A one-line heads-up when the project has settings that won't apply yet (headless runs can't ask). */
 export function untrustedNote(settings: WorkspaceSettings): string | undefined {
-  const n = settings.untrustedCount();
-  return n > 0
-    ? `This project has ${n === 1 ? "a hook or allow rule" : "hooks or allow rules"} that won't apply until you trust ${n === 1 ? "it" : "them"} (ambient hooks).`
+  return settings.untrustedCount() > 0
+    ? "This project has hooks, allow rules or MCP servers that won't apply until you trust them (ambient trust)."
     : undefined;
 }

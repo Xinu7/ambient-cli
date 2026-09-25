@@ -588,6 +588,16 @@ export function App(deps: AppDeps): ReactNode {
   };
 
   const settingsRef = useRef(deps.settings);
+  // A project whose own settings (hooks, allow rules, MCP servers) wait for the user's OK says so up front.
+  useEffect(() => {
+    if ((settingsRef.current?.untrustedCount() ?? 0) > 0) {
+      dispatch({
+        t: "notice",
+        level: "info",
+        text: "This project has its own hooks, allow rules or MCP servers. They're off until you review them: /trust",
+      });
+    }
+  }, []);
   const approve = useCallback<RunOptions["approve"]>((req) => {
     return new Promise((resolve) => {
       // "Bypass session" (chosen from an earlier approval, or /bypass) auto-allows the rest of THIS run without
@@ -1285,15 +1295,21 @@ export function App(deps: AppDeps): ReactNode {
         dispatch({ t: "notice", level: "info", text: usageReport(state.status.usage) });
         break;
       case "/hooks":
-      case "/permissions": {
+      case "/permissions":
+      case "/trust": {
         const settings = deps.settings;
+        const word = arg.trim().toLowerCase();
+        // `/trust yes` (and the older `/hooks trust`) trusts; plain `/trust` shows what would be trusted.
+        const confirm = command.name === "/trust" ? word === "yes" : word === "trust";
         const text = !settings
-          ? "No hooks or permission rules."
-          : arg.trim().toLowerCase() === "trust"
+          ? "No hooks, permission rules or project settings."
+          : confirm
             ? settings.trust()
             : (command.name === "/hooks"
                 ? settings.hooksSummary()
-                : settings.permissionsSummary()
+                : command.name === "/permissions"
+                  ? settings.permissionsSummary()
+                  : settings.trustSummary()
               ).join("\n");
         dispatch({ t: "notice", level: "info", text });
         break;

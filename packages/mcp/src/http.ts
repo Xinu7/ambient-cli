@@ -4,6 +4,8 @@ import type { Transport } from "./jsonrpc.js";
 export interface HttpServerConfig {
   url: string;
   headers?: Record<string, string>;
+  /** The server speaks MCP's original HTTP+SSE binding (`"type": "sse"`), not Streamable HTTP. */
+  legacySse?: boolean;
 }
 
 /** The subset of fetch we use — injectable so tests never touch the network. */

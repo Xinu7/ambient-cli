@@ -46,7 +46,7 @@ describe("permission rules from every source", () => {
       ask: ["Bash(git push:*)"],
     });
     expect(s.untrustedCount()).toBe(1);
-    expect(untrustedNote(s)).toContain("won't apply until you trust it");
+    expect(untrustedNote(s)).toContain("won't apply until you trust them");
     expect(s.permissionsSummary().join("\n")).toContain("allow  Bash(make:*)  (not applied)");
 
     expect(s.trust()).toBe(
@@ -86,6 +86,6 @@ describe("permission rules from every source", () => {
     const s = makeWorkspaceSettings({ workspaceRoot: ws, home, trustFile, config: {} });
     expect(s.rules()).toBeUndefined();
     expect(s.permissionsSummary()[0]).toContain('under "permissions"');
-    expect(s.trust()).toBe("This project has no hooks or allow rules to trust.");
+    expect(s.trust()).toBe("This project has no hooks, allow rules or MCP servers to trust.");
   });
 });

@@ -260,7 +260,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   let done = false;
   if (!skipMcp) {
     void connectMcp(cwd, {
-      approveServer: async () => process.env.AMBIENT_MCP_ALLOW_PROJECT === "1",
+      // A project's own servers connect once the project's settings are trusted (/trust); the env switch
+      // remains for scripted runs.
+      approveServer: async () =>
+        process.env.AMBIENT_MCP_ALLOW_PROJECT === "1" || settings.projectTrusted(),
+      plugins: opts.settingsConfig?.claudeSettings === true,
     })
       .then((m) => {
         if (done) {

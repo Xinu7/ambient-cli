@@ -97,19 +97,20 @@ rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
   compaction); the agent can propose a revision, but only you commit it.
 - **Brings your setup.** Reads your existing `.claude/agents`, skills, slash commands, instruction files
   (`AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules`, with `@path` imports), and MCP
-  servers (both the `.mcp.json` and Codex `config.toml` dialects) so what you already use works on Ambient
-  models. When your MCP servers bring more tools than the model has room for, it sees an index and loads
+  servers (`.mcp.json`, `claude mcp add`, and Codex `config.toml`; stdio, Streamable HTTP and SSE, with
+  header or bearer-token auth from your environment) so what you already use works on Ambient models. When your MCP servers bring more tools than the model has room for, it sees an index and loads
   the ones it needs on demand.
 - **Hooks and permission rules, the Claude Code way.** Hook commands (`PreToolUse`, `PostToolUse`,
   `UserPromptSubmit`, `Stop`, `SubagentStop`, `SessionStart`, `SessionEnd`, `PreCompact`, `Notification`)
   can block a tool call, rewrite its input, add context, or send the agent back to work. Rules like
   `Bash(npm test:*)`, `Read(./.env)`, `WebFetch(domain:docs.ambient.xyz)` or `mcp__github` allow, ask for,
   or deny matching calls (a deny always wins, even in bypass). Put both under `"hooks"` and `"permissions"`
-  in `~/.config/amb/config.json`. Deny and ask rules apply from any settings file. A project's own
-  `.claude/settings.json` hooks and allow rules apply once you've trusted them (`/hooks trust`, or
-  `ambient hooks trust`; any change needs trusting again), and those in `~/.claude` and plugins — along with your
-  global `~/.claude/CLAUDE.md`, `~/.claude/rules` and `~/.codex/AGENTS.md` — apply when you set
-  `"claudeSettings": true`.
+  in `~/.config/amb/config.json`; deny and ask rules apply from any settings file.
+- **Nothing from a clone runs until you say so.** A project's own `.claude/settings.json` hooks and allow
+  rules and its `.mcp.json` servers apply once you've reviewed and trusted them (`/trust`, or
+  `ambient trust`); any change needs trusting again. Your `~/.claude` hooks, allow rules and global
+  instructions (`~/.claude/CLAUDE.md`, `~/.claude/rules`, `~/.codex/AGENTS.md`) and your enabled Claude Code
+  plugins' MCP servers apply when you set `"claudeSettings": true`.
 - **Runs everywhere.** macOS, Linux and Windows (Git Bash or PowerShell), tested on all three.
 
 ## In the interactive TUI
@@ -124,7 +125,8 @@ The activity line narrates what the agent is actually doing — `Reading src/app
 /goal <text>     a north-star kept every turn      /skills           browse and pin your skills
 /attach <path>   attach an image                   /login  /logout   add, change or remove your API key
 /tools           what the agent can use            /clear            start a fresh conversation
-/hooks [trust]   the hooks that run here           /permissions      your allow / ask / deny rules
+/hooks           the hooks that run here           /permissions      your allow / ask / deny rules
+/trust [yes]     review this project's own settings
 /help            every command and key             /quit
 ```
 
@@ -148,7 +150,8 @@ ambient sessions [show <id>]        List / inspect past sessions
 ambient resume [<id|latest> "<…>"]  Continue a prior session with a new instruction
 ambient rewind [<id|latest>] [N]    Revert the workspace to before the last N file-changing turns
 ambient config [show|path]          Show your ~/.config/amb defaults
-ambient hooks [trust]               List the hooks that run here; trust this project's own
+ambient hooks                       List the hooks that run here
+ambient trust [yes]                 Review (then trust) this project's hooks, allow rules and MCP servers
 ambient github [status|login]       Show GitHub sign-in (or run `gh auth login`)
 ambient doctor                      Check your setup + network
 ambient login | logout | help

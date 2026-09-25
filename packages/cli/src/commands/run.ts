@@ -285,7 +285,11 @@ export async function runAgent(args: string[]): Promise<void> {
   const mcp = skipMcp
     ? { tools: [], notices: [], close: () => {} }
     : await connectMcp(cwd, {
-        approveServer: async () => process.env.AMBIENT_MCP_ALLOW_PROJECT === "1",
+        // A project's own servers connect once the project's settings are trusted (/trust); the env switch
+        // remains for scripted runs.
+        approveServer: async () =>
+          process.env.AMBIENT_MCP_ALLOW_PROJECT === "1" || settings.projectTrusted(),
+        plugins: userConfig.claudeSettings === true,
       });
   if (!jsonl) for (const n of mcp.notices) process.stderr.write(dim(`  ${n}\n`));
 

@@ -2,6 +2,7 @@ import type { ToolDefinition } from "@amb/protocol";
 import { McpClient } from "./client.js";
 import { type HttpServerConfig, spawnHttpTransport } from "./http.js";
 import { JsonRpcClient, type Transport } from "./jsonrpc.js";
+import { spawnSseTransport } from "./sse-legacy.js";
 import { type StdioServerConfig, spawnStdioTransport } from "./stdio.js";
 import { mcpToolToDefinition } from "./to-tool.js";
 
@@ -14,7 +15,8 @@ export interface McpServerSpec {
 
 /** The default transport factory — picks HTTP for a `{url}` config, else spawns a stdio child. */
 function defaultSpawn(cfg: McpServerConfig): { transport: Transport } {
-  return "url" in cfg ? spawnHttpTransport(cfg) : spawnStdioTransport(cfg);
+  if (!("url" in cfg)) return spawnStdioTransport(cfg);
+  return cfg.legacySse ? spawnSseTransport(cfg) : spawnHttpTransport(cfg);
 }
 
 export interface McpSession {

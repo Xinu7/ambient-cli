@@ -10,6 +10,8 @@ export interface McpConnection {
 
 export interface ConnectOptions {
   approveServer?: (s: McpServerSpec) => Promise<boolean>;
+  /** Also connect enabled Claude Code plugins' servers (config `claudeSettings`). */
+  plugins?: boolean;
   /** Test seams — default to the real config loader + server starter. */
   load?: () => McpServerSpec[];
   start?: typeof startMcpServers;
@@ -26,7 +28,9 @@ export async function connectMcp(
   workspaceRoot: string,
   opts: ConnectOptions = {},
 ): Promise<McpConnection> {
-  const specs = opts.load ? opts.load() : loadMcpConfig(workspaceRoot);
+  const specs = opts.load
+    ? opts.load()
+    : loadMcpConfig(workspaceRoot, process.env, undefined, { plugins: opts.plugins === true });
   if (specs.length === 0) return { tools: [], close: () => {}, notices: [] };
 
   const notices: string[] = [];
@@ -39,6 +43,12 @@ export async function connectMcp(
     }
     if ((s.transport === "http" || s.transport === "sse") && !s.url) {
       notices.push(`mcp: ${s.name} is remote but has no url (skipped)`);
+      continue;
+    }
+    if (s.missingEnv && s.missingEnv.length > 0) {
+      notices.push(
+        `mcp: ${s.name} needs ${s.missingEnv.join(", ")} set in your environment (skipped)`,
+      );
       continue;
     }
     // A PROJECT-scoped server (a workspace file, higher trust surface — a local process OR remote data egress)
@@ -62,7 +72,11 @@ export async function connectMcp(
               ...(s.args ? { args: s.args } : {}),
               ...(s.env ? { env: s.env } : {}),
             }
-          : { url: s.url as string },
+          : {
+              url: s.url as string,
+              ...(s.transport === "sse" ? { legacySse: true } : {}),
+              ...(s.headers ? { headers: s.headers } : {}),
+            },
     })),
     { onLog: (m) => notices.push(m) },
   );
