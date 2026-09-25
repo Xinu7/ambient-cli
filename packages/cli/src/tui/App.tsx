@@ -2006,7 +2006,7 @@ export function App(deps: AppDeps): ReactNode {
       {/* SETTLED turns print ONCE into the terminal's REAL scrollback via <Static> — scroll up (trackpad/
           wheel) to see history. Never re-rendered, so each turn commits cleanly instead of repainting. */}
       <Static key={staticEpoch} items={settledItems}>
-        {(item) => <TranscriptRow key={item.id} item={item} width={interior} />}
+        {(item) => <TranscriptRow key={item.id} item={item} width={interior} settled />}
       </Static>
 
       {/* THE CLAMP — bounds the entire dynamic frame to rows-1 so Ink never full-clears (erasing scrollback). */}

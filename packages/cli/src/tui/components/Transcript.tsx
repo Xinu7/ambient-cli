@@ -95,10 +95,13 @@ export function TranscriptRow({
   item,
   width,
   maxStreamLines = STREAM_MAX_LINES,
+  settled = false,
 }: {
   item: TranscriptItem;
   width: number;
   maxStreamLines?: number;
+  /** Printed once into scrollback (not the redrawn live area), so it needs no height cap. */
+  settled?: boolean;
 }): ReactNode {
   switch (item.kind) {
     case "user": {
@@ -111,7 +114,9 @@ export function TranscriptRow({
         const firstLine = lines.find((l) => l.trim().length > 0) ?? lines[0] ?? "";
         return (
           <Box marginTop={1} width={width}>
-            <Text color={AmbientTheme.cyan}>{"› "}</Text>
+            <Box width={2} flexShrink={0}>
+              <Text color={AmbientTheme.cyan}>›</Text>
+            </Box>
             <Text color={AmbientTheme.dim}>{`[pasted ${lines.length} lines] `}</Text>
             <Text color={AmbientTheme.fg} wrap="truncate">
               {clip(firstLine, Math.max(8, width - 20))}
@@ -121,7 +126,10 @@ export function TranscriptRow({
       }
       return (
         <Box marginTop={1} width={width}>
-          <Text color={AmbientTheme.cyan}>{"› "}</Text>
+          {/* A fixed 2-column marker: when the prompt wraps, the layout would otherwise squeeze it to "›". */}
+          <Box width={2} flexShrink={0}>
+            <Text color={AmbientTheme.cyan}>›</Text>
+          </Box>
           <Text color={AmbientTheme.fg} wrap="wrap">
             {hardWrap(raw, Math.max(8, width - 2))}
           </Text>
@@ -344,10 +352,14 @@ export function TranscriptRow({
       // (/help, verify diagnostics) wrap and keep their lines instead of being flattened into one clipped row.
       const hasGlyph = /^[⚠◆✓✗↪·▲◉∴]/u.test(item.text);
       const mark = hasGlyph ? "" : item.level === "info" ? "· " : "⚠ ";
+      // An explicit width: scrollback rows are laid out outside the padded frame, so without it a long note
+      // wraps at the full terminal width and spills a character onto its own line. Only the live area caps
+      // the line count; in scrollback the whole note (e.g. /help) prints.
+      const wrapped = hardWrap(`${mark}${item.text}`, Math.max(8, width - 1));
       return (
-        <Box marginTop={1}>
+        <Box marginTop={1} width={Math.max(8, width)}>
           <Text color={color} wrap="wrap">
-            {capLines(hardWrap(`${mark}${item.text}`, Math.max(8, width - 1)), NOTICE_MAX_LINES)}
+            {settled ? wrapped : capLines(wrapped, NOTICE_MAX_LINES)}
           </Text>
         </Box>
       );
