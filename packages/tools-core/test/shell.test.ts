@@ -19,7 +19,7 @@ describe("detectShell", () => {
       PATH: "C:\\Windows\\System32;C:\\tools",
       SystemRoot: "C:\\Windows",
     };
-    const gitBash = "C:\\Program Files\\Git\\bin\\bash.exe";
+    const gitBash = "C:\\Program Files\\Git\\usr\\bin\\bash.exe";
     expect(
       detectShell(env, "win32", exists([gitBash, "C:\\Windows\\System32\\bash.exe"])),
     ).toMatchObject({

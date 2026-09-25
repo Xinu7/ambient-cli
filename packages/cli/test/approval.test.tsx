@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import type { CatalogModel, PermissionDecision } from "@amb/protocol";
 import type { ChatClient, TurnCompletion } from "@amb/runtime";
 import type { SessionWriter } from "@amb/sessions";
@@ -235,8 +236,8 @@ describe("App: approval interaction end to end", () => {
         effort="auto"
         requestedModel="vendor/m"
         maxTurns={6}
-        cwd="/tmp"
-        workspaceRoot="/tmp"
+        cwd={tmpdir()}
+        workspaceRoot={tmpdir()}
         fleet={readyFleet}
         initialTask="do it"
       />,

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import type { ToolContext, ToolDefinition } from "@amb/protocol";
 import { z } from "zod";
 import { BoundedCapture } from "../capture.js";
@@ -38,6 +39,10 @@ export const bashTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
   inputSchema: Input,
   outputSchema: Output,
   execute(input, ctx: ToolContext) {
+    // A missing working directory makes spawn fail with a misleading "<shell> ENOENT"; say what's wrong.
+    if (!existsSync(ctx.cwd)) {
+      return Promise.reject(new Error(`the working directory doesn't exist: ${ctx.cwd}`));
+    }
     return new Promise((resolve, reject) => {
       // On POSIX `detached: true` makes the shell its OWN process-group leader so a timeout/abort can kill the
       // WHOLE tree (a dev server or `npm test` → node would otherwise keep the stdout pipe open and hang the

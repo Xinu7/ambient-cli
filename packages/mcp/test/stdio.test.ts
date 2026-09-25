@@ -16,7 +16,11 @@ const alive = (pid: number): boolean => {
 // or the grandchild orphans AND keeps our stdout pipe open (the CLI then hangs after [complete]).
 it("close() kills the whole process group — no orphaned grandchild, pipes released", async () => {
   const { transport, child } = spawnStdioTransport({
-    command: "sh",
+    // On Windows use Git's real sh (usr\bin), not the bin\ launcher.
+    command:
+      process.platform === "win32"
+        ? `${process.env.ProgramFiles ?? "C:\\Program Files"}\\Git\\usr\\bin\\sh.exe`
+        : "sh",
     // Git Bash's `sh` reports an MSYS pid for `$!`; the real Windows pid is in /proc/<pid>/winpid.
     args: [
       "-c",

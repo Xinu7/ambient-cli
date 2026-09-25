@@ -61,12 +61,16 @@ export function detectShell(
   }
 
   const w = path.win32;
-  const gitBash = [
-    env.ProgramFiles && w.join(env.ProgramFiles, "Git", "bin", "bash.exe"),
-    env["ProgramFiles(x86)"] &&
-      w.join(env["ProgramFiles(x86)"] as string, "Git", "bin", "bash.exe"),
-    env.LOCALAPPDATA && w.join(env.LOCALAPPDATA, "Programs", "Git", "bin", "bash.exe"),
-  ].find((p): p is string => typeof p === "string" && exists(p));
+  // Prefer Git's real bash (usr\bin) over its bin\ launcher: the launcher adds a process layer that a tree
+  // kill doesn't reliably reach, which can leave a background child holding the output pipe.
+  const gitRoots = [
+    env.ProgramFiles && w.join(env.ProgramFiles, "Git"),
+    env["ProgramFiles(x86)"] && w.join(env["ProgramFiles(x86)"] as string, "Git"),
+    env.LOCALAPPDATA && w.join(env.LOCALAPPDATA, "Programs", "Git"),
+  ].filter((p): p is string => typeof p === "string");
+  const gitBash = gitRoots
+    .flatMap((root) => [w.join(root, "usr", "bin", "bash.exe"), w.join(root, "bin", "bash.exe")])
+    .find((p) => exists(p));
   if (gitBash) return make("bash", gitBash);
   const pathBash = onPath("bash.exe", env, platform, exists);
   if (pathBash && !/\\(system32|windowsapps)\\/i.test(pathBash)) return make("bash", pathBash);
