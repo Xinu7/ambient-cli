@@ -2,10 +2,13 @@ import {
   discoverInjectableSkills,
   loadInstructions,
   readMemory,
+  readUserMemory,
   repoMap,
+  userMemoryPath,
   writeMemory,
 } from "@amb/context";
 import type { WorkspaceContextPort } from "@amb/runtime";
+import { ambHome } from "@amb/sessions";
 import { gitState } from "./git-state.js";
 
 /**
@@ -35,6 +38,7 @@ export function makeWorkspaceContextPort(
     instructions: (cwd, limits) =>
       loadInstructions(cwd, limits, { userFiles: opts.userInstructions === true }).text,
     readMemory: (workspaceRoot) => readMemory(workspaceRoot),
+    readUserMemory: () => readUserMemory(userMemoryPath(ambHome())),
     writeMemory: (workspaceRoot, summary) => writeMemory(workspaceRoot, summary),
     date: () => now().toISOString().slice(0, 10),
     platform: () => process.platform,

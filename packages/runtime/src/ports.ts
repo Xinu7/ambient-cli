@@ -84,6 +84,8 @@ export interface WorkspaceContextPort {
   instructions(cwd: string, limits?: { perFile: number; total: number }): string;
   /** Durable project memory (.ambient/MEMORY.md) for the workspace, or undefined if none. */
   readMemory(workspaceRoot: string): string | undefined;
+  /** The user's notes for every project, or undefined if none. */
+  readUserMemory?(): string | undefined;
   /** Persist the compounding project memory (best-effort; never load-bearing). */
   writeMemory(workspaceRoot: string, summary: string): void;
   /** Today's date as YYYY-MM-DD (injectable clock). */

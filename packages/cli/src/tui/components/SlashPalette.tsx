@@ -41,14 +41,18 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/usage", desc: "Tokens sent and received this session" },
   {
     name: "/hooks",
-    args: "[trust]",
-    desc: "Hooks that run on this project (trust the project's own)",
+    desc: "The hooks that run on this project",
   },
   { name: "/permissions", desc: "Your allow / ask / deny rules and where they come from" },
   {
     name: "/mcp",
     args: "[login <server>]",
     desc: "Your MCP servers; sign in to one that needs it",
+  },
+  {
+    name: "/memory",
+    args: "[all|forget]",
+    desc: "Notes ambient keeps (start a line with # to add one)",
   },
   {
     name: "/trust",

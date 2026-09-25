@@ -35,6 +35,7 @@ import { compactNow } from "../agent/compact-now.js";
 import { createDurableEventSink } from "../agent/event-sink.js";
 import { fireAndForget } from "../agent/hooks.js";
 import { type McpControl, mcpReport, splitArgs } from "../agent/mcp-control.js";
+import { type MemoryPort, quickNote } from "../agent/memory-port.js";
 import { buildRegistry } from "../agent/registry.js";
 import { makeSubagentTool } from "../agent/subagent-tool.js";
 import { makeVerifyPort } from "../agent/verify-port.js";
@@ -178,6 +179,8 @@ export interface AppDeps {
   history?: HistoryPort;
   /** The workspace's files for the `@` picker (listed at the edge, on first use). */
   listFiles?: () => Promise<string[]>;
+  /** Project and personal memory notes: `# note`, /memory. */
+  memory?: MemoryPort;
   /** The session's MCP servers: status for /mcp, and sign-in with /mcp login. */
   mcp?: Pick<McpControl, "status" | "login" | "promptCommands" | "expandPrompt">;
   /** Include the user's global Claude Code / Codex instruction files (config `claudeSettings`). */
@@ -1319,6 +1322,22 @@ export function App(deps: AppDeps): ReactNode {
         dispatch({ t: "notice", level: "info", text });
         break;
       }
+      case "/memory": {
+        const memory = deps.memory;
+        if (!memory) {
+          dispatch({ t: "notice", level: "info", text: "Memory isn't available here." });
+          break;
+        }
+        const [sub = "", ...rest] = arg.trim().split(/\s+/);
+        const text =
+          sub === "forget"
+            ? memory.forget(rest[0] ?? "")
+            : sub === "all"
+              ? memory.rememberEverywhere(rest.join(" "))
+              : memory.report();
+        dispatch({ t: "notice", level: "info", text });
+        break;
+      }
       case "/mcp": {
         const [sub, name] = arg.trim().split(/\s+/);
         if (!deps.mcp) {
@@ -1914,6 +1933,18 @@ export function App(deps: AppDeps): ReactNode {
       // silently run it as a (paid) agent task.
       if (looksLikeSlashCommand(task)) {
         dispatch({ t: "notice", level: "warn", text: `unknown command: ${task.split(/\s/)[0]}` });
+        setBuffer("");
+        return;
+      }
+      // `# note` (one line) is a quick note for this project's memory — saved directly, no model call.
+      const note = quickNote(task);
+      if (note !== undefined) {
+        dispatch({
+          t: "notice",
+          level: "info",
+          text: deps.memory ? deps.memory.remember(note) : "Memory isn't available here.",
+        });
+        hist.record(task);
         setBuffer("");
         return;
       }

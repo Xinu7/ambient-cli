@@ -8,7 +8,7 @@ import {
 } from "@amb/ambient-api";
 import { discoverSkills, pinSkill, readPinnedSkills, skillSource, unpinSkill } from "@amb/context";
 import type { Grant, ToolDefinition } from "@amb/protocol";
-import { SessionWriter } from "@amb/sessions";
+import { SessionWriter, ambHome } from "@amb/sessions";
 import { render } from "ink";
 import { createElement } from "react";
 import { AmbientChatClient } from "../agent/ambient-client.js";
@@ -16,6 +16,7 @@ import { makeCapabilityPort } from "../agent/capability-port.js";
 import { listWorkspaceFiles } from "../agent/file-list.js";
 import { fireAndForget } from "../agent/hooks.js";
 import { makeMcpControl } from "../agent/mcp-control.js";
+import { makeMemoryPort } from "../agent/memory-port.js";
 import { type SettingsConfig, workspaceSettings } from "../agent/workspace-settings.js";
 import { openBrowser, signInInteractive } from "../commands/login.js";
 import { configDir } from "../config.js";
@@ -224,6 +225,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         return new SessionWriter(sessionId, () => new Date().toISOString());
       },
       settings,
+      memory: makeMemoryPort(cwd, ambHome()),
       userInstructions: opts.settingsConfig?.claudeSettings === true,
       capabilities: makeCapabilityPort(),
       agentMode: opts.agentMode,

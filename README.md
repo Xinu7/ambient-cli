@@ -93,6 +93,9 @@ rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
 - **Honest reasoning effort.** `auto` (default) picks per turn — none for chat, high for work, max for
   planning, hard bugs, or after a failed check; `/effort` or `--effort off|high|max` pins it. These are the
   levels Ambient models actually serve.
+- **Memory you control.** Start a line with `#` to save a note to the project's memory
+  (`.ambient/MEMORY.md`) without a model call; `/memory all <note>` keeps one for every project. `/memory`
+  lists them and `/memory forget <n>` removes one. The agent also records what it learns there as it works.
 - **A north-star you set.** `/goal` pins a session objective the agent keeps in view every turn (it survives
   compaction); the agent can propose a revision, but only you commit it.
 - **Brings your setup.** Reads your existing `.claude/agents`, skills, slash commands, instruction files
@@ -126,8 +129,9 @@ The activity line narrates what the agent is actually doing — `Reading src/app
 /goal <text>     a north-star kept every turn      /skills           browse and pin your skills
 /attach <path>   attach an image                   /login  /logout   add, change or remove your API key
 /tools           what the agent can use            /clear            start a fresh conversation
-/hooks           the hooks that run here           /permissions      your allow / ask / deny rules
-/trust [yes]     review this project's own settings /mcp [login <s>]  your MCP servers; sign in to one
+/memory          notes ambient keeps (# adds one)  /hooks            the hooks that run here
+/permissions     your allow / ask / deny rules     /trust [yes]      review this project's own settings
+/mcp [login <s>] your MCP servers; sign in to one
 /help            every command and key             /quit
 ```
 

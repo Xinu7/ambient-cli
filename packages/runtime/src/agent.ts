@@ -341,9 +341,15 @@ export class Agent {
         !m.content.includes(SPILL_NOTE), // a spill breadcrumb holds no summary text
     );
     const memory = rawMemory && carriesSummary ? extractNotes(rawMemory) || undefined : rawMemory;
-    const memoryBlock = memory
-      ? `## Project memory (.ambient/MEMORY.md — durable notes from prior sessions; re-verify with tools, don't trust blindly)\n${memory}`
-      : "";
+    const userMemory = opts.workspace.readUserMemory?.();
+    const memoryBlock = [
+      userMemory ? `## Your notes (kept for every project)\n${userMemory}` : "",
+      memory
+        ? `## Project memory (.ambient/MEMORY.md — durable notes from prior sessions; re-verify with tools, don't trust blindly)\n${memory}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     // Prefer the lossless live conversation (`priorMessages`) when present — the reconstruction is only for
     // cross-process resume, where no in-memory Msg[] exists. Injecting both would double-count the history.
     const hasPriorMessages = (opts.priorMessages?.length ?? 0) > 0;

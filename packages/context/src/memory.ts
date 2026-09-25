@@ -67,10 +67,13 @@ export function writeMemory(workspaceRoot: string, summary: string): void {
  * be wiped by the next compaction's writeMemory. Bounded + best-effort. Returns whether it recorded anything.
  */
 export function rememberNote(workspaceRoot: string, note: string): boolean {
+  return appendNote(memoryPath(workspaceRoot), note, MEMORY_HEADER);
+}
+
+function appendNote(p: string, note: string, header: string): boolean {
   const clean = note.replace(/\s+/g, " ").trim().slice(0, 500);
   if (clean.length === 0) return false;
   try {
-    const p = memoryPath(workspaceRoot);
     const existing = existsSync(p) ? readFileSync(p, "utf8") : "";
     const idx = existing.indexOf(NOTES_HEADER);
     const above = (idx >= 0 ? existing.slice(0, idx) : existing).trimEnd();
@@ -78,7 +81,7 @@ export function rememberNote(workspaceRoot: string, note: string): boolean {
       .split("\n")
       .filter((l) => l.startsWith("- "));
     const bullets = [...priorBullets, `- ${clean}`].slice(-MAX_NOTES);
-    const head = above.length > 0 ? above : MEMORY_HEADER.trimEnd();
+    const head = above.length > 0 ? above : header.trimEnd();
     mkdirSync(dirname(p), { recursive: true });
     writeFileSync(p, `${head}\n\n${NOTES_HEADER}\n${bullets.join("\n")}\n`, "utf8");
     return true;
@@ -86,3 +89,66 @@ export function rememberNote(workspaceRoot: string, note: string): boolean {
     return false; // best-effort — memory is never load-bearing
   }
 }
+
+/** The notes (bullets) in a memory file's curated Notes section, in order. */
+export function listNotes(file: string): string[] {
+  try {
+    const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+    const idx = text.indexOf(NOTES_HEADER);
+    if (idx < 0) return [];
+    return text
+      .slice(idx)
+      .split("\n")
+      .filter((l) => l.startsWith("- "))
+      .map((l) => l.slice(2));
+  } catch {
+    return [];
+  }
+}
+
+/** Remove note `n` (1-based) from a memory file's Notes section; returns the removed note, if any. */
+export function forgetNote(file: string, n: number): string | undefined {
+  try {
+    if (!existsSync(file)) return undefined;
+    const text = readFileSync(file, "utf8");
+    const idx = text.indexOf(NOTES_HEADER);
+    if (idx < 0) return undefined;
+    const above = text.slice(0, idx).trimEnd();
+    const bullets = text
+      .slice(idx)
+      .split("\n")
+      .filter((l) => l.startsWith("- "));
+    const gone = bullets[n - 1];
+    if (gone === undefined) return undefined;
+    const rest = bullets.filter((_, i) => i !== n - 1);
+    const notes = rest.length > 0 ? `${NOTES_HEADER}\n${rest.join("\n")}\n` : "";
+    writeFileSync(file, `${above}\n${notes ? `\n${notes}` : ""}`, "utf8");
+    return gone.slice(2);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The file for notes that apply to every project (under ambient's home folder). */
+export function userMemoryPath(ambientHome: string): string {
+  return join(ambientHome, "MEMORY.md");
+}
+
+/** Add a note that applies to every project. */
+export function rememberUserNote(file: string, note: string): boolean {
+  return appendNote(file, note, USER_MEMORY_HEADER);
+}
+
+/** The notes that apply to every project, as prompt text (undefined when there are none). */
+export function readUserMemory(file: string): string | undefined {
+  const notes = listNotes(file);
+  return notes.length > 0 ? notes.map((n) => `- ${n}`).join("\n") : undefined;
+}
+
+const USER_MEMORY_HEADER = [
+  "# Ambient memory — every project",
+  "",
+  "> Notes you asked ambient to keep for all your projects (/memory to see or forget them).",
+  "",
+  "",
+].join("\n");

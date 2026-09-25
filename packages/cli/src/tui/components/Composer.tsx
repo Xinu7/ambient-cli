@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
+import { quickNote } from "../../agent/memory-port.js";
 import { clampCursor, composerTextWidth, layoutRows, offsetToRowCol } from "../editor.js";
 import type { AgentMode } from "../state.js";
 import { AmbientTheme } from "../theme.js";
@@ -174,7 +175,9 @@ export function Composer({
         : "Describe a coding task · type / for commands";
   const hint = running
     ? "enter steers the agent · esc cancels"
-    : "tab plan/build · shift+tab permission · enter runs · ctrl+c quits";
+    : quickNote(value) !== undefined
+      ? "enter saves this note to the project's memory · /memory to see notes"
+      : "tab plan/build · shift+tab permission · enter runs · ctrl+c quits";
 
   return (
     <Box flexDirection="column">
