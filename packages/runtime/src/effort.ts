@@ -26,10 +26,10 @@ export function autoEffortForTask(
   mode: Mode,
   previous?: ReasoningLevel,
 ): ReasoningLevel {
-  if (mode === "plan") return "max";
   const t = (text ?? "").trim();
+  if (TRIVIAL_TASK.test(t)) return "none"; // even in plan mode, a hello needs no reasoning
+  if (mode === "plan") return "max";
   if (CONTINUATION.test(t)) return previous ?? "high";
-  if (TRIVIAL_TASK.test(t)) return "none";
   if (HARD_TASK.test(t)) return "max";
   return "high";
 }

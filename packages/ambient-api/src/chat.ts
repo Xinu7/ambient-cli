@@ -92,6 +92,9 @@ export async function* streamChat(
     if (!res.body) throw new Error("Ambient chat response has no body");
     yield* readSSEStream(res.body as ReadableStream<Uint8Array>, wd ? () => wd.alive() : undefined);
   } catch (e) {
+    // A classified error (HTTP status, provider error in the stream) is the truth even if a clock fired while
+    // its body was being read — keep its kind and Retry-After instead of rewriting it as a stall.
+    if (e instanceof AmbError) throw e;
     if (wd?.stalled) throw wd.error(req.model);
     throw e;
   } finally {

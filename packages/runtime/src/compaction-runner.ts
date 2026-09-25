@@ -7,7 +7,7 @@ import {
 } from "@amb/context";
 import type { CatalogModel } from "@amb/protocol";
 import { pickForRole, streamTimeouts } from "@amb/reliability";
-import { SUMMARY_MARKER, deterministicSummary, planSpill } from "./agent-support.js";
+import { SPILL_NOTE, SUMMARY_MARKER, deterministicSummary, planSpill } from "./agent-support.js";
 import { MAX_COMPACTIONS } from "./constants.js";
 import { summaryEffort } from "./effort.js";
 import type { ChatClient, Msg, RunOptions } from "./ports.js";
@@ -83,6 +83,7 @@ export async function compact(
       priorMemory || undefined,
       windowTokens,
       signal,
+      compactor === target,
     );
     // Use the model's NARRATIVE but ALWAYS append the AUTHORITATIVE facts from the log (files touched, tool
     // ok/fail, last error) so a weak compactor can't fabricate "all tests pass" or drop real errors and then
@@ -124,6 +125,9 @@ export async function compact(
   return next;
 }
 
+/** Window assumed for a compactor model that publishes no context length. */
+const UNKNOWN_COMPACTOR_WINDOW = 32_768;
+
 /** Most summarizer calls one compaction may spend; older overflow is folded in deterministically instead. */
 const MAX_SUMMARY_CHUNKS = 8;
 
@@ -148,8 +152,11 @@ async function rollingSummary(
   prior: string | undefined,
   fallbackWindow: number,
   signal: AbortSignal,
+  sameAsTarget: boolean,
 ): Promise<string | undefined> {
-  const window = model?.contextLength ?? fallbackWindow;
+  // When the compactor IS the served model, the caller's window already includes its learned ceiling; a
+  // different compactor uses its own catalog window, or a conservative default when it doesn't publish one.
+  const window = sameAsTarget ? fallbackWindow : (model?.contextLength ?? UNKNOWN_COMPACTOR_WINDOW);
   const maxTokens = summaryOutputTokens(model, window);
   const inputBudget = Math.floor(window * 0.9) - maxTokens;
   if (inputBudget < 1024) return undefined;
@@ -218,7 +225,7 @@ export function spillToArtifact(
   // (deterministicSummary preserves prior-summary lines) instead of paraphrasing the pointer away.
   const breadcrumb: Msg = {
     role: "system",
-    content: `${SUMMARY_MARKER} — ${spill.evictedCount} earlier message(s) were evicted to fit a small context window. They are not lost: call read_artifact({handle:"${handle}"}) to page through that history if you need it.`,
+    content: `${SUMMARY_MARKER} — ${spill.evictedCount} earlier message(s) ${SPILL_NOTE}. They are not lost: call read_artifact({handle:"${handle}"}) to page through that history if you need it.`,
   };
   const next: Msg[] = [...spill.anchor, breadcrumb, ...spill.recent];
   if (estimateMessagesTokens(next) >= estimateMessagesTokens(messages)) return null; // no real reduction

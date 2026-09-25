@@ -86,3 +86,23 @@ describe("Retry-After", () => {
     });
   });
 });
+
+describe("a clock firing while an error body is read", () => {
+  it("keeps the classified HTTP error (kind + Retry-After), not a generic stall", async () => {
+    const f: FetchLike = async (_u, init) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(ctrl) {
+          init?.signal?.addEventListener("abort", () =>
+            ctrl.error(new DOMException("a", "AbortError")),
+          );
+        }, // never sends the body
+      });
+      return new Response(body, { status: 429, headers: { "Retry-After": "5" } });
+    };
+    const p = streamChatCompletion(config, req, {
+      fetch: f,
+      timeouts: { firstByteMs: 30, idleMs: 30 },
+    });
+    await expect(p).rejects.toMatchObject({ kind: "rate_limit", retryAfterMs: 5000 });
+  });
+});

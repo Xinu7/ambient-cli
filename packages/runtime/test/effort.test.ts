@@ -47,7 +47,8 @@ describe("autoEffortForTask — task-adaptive auto effort over the real tiers", 
   it("ordinary tasks → high; plan mode always → max", () => {
     expect(autoEffortForTask("build a 2048 game in react", "ask")).toBe("high");
     expect(autoEffortForTask("list the files", "ask")).toBe("high");
-    expect(autoEffortForTask("sup", "plan")).toBe("max");
+    expect(autoEffortForTask("plan the auth rework", "plan")).toBe("max");
+    expect(autoEffortForTask("sup", "plan")).toBe("none");
   });
   it("a short continuation inherits the previous effort instead of dropping", () => {
     expect(autoEffortForTask("continue", "ask", "max")).toBe("max");
@@ -166,7 +167,10 @@ describe("effort reaches the chat client (wired, not just built)", () => {
 
   it("auto in plan mode resolves to max on the wire", async () => {
     const client = new RecordingClient([reasoning], [{ content: "done", toolCalls: [] }]);
-    await new Agent(client).run("hi", opts({ effort: "auto", mode: "plan" }));
+    await new Agent(client).run(
+      "plan the new billing flow",
+      opts({ effort: "auto", mode: "plan" }),
+    );
     expect(client.calls[0]?.reasoningEffort).toBe("max");
   });
 

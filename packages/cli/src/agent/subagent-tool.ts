@@ -74,6 +74,9 @@ const Output = z.object({
   files: z.array(z.object({ path: z.string(), operation: z.string() })).optional(),
 });
 
+/** Builtins a child never gets, whatever its role or preset. */
+const CHILD_EXCLUDED_TOOLS = new Set(["remember"]);
+
 /** A CHILD registry: builders get every builtin (the `subagent` tool is NOT a builtin, so no grandchildren);
  *  scouts/oracles get only read-only tools (they also run in forced `plan` mode). When a resolved preset
  *  declares `tools:`, the registry is further restricted to that intersection — the preset's allow-list is
@@ -82,9 +85,10 @@ const Output = z.object({
 export function childRegistry(role: SubagentRole, allowedTools?: string[]): ToolRegistry {
   const full = createBuiltinRegistry();
   const allow = allowedTools && allowedTools.length > 0 ? new Set(allowedTools) : undefined;
-  if (role === "builder" && !allow) return full; // fast path: unrestricted builder
   const reg = new ToolRegistry();
   for (const t of full.list()) {
+    // Only the parent session writes project memory: parallel children would race to rewrite MEMORY.md.
+    if (CHILD_EXCLUDED_TOOLS.has(t.manifest.name)) continue;
     const roleOk = role === "builder" || isReadOnly(t.manifest); // scouts/oracles: read-only only
     if (roleOk && (!allow || allow.has(t.manifest.name))) reg.register(t);
   }

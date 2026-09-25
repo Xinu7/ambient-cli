@@ -7,6 +7,9 @@ import type { StreamTimeouts } from "@amb/reliability";
  * so the caller can report a retryable "stalled" transport error instead of a generic abort. A user abort is
  * passed through untouched (never reported as a stall).
  */
+/** `AmbError.detail` marker for a stall, so retry policy can fail over sooner than for a network blip. */
+export const STALL_DETAIL = "stream-stall";
+
 export class StallWatchdog {
   private readonly ctrl = new AbortController();
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -44,7 +47,13 @@ export class StallWatchdog {
       this.reason === "first"
         ? `No response from ${model} after ${secs}s — the worker didn't start streaming.`
         : `${model} stalled — no data for ${secs}s mid-stream.`;
-    return new AmbError({ kind: "transport", message, retryable: true, model });
+    return new AmbError({
+      kind: "transport",
+      message,
+      retryable: true,
+      model,
+      detail: STALL_DETAIL,
+    });
   }
 
   dispose(): void {

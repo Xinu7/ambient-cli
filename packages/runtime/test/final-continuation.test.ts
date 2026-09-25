@@ -30,3 +30,19 @@ describe("a final answer cut off at the output limit", () => {
     expect(res.finalText.startsWith("more")).toBe(true);
   });
 });
+
+describe("the stitched prefix never leaks into a later answer", () => {
+  it("cut-off → tool turn → final answer returns ONLY the final answer", async () => {
+    const client = new FixtureClient(catalogOf(TEXT_200K), [
+      { content: "PARTIAL-A cut", toolCalls: [], finishReason: "length" },
+      {
+        content: "",
+        toolCalls: [{ id: "tc1", name: "list", args: { path: "." }, rawArgs: "{}" }],
+        finishReason: "tool_calls",
+      },
+      { content: "FINAL-ANSWER", toolCalls: [], finishReason: "stop" },
+    ]);
+    const res = await new Agent(client).run("go", runOpts({ requestedModel: TEXT_200K.id }));
+    expect(res.finalText).toBe("FINAL-ANSWER");
+  });
+});

@@ -79,3 +79,31 @@ describe("compaction summary sizing", () => {
     expect(client.calls[0]?.maxTokens).toBeLessThanOrEqual(8192);
   });
 });
+
+describe("compactor window when the compactor is the served model", () => {
+  it("uses the caller's (learned-ceiling-aware) window, not the optimistic catalog window", async () => {
+    const catalog = catalogOf(TEXT_200K);
+    const client = new FixtureClient(
+      catalog,
+      Array.from({ length: 40 }, () => ({ content: "## Goal\nx", toolCalls: [] })),
+    );
+    // Learned ceiling says this model really only takes ~30K, far below its 202K catalog window.
+    await compact(
+      client,
+      hugeConversation(),
+      TEXT_200K.id,
+      catalog,
+      "ses_s",
+      "trn_s",
+      () => {},
+      new AbortController().signal,
+      () => {},
+      30_000,
+      "",
+    );
+    for (const c of client.calls) {
+      expect(estimateMessagesTokens(c.messages) + c.maxTokens).toBeLessThanOrEqual(30_000);
+    }
+    expect(client.calls.length).toBeGreaterThan(1);
+  });
+});

@@ -36,3 +36,25 @@ describe("carried images", () => {
     expect(hasImagePart(client.calls[0]?.messages ?? [])).toBe(false);
   });
 });
+
+describe("pinned flag on carried history", () => {
+  it("an earlier run's pinned task is un-pinned when carried (only the CURRENT task is pinned)", () => {
+    const out = stubCarriedImages([{ role: "user", content: "old task", pinned: true }]);
+    expect(out[0]?.pinned).toBeUndefined();
+  });
+  it("in a follow-up run exactly one message — the new task — is pinned", async () => {
+    const client = new FixtureClient(catalogOf(TEXT_200K), [{ content: "ok", toolCalls: [] }]);
+    await new Agent(client).run(
+      "new task",
+      runOpts({
+        requestedModel: TEXT_200K.id,
+        priorMessages: [
+          { role: "user", content: "old task", pinned: true },
+          { role: "assistant", content: "done" },
+        ],
+      }),
+    );
+    const pinned = (client.calls[0]?.messages ?? []).filter((m) => m.pinned);
+    expect(pinned.map((m) => m.content)).toEqual(["new task"]);
+  });
+});

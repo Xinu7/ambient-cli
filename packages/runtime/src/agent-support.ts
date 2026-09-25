@@ -219,6 +219,8 @@ export function catalogHash(catalog: CatalogModel[]): string {
  * successes/failures, and the last error — so the model won't repeat a done action or claim false success.
  */
 export const SUMMARY_MARKER = "## Summary of earlier conversation";
+/** Phrase unique to a spill breadcrumb (evicted history, no summary text) — distinguishes it from a summary. */
+export const SPILL_NOTE = "were evicted to fit a small context window";
 
 export function deterministicSummary(msgs: Msg[]): string {
   const files = new Set<string>();

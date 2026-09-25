@@ -44,3 +44,24 @@ describe("project memory in a carried session", () => {
     expect(String(client.calls[0]?.messages[0]?.content)).toContain("AUTO-SUMMARY");
   });
 });
+
+describe("a spill breadcrumb is not a summary", () => {
+  it("keeps the project memory's auto-summary when the carried session only has a spill breadcrumb", async () => {
+    const { SPILL_NOTE } = await import("../src/agent-support.js");
+    const ws = memWorkspace();
+    ws.memory = MEMORY;
+    const client = new FixtureClient(catalogOf(TEXT_200K), [{ content: "ok", toolCalls: [] }]);
+    await new Agent(client).run(
+      "next",
+      runOpts({
+        requestedModel: TEXT_200K.id,
+        workspace: ws,
+        priorMessages: [
+          { role: "user", content: "earlier" },
+          { role: "system", content: `${SUMMARY_MARKER} — 12 earlier message(s) ${SPILL_NOTE}.` },
+        ],
+      }),
+    );
+    expect(String(client.calls[0]?.messages[0]?.content)).toContain("AUTO-SUMMARY");
+  });
+});

@@ -19,3 +19,12 @@ describe("palette", () => {
     expect(SLASH_COMMANDS.find((c) => c.name === "/effort")?.args).toBe("[auto|off|high|max]");
   });
 });
+
+describe("single-segment paths", () => {
+  it("'/tmp is full' is a task when /tmp exists; an unknown /word is still a command", () => {
+    const exists = (p: string) => p === "/tmp" || p === "/README.md";
+    expect(looksLikeSlashCommand("/tmp is full", exists)).toBe(false);
+    expect(looksLikeSlashCommand("/README.md is wrong", exists)).toBe(false);
+    expect(looksLikeSlashCommand("/modle", exists)).toBe(true);
+  });
+});

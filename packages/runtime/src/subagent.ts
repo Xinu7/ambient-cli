@@ -109,7 +109,7 @@ const ROUTED_ROLE: Record<SubagentRole, RoutedRole> = {
   builder: "executor",
 };
 /** Time a child gets to write its wrap-up after the soft deadline before it is hard-stopped. */
-const WRAP_UP_GRACE_MS = 90_000;
+const WRAP_UP_GRACE_MS = 180_000; // ≥ a request's own first-byte allowance, so the wrap-up isn't cut off
 /** Per-child summary cap. Generous on purpose: the parent's own tool-result budget still fits the whole wave
  *  to the served window (offloading the rest to read_artifact), so a scout's findings aren't cut to a stub. */
 const SUMMARY_CAP = 8_000;

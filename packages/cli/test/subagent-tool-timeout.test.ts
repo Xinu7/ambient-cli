@@ -19,3 +19,21 @@ describe("subagent tool timeout", () => {
     expect(tool.manifest.timeoutPolicy.maximumMs).toBeUndefined();
   });
 });
+
+describe("child registries", () => {
+  it("no child (not even an unrestricted builder) gets the memory-writing `remember` tool", async () => {
+    const { childRegistry } = await import("../src/agent/subagent-tool.js");
+    for (const role of ["scout", "oracle", "builder"] as const) {
+      expect(
+        childRegistry(role)
+          .list()
+          .some((t) => t.manifest.name === "remember"),
+      ).toBe(false);
+    }
+    expect(
+      childRegistry("builder")
+        .list()
+        .some((t) => t.manifest.name === "write"),
+    ).toBe(true);
+  });
+});

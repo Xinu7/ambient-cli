@@ -14,9 +14,13 @@ describe("streamTimeouts", () => {
     expect(max.idleMs).toBeGreaterThan(none.idleMs);
     expect(max.firstByteMs).toBeGreaterThan(none.firstByteMs);
   });
-  it("a model the catalog flags cold gets a short first-byte leash (a down worker fails fast)", () => {
-    const t = streamTimeouts({ promptTokens: 50_000, flaggedCold: true }, {});
-    expect(t.firstByteMs).toBeLessThanOrEqual(30_000);
+  it("a flagged-cold model gets a short base leash but keeps the prefill allowance for big prompts", () => {
+    const small = streamTimeouts({ promptTokens: 1_000, flaggedCold: true }, {});
+    expect(small.firstByteMs).toBeLessThanOrEqual(31_000);
+    const big = streamTimeouts({ promptTokens: 200_000, flaggedCold: true }, {});
+    expect(big.firstByteMs).toBeGreaterThanOrEqual(150_000); // 200K prefill needs real time
+    const bigReady = streamTimeouts({ promptTokens: 200_000 }, {});
+    expect(big.firstByteMs).toBeLessThan(bigReady.firstByteMs);
   });
   it("honors env overrides", () => {
     const t = streamTimeouts(

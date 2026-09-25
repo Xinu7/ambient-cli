@@ -11,3 +11,20 @@ describe("parseToolArgs", () => {
     expect(parseToolArgs("{bad")).toBeUndefined();
   });
 });
+
+describe("wire messages", () => {
+  it("echo a zero-arg call's arguments as '{}' and never serialize the pinned flag", async () => {
+    const { toWireMessages } = await import("../src/agent/ambient-client.js");
+    const wire = toWireMessages([
+      { role: "user", content: "task", pinned: true },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "a", name: "list", args: {}, rawArgs: "" }],
+      },
+    ]) as Array<Record<string, unknown>>;
+    expect(JSON.stringify(wire)).not.toContain("pinned");
+    const call = (wire[1]?.tool_calls as Array<{ function: { arguments: string } }>)[0];
+    expect(call?.function.arguments).toBe("{}");
+  });
+});

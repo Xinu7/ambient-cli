@@ -39,6 +39,7 @@ import {
 } from "@amb/reliability";
 import { type ToolRegistry, createBuiltinRegistry, toOpenAITools } from "@amb/tools-core";
 import {
+  SPILL_NOTE,
   SUMMARY_MARKER,
   capToolResult,
   catalogHash,
@@ -234,7 +235,10 @@ export class Agent {
     // as the carried summary message — injecting both doubles it. Keep only the curated notes then.
     const rawMemory = opts.workspace.readMemory(opts.workspaceRoot);
     const carriesSummary = (opts.priorMessages ?? []).some(
-      (m) => typeof m.content === "string" && m.content.startsWith(SUMMARY_MARKER),
+      (m) =>
+        typeof m.content === "string" &&
+        m.content.startsWith(SUMMARY_MARKER) &&
+        !m.content.includes(SPILL_NOTE), // a spill breadcrumb holds no summary text
     );
     const memory = rawMemory && carriesSummary ? extractNotes(rawMemory) || undefined : rawMemory;
     const memoryBlock = memory
@@ -408,6 +412,7 @@ export class Agent {
     let failedBatches = 0;
     let finalContinuations = 0;
     let stitchedPrefix = "";
+    let continuingAnswer = false;
 
     // ── Turn budget ──────────────────────────────────────────────────────────────────────────────────────
     // `maxTurns` is a SEGMENT, not a hard cap. When a segment fills while the task is still progressing,
@@ -744,6 +749,9 @@ export class Agent {
       // Extract the actionable tool calls per the lane the REQUEST was built with (turnAssisted) — this
       // must match the transport, even if chatOnce failed over to a different-lane model.
       const assistedTurn = turnAssisted;
+      // A stitched prefix belongs only to the answer being continued; any other turn starts fresh.
+      if (!continuingAnswer) stitchedPrefix = "";
+      continuingAnswer = false;
       let toolCalls = completion.toolCalls;
       let displayText = completion.content;
       if (assistedTurn) {
@@ -841,6 +849,7 @@ export class Agent {
       ) {
         finalContinuations += 1;
         stitchedPrefix = finalText;
+        continuingAnswer = true;
         messages.push({ role: "assistant", content: displayText });
         messages.push({
           role: "user",
@@ -972,7 +981,11 @@ export class Agent {
       // a whole segment with nothing succeeding is a stuck run, not progress, so we stop rather than extend.
       segmentProgress += outcomes.filter((o) => o.ok).length;
       // Two turns in a row where every tool call failed: the model is struggling — reason at max from here.
-      failedBatches = outcomes.length > 0 && outcomes.every((o) => !o.ok) ? failedBatches + 1 : 0;
+      // (A denied approval is the user's choice, not the model failing — it doesn't count.)
+      failedBatches =
+        outcomes.length > 0 && outcomes.every((o) => !o.ok && !o.error?.startsWith("denied:"))
+          ? failedBatches + 1
+          : 0;
       if (failedBatches >= FAILED_BATCHES_TO_ESCALATE) autoLevel = "max";
       // Doom-loop guard: a batch of the SAME tool calls (same names + args) repeated with no change is the
       // model going in circles. After MAX_IDENTICAL_TOOL_BATCHES identical batches, stop honestly.

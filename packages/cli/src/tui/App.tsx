@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { IMAGE_EDGE_HIGH, discoverCommands, expandCommand } from "@amb/context";
 import {
   type AskRequest,
@@ -157,7 +158,7 @@ type Action =
   | { t: "echo"; text: string }
   | { t: "toggleThinking" }
   | { t: "goal"; text: string }
-  | { t: "clear" };
+  | { t: "clear"; fresh?: boolean };
 
 function appReducer(state: ViewState, action: Action): ViewState {
   switch (action.t) {
@@ -190,7 +191,8 @@ function appReducer(state: ViewState, action: Action): ViewState {
       );
     }
     case "clear":
-      return clearTranscript(state);
+      // A fresh conversation (idle /clear) also retires the plan; a mid-run clear only wipes the screen.
+      return action.fresh ? { ...clearTranscript(state), plan: [] } : clearTranscript(state);
   }
 }
 
@@ -999,23 +1001,28 @@ export function App(deps: AppDeps): ReactNode {
         }
         break;
       }
-      case "/clear":
+      case "/clear": {
         // Clearing the screen also starts a NEW conversation: drop the session refs so the next turn mints a
         // fresh id/writer and carries NO prior-turn context (otherwise the agent would "remember" what the
         // user just cleared). Only when idle — a mid-run /clear must not swap the session out from under it.
-        if (!busyRef.current) {
+        const fresh = !busyRef.current;
+        if (fresh) {
           sessionIdRef.current = null;
           writerRef.current = null;
+          // Nothing from the cleared conversation carries into the next one: not its plan, not its effort.
+          planRef.current = [];
+          lastEffortRef.current = undefined;
         }
         // The kept plan is now from a cleared session — retire the review prompt/gesture so an empty Enter can't
         // silently execute a stale plan in the fresh session.
         setPlanReview(false);
-        dispatch({ t: "clear" });
+        dispatch({ t: "clear", fresh });
         // Scrollback printed by <Static> is outside React's control: clear the screen + scrollback and remount
         // <Static> (its internal cursor would otherwise skip the first items of the fresh transcript).
         stdout?.write("\x1b[2J\x1b[3J\x1b[H");
         setStaticEpoch((n) => n + 1);
         break;
+      }
       case "/quit":
         // Never quit with work still flying — abort the run first so nothing runs on invisibly.
         if (busyRef.current) abortRun();
@@ -1095,7 +1102,10 @@ export function App(deps: AppDeps): ReactNode {
         // Printable text → append to the note: a keystroke OR a paste (a multi-char chunk). Control keys /
         // arrows / tab arrive as "" or control characters and are ignored; pasted newlines become spaces.
         if (ch.length > 0 && !key.ctrl && !key.meta && !isAllControl(ch)) {
-          setQuestionState({ ...q, text: q.text + ch.replace(/\r?\n/g, " ") });
+          setQuestionState({
+            ...q,
+            text: q.text + normalizePastedText(ch).replace(/\s*\n\s*/g, " "),
+          });
           return;
         }
       }
@@ -1681,9 +1691,14 @@ export function App(deps: AppDeps): ReactNode {
  * Whether submitted text is meant as a slash command. A prompt that merely starts with a path
  * ("/Users/me/app.ts is broken") is a task, not an unknown command: a command name has no further slash.
  */
-export function looksLikeSlashCommand(text: string): boolean {
+export function looksLikeSlashCommand(
+  text: string,
+  pathExists: (p: string) => boolean = existsSync,
+): boolean {
   const first = text.trim().split(/\s/)[0] ?? "";
-  return /^\/[A-Za-z][\w:.-]*$/.test(first);
+  if (!/^\/[A-Za-z][\w:.-]*$/.test(first)) return false;
+  // "/tmp is full" or "/README.md is wrong": a real path on disk is a task about that path, not a command.
+  return !pathExists(first);
 }
 
 /** True when every character is a control character (C0 or DEL) — a keypress with nothing printable. */

@@ -76,7 +76,8 @@ export function toWireMessages(messages: Msg[]): unknown[] {
         tool_calls: m.toolCalls.map((tc) => ({
           id: tc.id,
           type: "function",
-          function: { name: tc.name, arguments: tc.rawArgs },
+          // A zero-argument call streams "" — echo it back as a valid empty object for strict chat templates.
+          function: { name: tc.name, arguments: tc.rawArgs.trim() === "" ? "{}" : tc.rawArgs },
         })),
       };
     }

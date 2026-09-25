@@ -239,7 +239,10 @@ export async function runChatWithFailover(
 
       // Back off and RETRY THE SAME worker first for rate-limits AND transient transport blips (a cold
       // worker has none, so it fails over immediately).
-      if (err.kind !== "cold" && sameModelRetries < MAX_SAME_MODEL_RETRIES) {
+      // A STALLED worker gets one same-model retry (the gateway may route to another worker), not two — each
+      // stall already cost a full timeout.
+      const sameModelLimit = err.detail === "stream-stall" ? 1 : MAX_SAME_MODEL_RETRIES;
+      if (err.kind !== "cold" && sameModelRetries < sameModelLimit) {
         sameModelRetries += 1;
         await abortableSleep(deps.sleep, retryDelaySeconds(err, sameModelRetries), ctx.signal);
         continue;
@@ -256,8 +259,9 @@ export async function runChatWithFailover(
         });
       }
       failovers += 1;
+      // Retry-After is about THIS model; switching to another one only needs our normal backoff.
       if (err.kind !== "cold")
-        await abortableSleep(deps.sleep, retryDelaySeconds(err, failovers), ctx.signal);
+        await abortableSleep(deps.sleep, backoffSeconds(failovers), ctx.signal);
 
       // Fail over to a warm model, never one we've already failed on this turn.
       failed.add(current);
