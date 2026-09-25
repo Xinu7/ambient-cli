@@ -57,10 +57,13 @@ function mcpIdentity(s: McpServerSpec): unknown[] {
 /** Text from a project file, shown for review: control characters (which could hide or rewrite what's on
  *  screen) made visible instead of interpreted. */
 export function visible(text: string): string {
-  return text.replace(
-    /[\u0000-\u001f\u007f-\u009f]/g,
-    (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`,
-  );
+  let out = "";
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+    const control = code < 0x20 || (code >= 0x7f && code <= 0x9f);
+    out += control ? `\\x${code.toString(16).padStart(2, "0")}` : ch;
+  }
+  return out;
 }
 
 /** Trust is granted to exactly this configuration: the project's hooks, allow rules and MCP servers. */
