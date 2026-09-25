@@ -1,4 +1,5 @@
 import { type AgentPreset, discoverAgents } from "@amb/context";
+import type { PermissionRules } from "@amb/permissions";
 import {
   type Mode,
   type NewEvent,
@@ -35,6 +36,8 @@ export interface SubagentToolDeps {
   verify?: VerifyPort;
   /** The session's hooks, applied to children's tool calls (and SubagentStop). */
   hooks?: HooksPort;
+  /** The session's permission rules, obeyed by children too. */
+  permissionRules?: PermissionRules;
   /** Injectable clock (test hook); defaults to real time. */
   now?: () => number;
   /** The user's agent presets, listed in the tool description so the model can pick one by name. */
@@ -217,6 +220,7 @@ export function makeSubagentTool(deps: SubagentToolDeps): ToolDefinition {
           ...(deps.goal ? { goal: deps.goal } : {}),
           ...(deps.verify ? { verify: deps.verify } : {}),
           ...(deps.hooks ? { hooks: deps.hooks } : {}),
+          ...(deps.permissionRules ? { permissionRules: deps.permissionRules } : {}),
           buildChildRegistry: childRegistry,
           childSink: childSink(now),
           artifactStore: childArtifactStore,

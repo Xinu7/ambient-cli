@@ -134,7 +134,7 @@ async function runOne(
     autoApprovalStreak: autoApproval.streak,
     ...(autoApproval.cap !== undefined ? { autoApprovalCap: autoApproval.cap } : {}),
   };
-  const base = decide(permInput);
+  const base = decide(permInput, opts.permissionRules ? { rules: opts.permissionRules } : {});
   // A hook can turn a prompt into an automatic allow, or an automatic allow into a prompt — never undo a denial.
   const decision =
     base.effect === "ask" && pre.allow && !pre.ask

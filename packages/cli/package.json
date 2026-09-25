@@ -18,6 +18,7 @@
     "@amb/context": "workspace:*",
     "@amb/evals": "workspace:*",
     "@amb/mcp": "workspace:*",
+    "@amb/permissions": "workspace:*",
     "@amb/protocol": "workspace:*",
     "@amb/reliability": "workspace:*",
     "@amb/runtime": "workspace:*",

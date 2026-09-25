@@ -3,7 +3,7 @@ import type { ChatClient, ChatParams, HooksPort } from "@amb/runtime";
 import type { SessionWriter } from "@amb/sessions";
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
-import type { HooksControl } from "../src/agent/hooks.js";
+import type { WorkspaceSettings } from "../src/agent/workspace-settings.js";
 import { App } from "../src/tui/App.js";
 
 const model: CatalogModel = {
@@ -21,7 +21,7 @@ const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const stubWriter = () =>
   ({ append() {}, close() {}, path: "/dev/null" }) as unknown as SessionWriter;
 
-function mount(hooks: HooksControl) {
+function mount(settings: WorkspaceSettings) {
   const requests: ChatParams[] = [];
   const client = {
     fetchCatalog: async () => [model],
@@ -41,7 +41,7 @@ function mount(hooks: HooksControl) {
       maxTurns={4}
       cwd="/nonexistent-ws"
       workspaceRoot="/nonexistent-ws"
-      hooks={hooks}
+      settings={settings}
     />,
   );
   const type = async (text: string) => {
@@ -60,15 +60,17 @@ describe("/hooks", () => {
     const port: HooksPort = {
       run: async (event) => (event === "UserPromptSubmit" ? { context: "HOOK-CONTEXT" } : {}),
     };
-    const hooks: HooksControl = {
-      port: (sid) => {
+    const hooks: WorkspaceSettings = {
+      hooksPort: (sid) => {
         ports.push(sid());
         return trusted ? port : undefined;
       },
-      summary: () => ["1 hook will run:", "  PreToolUse(Bash) → ./guard.sh"],
+      rules: () => undefined,
+      hooksSummary: () => ["1 hook will run:", "  PreToolUse(Bash) → ./guard.sh"],
+      permissionsSummary: () => ["From ambient config:", "  deny   Read(./.env)"],
       trust: () => {
         trusted = true;
-        return "Trusted 1 project hook. It runs from the next message.";
+        return "Trusted this project's 1 hook. They apply from the next message.";
       },
       untrustedCount: () => (trusted ? 0 : 1),
     };
@@ -77,11 +79,14 @@ describe("/hooks", () => {
     await type("/hooks");
     expect(ui.lastFrame()).toContain("PreToolUse(Bash) → ./guard.sh");
 
+    await type("/permissions");
+    expect(ui.lastFrame()).toContain("deny   Read(./.env)");
+
     await type("first");
     expect(JSON.stringify(requests.at(-1)?.messages)).not.toContain("HOOK-CONTEXT");
 
     await type("/hooks trust");
-    expect(ui.lastFrame()).toContain("Trusted 1 project hook");
+    expect(ui.lastFrame()).toContain("Trusted this project's 1 hook");
 
     await type("second");
     expect(JSON.stringify(requests.at(-1)?.messages)).toContain("HOOK-CONTEXT");

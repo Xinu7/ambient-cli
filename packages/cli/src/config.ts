@@ -48,9 +48,19 @@ export const AmbConfigSchema = z
     /** Hooks in Claude Code's format (`{"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command",
      *  "command": "…"}]}]}`). These always run. */
     hooks: z.record(z.string(), z.array(z.unknown())).optional(),
-    /** Also run the hooks from ~/.claude/settings.json and enabled Claude Code plugins. Off by default: those
-     *  are written for Claude Code and may not suit ambient. */
-    claudeHooks: z.boolean().optional(),
+    /** Permission rules in Claude Code's syntax: `allow` answers the approval question for matching calls,
+     *  `ask` always asks, `deny` always refuses (e.g. "Bash(npm test:*)", "Read(./.env)",
+     *  "WebFetch(domain:docs.ambient.xyz)", "mcp__github"). */
+    permissions: z
+      .object({
+        allow: z.array(z.string().min(1)).optional(),
+        deny: z.array(z.string().min(1)).optional(),
+        ask: z.array(z.string().min(1)).optional(),
+      })
+      .optional(),
+    /** Also use the hooks and allow rules from ~/.claude/settings.json and enabled Claude Code plugins. Off by
+     *  default: they're written for Claude Code and may not suit ambient. Deny and ask rules always apply. */
+    claudeSettings: z.boolean().optional(),
   })
   // Unknown keys are stripped (default) rather than rejected, so a future field in an older binary is tolerated.
   .strip();

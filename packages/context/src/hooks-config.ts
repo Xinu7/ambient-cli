@@ -125,3 +125,48 @@ export function discoverHooks(opts: {
     ),
   };
 }
+
+/** Allow / deny / ask rule lists as written in a settings file's `permissions` block. */
+export interface RuleLists {
+  allow: string[];
+  deny: string[];
+  ask: string[];
+}
+
+const EMPTY_RULES: RuleLists = { allow: [], deny: [], ask: [] };
+
+/** Read the `permissions` block of a settings object. */
+export function parseRuleLists(settings: unknown): RuleLists {
+  const perms = (settings as { permissions?: unknown } | undefined)?.permissions;
+  if (!perms || typeof perms !== "object") return EMPTY_RULES;
+  const list = (v: unknown) =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim() !== "") : [];
+  const p = perms as Record<string, unknown>;
+  return { allow: list(p.allow), deny: list(p.deny), ask: list(p.ask) };
+}
+
+export interface DiscoveredRules {
+  /** The project's `.claude/settings.json` + `settings.local.json`. */
+  project: RuleLists;
+  /** The user's `~/.claude/settings.json`. */
+  claudeUser: RuleLists;
+}
+
+export function discoverRuleLists(opts: { workspaceRoot: string; home?: string }): DiscoveredRules {
+  const home = opts.home ?? homedir();
+  const projectDir = join(opts.workspaceRoot, ".claude");
+  const userDir = join(home, ".claude");
+  const merge = (a: RuleLists, b: RuleLists): RuleLists => ({
+    allow: [...a.allow, ...b.allow],
+    deny: [...a.deny, ...b.deny],
+    ask: [...a.ask, ...b.ask],
+  });
+  const project = merge(
+    parseRuleLists(readJsonFile(join(projectDir, "settings.json"), projectDir)),
+    parseRuleLists(readJsonFile(join(projectDir, "settings.local.json"), projectDir)),
+  );
+  return {
+    project: projectDir === userDir ? EMPTY_RULES : project,
+    claudeUser: parseRuleLists(readJsonFile(join(userDir, "settings.json"), userDir)),
+  };
+}

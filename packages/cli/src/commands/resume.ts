@@ -27,7 +27,7 @@ import { makeInteractiveApprover } from "../agent/approver.js";
 import { makeInteractiveAsker } from "../agent/asker.js";
 import { makeCapabilityPort } from "../agent/capability-port.js";
 import { createDurableEventSink } from "../agent/event-sink.js";
-import { fireAndForget, untrustedNote, workspaceHooks } from "../agent/hooks.js";
+import { fireAndForget } from "../agent/hooks.js";
 import { connectMcp } from "../agent/mcp-connect.js";
 import { buildRegistry } from "../agent/registry.js";
 import { EventRenderer } from "../agent/render-events.js";
@@ -36,6 +36,7 @@ import { makeSubagentTool } from "../agent/subagent-tool.js";
 import { makeVerifyPort } from "../agent/verify-port.js";
 import { resolveWorkingApiKey } from "../agent/working-key.js";
 import { makeWorkspaceContextPort } from "../agent/workspace-context-port.js";
+import { untrustedNote, workspaceSettings } from "../agent/workspace-settings.js";
 import { configDir, loadConfig } from "../config.js";
 import { bold, dim } from "../render/color.js";
 import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
@@ -246,9 +247,10 @@ export async function runResume(args: string[]): Promise<void> {
     `${bold("amb resume")} ${dim(`· from ${sessionId0} · ${parsed.model} · ${sessionId}`)}\n`,
   );
 
-  const hooksControl = workspaceHooks(cwd, userConfig, configDir());
-  const hooks = hooksControl.port(() => sessionId);
-  const hooksNote = untrustedNote(hooksControl);
+  const settings = workspaceSettings(cwd, userConfig, configDir());
+  const hooks = settings.hooksPort(() => sessionId);
+  const permissionRules = settings.rules();
+  const hooksNote = untrustedNote(settings);
   if (hooksNote) process.stderr.write(dim(`  ${hooksNote}\n`));
 
   const opts: RunOptions = {
@@ -274,6 +276,7 @@ export async function runResume(args: string[]): Promise<void> {
     resumeContext,
     ...(resumedGoal ? { goal: resumedGoal } : {}),
     ...(hooks ? { hooks } : {}),
+    ...(permissionRules ? { permissionRules } : {}),
   };
 
   const mcp = await connectMcp(cwd, {
@@ -294,6 +297,7 @@ export async function runResume(args: string[]): Promise<void> {
         ...(opts.capabilities ? { capabilities: opts.capabilities } : {}),
         ...(opts.verify ? { verify: opts.verify } : {}),
         ...(hooks ? { hooks } : {}),
+        ...(permissionRules ? { permissionRules } : {}),
       }),
     });
     const result = await new Agent(client, registry).run(parsed.instruction, opts);

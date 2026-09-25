@@ -1,4 +1,4 @@
-import { capMode } from "@amb/permissions";
+import { type PermissionRules, capMode } from "@amb/permissions";
 import { type Mode, type NewEvent, newSessionId } from "@amb/protocol";
 import type { RoutedRole } from "@amb/reliability";
 import type { ToolRegistry } from "@amb/tools-core";
@@ -76,6 +76,8 @@ export interface SubagentDeps {
   verify?: VerifyPort;
   /** The session's hooks: a child's tool calls run the tool hooks, and SubagentStop fires when it finishes. */
   hooks?: HooksPort;
+  /** The session's permission rules — a child obeys the same denials. */
+  permissionRules?: PermissionRules;
   /** Build a child's registry for a role — MUST NOT include the `subagent` tool (structural depth cap).
    *  `allowedTools` (from a resolved preset) further restricts the registry to that intersection. */
   buildChildRegistry: (role: SubagentRole, allowedTools?: string[]) => ToolRegistry;
@@ -314,6 +316,7 @@ function runOneChild(
     ...(store ? { artifact: store.save, readArtifact: store.read } : {}),
     ...(spec.instructions ? { instructions: spec.instructions } : {}),
     ...(deps.hooks ? { hooks: childHooks(deps.hooks) } : {}),
+    ...(deps.permissionRules ? { permissionRules: deps.permissionRules } : {}),
     // Route by role when the model is on `auto` — including an explicit `spec.model === "auto"` that a Claude
     // preset produced (opus/sonnet/haiku map to "auto"); only a CONCRETE model id suppresses routing.
     ...(spec.model && spec.model !== "auto" ? {} : { routedRole: ROUTED_ROLE[role] }),

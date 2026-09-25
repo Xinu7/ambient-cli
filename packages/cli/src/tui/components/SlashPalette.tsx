@@ -44,6 +44,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     args: "[trust]",
     desc: "Hooks that run on this project (trust the project's own)",
   },
+  { name: "/permissions", desc: "Your allow / ask / deny rules and where they come from" },
   { name: "/login", desc: "Add or change your Ambient API key (checked before saving)" },
   { name: "/logout", desc: "Remove the saved API key from this machine" },
   { name: "/clear", desc: "Clear the screen and start a fresh conversation" },
@@ -80,8 +81,18 @@ function isFuzzyToken(token: string): boolean {
   return token.length >= 2 && /^[a-z0-9:_-]+$/.test(token);
 }
 
-/** Commands a loose match must never pick: they change permissions, sign out, or end the session. */
-const EXACT_ONLY = new Set(["/bypass", "/accept", "/ask", "/logout", "/login", "/clear", "/quit"]);
+/** Commands a loose match must never pick: they concern permissions, sign out, or end the session. */
+const EXACT_ONLY = new Set([
+  "/bypass",
+  "/accept",
+  "/ask",
+  "/permissions",
+  "/hooks",
+  "/logout",
+  "/login",
+  "/clear",
+  "/quit",
+]);
 
 /**
  * No prefix hit → rank the built-in commands by a loose in-order match (e.g. `/thnk` → `/thinking`). The

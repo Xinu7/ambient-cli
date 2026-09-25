@@ -99,12 +99,15 @@ rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
   servers (both the `.mcp.json` and Codex `config.toml` dialects) so what you already use works on Ambient
   models. When your MCP servers bring more tools than the model has room for, it sees an index and loads
   the ones it needs on demand.
-- **Hooks, the Claude Code way.** Hook commands in Claude Code's format (`PreToolUse`, `PostToolUse`,
+- **Hooks and permission rules, the Claude Code way.** Hook commands (`PreToolUse`, `PostToolUse`,
   `UserPromptSubmit`, `Stop`, `SubagentStop`, `SessionStart`, `SessionEnd`, `PreCompact`, `Notification`)
-  can block a tool call, rewrite its input, add context, or send the agent back to work. Put them under
-  `"hooks"` in `~/.config/amb/config.json`. A project's own `.claude/settings.json` hooks run once you've
-  trusted them (`/hooks trust`, or `ambient hooks trust`; any change needs trusting again), and your
-  `~/.claude` and plugin hooks run when you set `"claudeHooks": true`.
+  can block a tool call, rewrite its input, add context, or send the agent back to work. Rules like
+  `Bash(npm test:*)`, `Read(./.env)`, `WebFetch(domain:docs.ambient.xyz)` or `mcp__github` allow, ask for,
+  or deny matching calls (a deny always wins, even in bypass). Put both under `"hooks"` and `"permissions"`
+  in `~/.config/amb/config.json`. Deny and ask rules apply from any settings file. A project's own
+  `.claude/settings.json` hooks and allow rules apply once you've trusted them (`/hooks trust`, or
+  `ambient hooks trust`; any change needs trusting again), and those in `~/.claude` and plugins apply when
+  you set `"claudeSettings": true`.
 - **Runs everywhere.** macOS, Linux and Windows (Git Bash or PowerShell), tested on all three.
 
 ## In the interactive TUI
@@ -119,7 +122,7 @@ The activity line narrates what the agent is actually doing — `Reading src/app
 /goal <text>     a north-star kept every turn      /skills           browse and pin your skills
 /attach <path>   attach an image                   /login  /logout   add, change or remove your API key
 /tools           what the agent can use            /clear            start a fresh conversation
-/hooks [trust]   the hooks that run here
+/hooks [trust]   the hooks that run here           /permissions      your allow / ask / deny rules
 /help            every command and key             /quit
 ```
 

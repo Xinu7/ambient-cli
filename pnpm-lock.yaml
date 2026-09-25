@@ -65,6 +65,9 @@ importers:
       '@amb/mcp':
         specifier: workspace:*
         version: link:../mcp
+      '@amb/permissions':
+        specifier: workspace:*
+        version: link:../permissions
       '@amb/protocol':
         specifier: workspace:*
         version: link:../protocol

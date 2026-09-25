@@ -1,5 +1,7 @@
+import { homedir } from "node:os";
 import type { Effect, Grant, Mode, PermissionDecision, PermissionInput } from "@amb/protocol";
 import { classifyToolRisk } from "./risk.js";
+import { type PermissionRules, applyRules } from "./rules.js";
 import { isWithinWorkspace } from "./within.js";
 
 /**
@@ -109,8 +111,17 @@ export function capMode(parentMode: Mode, role: "scout" | "oracle" | "builder"):
   return parentMode; // builder: same as the parent, never widened
 }
 
-export function decide(input: PermissionInput): PermissionDecision {
-  const afterRisk = applyRisk(baseDecide(input), input);
+/** Permission rules to apply (from settings files and ambient's config) and the home folder `~/` means. */
+export interface DecideOptions {
+  rules?: PermissionRules;
+  home?: string;
+}
+
+export function decide(input: PermissionInput, opts: DecideOptions = {}): PermissionDecision {
+  const base = baseDecide(input);
+  // Rules refine the mode's answer; the risk overlay still gets its look at anything a rule allowed.
+  const ruled = opts.rules ? applyRules(base, opts.rules, input, opts.home ?? homedir()) : base;
+  const afterRisk = applyRisk(ruled, input);
   // Autonomy brake: a long unbroken run of auto-approved edits gets a periodic human checkpoint. Only in
   // accept-edits (bypass is untouched) and only for mutations (reads are free and never counted).
   const cap = input.autoApprovalCap ?? MAX_CONSECUTIVE_AUTO_APPROVALS;

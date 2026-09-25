@@ -1,4 +1,5 @@
 import type { SkillMeta } from "@amb/context";
+import type { PermissionRules } from "@amb/permissions";
 import type {
   AskRequest,
   AskResponse,
@@ -242,6 +243,8 @@ export interface RunOptions {
   instructions?: string;
   /** User-configured hooks (scripts run on tool calls, prompts and finishing). Absent ⇒ none. */
   hooks?: HooksPort;
+  /** Allow / deny / ask rules (Claude Code syntax) layered over the permission mode. */
+  permissionRules?: PermissionRules;
   /**
    * The prior interactive conversation — the non-system messages returned by the LAST `run` in this same
    * live session. When present, the agent continues the REAL message array (`[freshSystem, ...priorMessages,

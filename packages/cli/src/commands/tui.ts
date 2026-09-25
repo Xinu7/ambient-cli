@@ -116,6 +116,6 @@ export async function runTuiCommand(args: string[]): Promise<void> {
     ...(goal ? { initialGoal: goal } : {}),
     // The persistent allowlist (config `allow`) seeds the session's grants so those tools don't re-prompt.
     initialGrants: grantsFromConfig(config),
-    hooksConfig: { hooks: config.hooks, claudeHooks: config.claudeHooks },
+    settingsConfig: config,
   });
 }

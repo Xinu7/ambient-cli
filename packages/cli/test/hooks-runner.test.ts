@@ -2,14 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  combine,
-  fromClaudeInput,
-  interpret,
-  makeHooksControl,
-  matches,
-  toClaudeInput,
-} from "../src/agent/hooks.js";
+import { combine, fromClaudeInput, interpret, matches, toClaudeInput } from "../src/agent/hooks.js";
+import { makeWorkspaceSettings } from "../src/agent/workspace-settings.js";
 
 describe("reading what a hook asked for", () => {
   it("exit 2 blocks with stderr as the reason; other failures change nothing", () => {
@@ -133,7 +127,7 @@ describe.skipIf(process.platform === "win32")("running hooks", () => {
   const signal = () => new AbortController().signal;
 
   it("sends the event JSON on stdin and blocks on exit 2", async () => {
-    const control = makeHooksControl({
+    const control = makeWorkspaceSettings({
       workspaceRoot: ws,
       home,
       trustFile,
@@ -145,7 +139,7 @@ describe.skipIf(process.platform === "win32")("running hooks", () => {
         ).hooks,
       },
     });
-    const port = control.port(() => "ses_1");
+    const port = control.hooksPort(() => "ses_1");
     const out = await port?.run(
       "PreToolUse",
       { tool_name: "bash", tool_input: { command: "ls" } },
@@ -159,7 +153,7 @@ describe.skipIf(process.platform === "win32")("running hooks", () => {
   });
 
   it("a hook that hangs is stopped at its timeout and changes nothing", async () => {
-    const control = makeHooksControl({
+    const control = makeWorkspaceSettings({
       workspaceRoot: ws,
       home,
       trustFile,
@@ -170,24 +164,28 @@ describe.skipIf(process.platform === "win32")("running hooks", () => {
       },
     });
     const started = Date.now();
-    expect(await control.port(() => "s")?.run("Stop", {}, signal())).toEqual({});
+    expect(await control.hooksPort(() => "s")?.run("Stop", {}, signal())).toEqual({});
     expect(Date.now() - started).toBeLessThan(5_000);
   });
 
   it("project hooks run only once trusted, and a changed configuration needs trusting again", async () => {
     const file = join(ws, ".claude", "settings.json");
     writeFileSync(file, JSON.stringify(settings("UserPromptSubmit", "echo from-project")));
-    const control = makeHooksControl({ workspaceRoot: ws, home, trustFile, config: {} });
-    expect(control.port(() => "s")).toBeUndefined();
+    const control = makeWorkspaceSettings({ workspaceRoot: ws, home, trustFile, config: {} });
+    expect(control.hooksPort(() => "s")).toBeUndefined();
     expect(control.untrustedCount()).toBe(1);
-    expect(control.summary().join("\n")).toContain("1 hook that won't run until you trust it:");
+    expect(control.hooksSummary().join("\n")).toContain(
+      "1 hook that won't run until you trust it:",
+    );
 
-    expect(control.trust()).toContain("Trusted 1 project hook");
-    const out = await control.port(() => "s")?.run("UserPromptSubmit", { prompt: "hi" }, signal());
+    expect(control.trust()).toContain("Trusted this project's 1 hook");
+    const out = await control
+      .hooksPort(() => "s")
+      ?.run("UserPromptSubmit", { prompt: "hi" }, signal());
     expect(out).toEqual({ context: "from-project" });
 
     writeFileSync(file, JSON.stringify(settings("UserPromptSubmit", "echo changed")));
-    expect(control.port(() => "s")).toBeUndefined();
+    expect(control.hooksPort(() => "s")).toBeUndefined();
     expect(control.untrustedCount()).toBe(1);
   });
 
@@ -196,29 +194,29 @@ describe.skipIf(process.platform === "win32")("running hooks", () => {
       join(home, ".claude", "settings.json"),
       JSON.stringify(settings("SessionStart", "echo claude-user")),
     );
-    const off = makeHooksControl({ workspaceRoot: ws, home, trustFile, config: {} });
-    expect(off.port(() => "s")).toBeUndefined();
-    expect(off.summary().join("\n")).toContain('"claudeHooks": true');
+    const off = makeWorkspaceSettings({ workspaceRoot: ws, home, trustFile, config: {} });
+    expect(off.hooksPort(() => "s")).toBeUndefined();
+    expect(off.hooksSummary().join("\n")).toContain('"claudeSettings": true');
 
-    const on = makeHooksControl({
+    const on = makeWorkspaceSettings({
       workspaceRoot: ws,
       home,
       trustFile,
-      config: { claudeHooks: true },
+      config: { claudeSettings: true },
     });
-    expect(await on.port(() => "s")?.run("SessionStart", {}, signal())).toEqual({
+    expect(await on.hooksPort(() => "s")?.run("SessionStart", {}, signal())).toEqual({
       context: "claude-user",
     });
   });
 
   it("gives hooks the project folder", async () => {
-    const control = makeHooksControl({
+    const control = makeWorkspaceSettings({
       workspaceRoot: ws,
       home,
       trustFile,
       config: { hooks: settings("SessionStart", 'echo "$CLAUDE_PROJECT_DIR"').hooks },
     });
-    expect(await control.port(() => "s")?.run("SessionStart", {}, signal())).toEqual({
+    expect(await control.hooksPort(() => "s")?.run("SessionStart", {}, signal())).toEqual({
       context: ws,
     });
   });

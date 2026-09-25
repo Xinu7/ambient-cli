@@ -14,8 +14,9 @@ import { createElement } from "react";
 import { AmbientChatClient } from "../agent/ambient-client.js";
 import { makeCapabilityPort } from "../agent/capability-port.js";
 import { listWorkspaceFiles } from "../agent/file-list.js";
-import { fireAndForget, workspaceHooks } from "../agent/hooks.js";
+import { fireAndForget } from "../agent/hooks.js";
 import { type McpConnection, connectMcp } from "../agent/mcp-connect.js";
+import { type SettingsConfig, workspaceSettings } from "../agent/workspace-settings.js";
 import { openBrowser, signInInteractive } from "../commands/login.js";
 import { configDir } from "../config.js";
 import { type FleetRow, formatFleetRows, laneResolver } from "../render/fleet.js";
@@ -66,8 +67,8 @@ export interface TuiOptions {
   initialGoal?: string;
   /** Check for a newer published version and show an upgrade hint in the splash (config `checkUpdates`). */
   checkUpdates?: boolean;
-  /** The hook settings from ambient's config. */
-  hooksConfig?: { hooks?: unknown; claudeHooks?: boolean };
+  /** Hooks and permission rules from ambient's config. */
+  settingsConfig?: SettingsConfig;
 }
 
 /** Fetch the live fleet (sorted rows) for the splash count + the model picker — best-effort, never blocks long. */
@@ -206,7 +207,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const restoreGlyphs = needsAsciiFallback() ? installAsciiFallback(process.stdout) : () => {};
   process.once("exit", restoreGlyphs);
 
-  const hooks = workspaceHooks(cwd, opts.hooksConfig ?? {}, configDir());
+  const settings = workspaceSettings(cwd, opts.settingsConfig ?? {}, configDir());
   // The session in use (a /clear starts a new one) — for the SessionEnd hook when the TUI closes.
   let currentSession = "";
   const instance = render(
@@ -216,7 +217,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         currentSession = sessionId;
         return new SessionWriter(sessionId, () => new Date().toISOString());
       },
-      hooks,
+      settings,
       capabilities: makeCapabilityPort(),
       agentMode: opts.agentMode,
       permission: opts.permission,
@@ -276,7 +277,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   } finally {
     done = true;
     await fireAndForget(
-      hooks.port(() => currentSession),
+      settings.hooksPort(() => currentSession),
       "SessionEnd",
       { reason: "exit" },
     );

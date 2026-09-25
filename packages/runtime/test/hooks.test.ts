@@ -194,3 +194,55 @@ describe("hooks in a subagent", () => {
     expect(seen.map((s) => s.event)).toEqual(["PreToolUse", "SubagentStop"]);
   });
 });
+
+describe("permission rules in a run", () => {
+  it("a deny rule refuses even a read in bypass mode; an allow rule skips the prompt", async () => {
+    const { parseRules } = await import("@amb/permissions");
+    const readCall = {
+      content: "",
+      toolCalls: [
+        {
+          id: "tc_r",
+          name: "read",
+          args: { path: "secret.txt" },
+          rawArgs: '{"path":"secret.txt"}',
+        },
+      ],
+    };
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(ws, "secret.txt"), "TOP-SECRET-VALUE");
+    const client = new FixtureClient(catalogOf(TEXT_200K), [readCall, done]);
+    await new Agent(client).run(
+      "read it",
+      runOpts({
+        requestedModel: TEXT_200K.id,
+        mode: "bypass",
+        cwd: ws,
+        workspaceRoot: ws,
+        permissionRules: { allow: [], ask: [], deny: parseRules(["Read(./secret.txt)"]) },
+      }),
+    );
+    const results = toolResults(client).join("\n");
+    expect(results).not.toContain("TOP-SECRET-VALUE");
+    expect(results).toContain("Read(./secret.txt)");
+
+    let asked = 0;
+    const client2 = new FixtureClient(catalogOf(TEXT_200K), [writeCall("f.txt", "ok"), done]);
+    await new Agent(client2).run(
+      "write",
+      runOpts({
+        requestedModel: TEXT_200K.id,
+        mode: "ask",
+        cwd: ws,
+        workspaceRoot: ws,
+        approve: async () => {
+          asked++;
+          return "deny";
+        },
+        permissionRules: { allow: parseRules(["Write(f.txt)"]), ask: [], deny: [] },
+      }),
+    );
+    expect(asked).toBe(0);
+    expect(readFileSync(join(ws, "f.txt"), "utf8")).toBe("ok");
+  });
+});

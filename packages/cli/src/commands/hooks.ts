@@ -1,17 +1,13 @@
-import { workspaceHooks } from "../agent/hooks.js";
+import { workspaceSettings } from "../agent/workspace-settings.js";
 import { configDir, loadConfig } from "../config.js";
 
 /** `ambient hooks` lists the hooks that run in this folder; `ambient hooks trust` allows the project's own. */
 export async function runHooks(args: string[]): Promise<void> {
   const config = loadConfig();
-  const control = workspaceHooks(
-    process.cwd(),
-    { hooks: config.hooks, claudeHooks: config.claudeHooks },
-    configDir(),
-  );
+  const control = workspaceSettings(process.cwd(), config, configDir());
   const sub = args[0];
   if (sub === undefined || sub === "list") {
-    process.stdout.write(`${control.summary().join("\n")}\n`);
+    process.stdout.write(`${control.hooksSummary().join("\n")}\n`);
     return;
   }
   if (sub === "trust") {
