@@ -31,6 +31,31 @@ export function resolveInWorkspace(workspaceRoot: string, p: string): string {
 
 const WIN = process.platform === "win32";
 
+/**
+ * Resolve a path for READING: inside the workspace, or inside a folder this run was granted read access to
+ * (a loaded skill's own files). Each candidate root gets the same symlink-safe containment check.
+ */
+export function resolveReadable(
+  workspaceRoot: string,
+  p: string,
+  readRoots: readonly string[] = [],
+): string {
+  try {
+    return resolveInWorkspace(workspaceRoot, p);
+  } catch (err) {
+    if (isAbsolute(p)) {
+      for (const root of readRoots) {
+        try {
+          return resolveInWorkspace(root, p);
+        } catch {
+          // not under this root
+        }
+      }
+    }
+    throw err;
+  }
+}
+
 /** Git Bash / MSYS spelling of a Windows path (`/c/Users/x`) → `C:\Users\x`; undefined for anything else. */
 export function fromGitBashPath(p: string): string | undefined {
   const m = /^\/([A-Za-z])(\/.*)?$/.exec(p);

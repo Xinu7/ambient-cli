@@ -71,3 +71,36 @@ describe("skill tool — bundled-files dir hint is HONEST (only when read/list c
     expect(res.body).not.toContain("This skill's files are in:"); // …but NO false "read from that dir" hint
   });
 });
+
+describe("a skill installed outside the project", () => {
+  it("loading it lets read/list open its own files for the run — nothing else outside the workspace", async () => {
+    const dir = writeSkill(join(fakeHome, ".claude", "skills"), "pdf", "run scripts/extract.py");
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "scripts", "extract.py"), "print('extract')");
+    writeFileSync(join(fakeHome, "secret.txt"), "NOT-FOR-THE-MODEL");
+    const roots = new Set<string>();
+    const c: ToolContext = {
+      ...ctx(ws),
+      readRoots: { list: () => [...roots], add: (d) => void roots.add(d) },
+    };
+    const { readTool } = await import("../src/tools/read.js");
+    const { listTool } = await import("../src/tools/list.js");
+    await expect(readTool.execute({ path: join(dir, "scripts", "extract.py") }, c)).rejects.toThrow(
+      /escapes/,
+    );
+
+    const res = await skillTool.execute({ name: "pdf" }, c);
+    expect(res.body).toContain(`This skill's files are in: ${dir}`);
+    const file = await readTool.execute({ path: join(dir, "scripts", "extract.py") }, c);
+    expect(file.content).toContain("print('extract')");
+    const listing = await listTool.execute({ path: dir }, c);
+    expect(JSON.stringify(listing)).toContain("scripts");
+
+    await expect(readTool.execute({ path: join(fakeHome, "secret.txt") }, c)).rejects.toThrow(
+      /escapes/,
+    );
+    await expect(
+      readTool.execute({ path: join(dir, "..", "..", "..", "secret.txt") }, c),
+    ).rejects.toThrow();
+  });
+});

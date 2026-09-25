@@ -214,3 +214,21 @@ export function loadInstructions(
   const all = [...user, ...project];
   return { text: all.map((c) => c.text).join("\n\n"), sources: all.map((c) => c.path) };
 }
+
+/** The instruction files in exactly one folder (no walking up), bounded — for a subfolder the agent starts
+ *  working in, whose rules weren't part of the prompt. Symlink-safe like every other instruction read. */
+export function folderInstructions(dir: string, perFile = MAX_PER_FILE): string | undefined {
+  const chunks: string[] = [];
+  const seen = new Set<string>();
+  for (const name of INSTRUCTION_FILENAMES) {
+    const content = readTextCappedSafe(join(dir, name), { root: dir })?.trim();
+    if (!content) continue;
+    const key = content.slice(0, 200);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const bounded =
+      content.length > perFile ? `${content.slice(0, perFile)}\n…(truncated)` : content;
+    chunks.push(`# From ${name}\n${bounded}`);
+  }
+  return chunks.length > 0 ? chunks.join("\n\n") : undefined;
+}

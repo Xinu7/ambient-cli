@@ -86,6 +86,8 @@ export interface WorkspaceContextPort {
   readMemory(workspaceRoot: string): string | undefined;
   /** The user's notes for every project, or undefined if none. */
   readUserMemory?(): string | undefined;
+  /** The instruction files (AGENTS.md, CLAUDE.md, …) in exactly this folder, or undefined if none. */
+  folderInstructions?(dir: string): string | undefined;
   /** Persist the compounding project memory (best-effort; never load-bearing). */
   writeMemory(workspaceRoot: string, summary: string): void;
   /** Today's date as YYYY-MM-DD (injectable clock). */

@@ -57,7 +57,12 @@ export const skillTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Out
         resolveInWorkspace(ctx.workspaceRoot, loaded.dir);
         reachableDir = loaded.dir;
       } catch {
-        reachableDir = undefined;
+        // A skill installed outside the project (~/.claude/skills, a plugin): loading it grants read-only
+        // access to its own folder for the rest of the run, so its bundled files can be opened.
+        if (ctx.readRoots) {
+          ctx.readRoots.add(loaded.dir);
+          reachableDir = loaded.dir;
+        }
       }
     }
     const body = reachableDir

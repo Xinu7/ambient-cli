@@ -1,3 +1,9 @@
+import {
+  isAbsolute as isAbsolutePath,
+  join as joinPath,
+  relative as relativePath,
+  resolve as resolvePath,
+} from "node:path";
 import { decide, refineBashEffects, resolveResource } from "@amb/permissions";
 import {
   type Grant,
@@ -24,6 +30,8 @@ export interface ToolOutcome {
   durationMs: number;
   /** Something a hook added after the tool ran (feedback or context for the model). */
   hookNote?: string;
+  /** Instructions for a folder the call reached into for the first time this run (its AGENTS.md etc.). */
+  folderInstructions?: string;
 }
 
 /** IDs that scope the attempt these tool calls belong to. */
@@ -323,7 +331,9 @@ export async function executeTools(
   grants: Grant[] = [],
   autoApproval: { streak: number; cap?: number } = { streak: 0 },
   resultChars?: number,
+  runState?: RunState,
 ): Promise<ToolOutcome[]> {
+  const readRoots = runState?.readRoots;
   const makeToolCtx = (toolCallId: string): ToolContext => ({
     cwd: opts.cwd,
     workspaceRoot: opts.workspaceRoot,
@@ -339,6 +349,9 @@ export async function executeTools(
     scope: { sessionId: scope.sessionId, turnId: scope.turnId, attemptId: scope.attemptId },
     toolCallId,
     ...(resultChars !== undefined ? { resultChars } : {}),
+    ...(readRoots
+      ? { readRoots: { list: () => [...readRoots], add: (dir: string) => void readRoots.add(dir) } }
+      : {}),
   });
 
   const ids = calls.map((c) => (c.id.startsWith("tc_") ? c.id : newToolCallId()));
@@ -476,7 +489,59 @@ export async function executeTools(
     }
   }
 
-  return outcomes.filter((o): o is ToolOutcome => o !== undefined);
+  const done = outcomes.filter((o): o is ToolOutcome => o !== undefined);
+  return runState ? withFolderInstructions(done, calls, opts, runState) : done;
+}
+
+/** What a run remembers across tool batches. */
+export interface RunState {
+  /** Folders outside the workspace tools may read (a loaded skill's own files). */
+  readRoots: Set<string>;
+  /** Folders whose own instruction files were already offered this run. */
+  instructionDirs: Set<string>;
+}
+
+export function newRunState(): RunState {
+  return { readRoots: new Set(), instructionDirs: new Set() };
+}
+
+/**
+ * The first time a call reaches into a folder below the working directory, that folder's own instruction
+ * files (AGENTS.md, CLAUDE.md, …) ride along with the result — so a monorepo package's rules apply when the
+ * agent starts working there, without loading every package's rules up front.
+ */
+function withFolderInstructions(
+  outcomes: ToolOutcome[],
+  calls: ToolCall[],
+  opts: RunOptions,
+  state: RunState,
+): ToolOutcome[] {
+  const load = opts.workspace?.folderInstructions;
+  if (!load) return outcomes;
+  const base = resolvePath(opts.cwd);
+  return outcomes.map((o, i) => {
+    if (!o.ok) return o;
+    const notes: string[] = [];
+    for (const r of resourcesOf(calls[i]?.args)) {
+      const abs = resolveResource(opts.workspaceRoot, r);
+      const rel = relativePath(base, abs);
+      if (!rel || rel.startsWith("..") || isAbsolutePath(rel)) continue;
+      // Every folder from just below the working directory down to the one the file is in.
+      const parts = rel.split(/[\\/]/);
+      const dirParts = o.toolName === "list" ? parts : parts.slice(0, -1);
+      for (let d = 1; d <= dirParts.length; d++) {
+        const dir = joinPath(base, ...dirParts.slice(0, d));
+        if (state.instructionDirs.has(dir)) continue;
+        state.instructionDirs.add(dir);
+        const text = load(dir);
+        if (text)
+          notes.push(
+            `Instructions for ${dirParts.slice(0, d).join("/")}/ (follow them while working there):\n${text}`,
+          );
+      }
+    }
+    return notes.length > 0 ? { ...o, folderInstructions: notes.join("\n\n") } : o;
+  });
 }
 
 /** Never store `undefined` in an event (breaks the checksum canonicalizer vs JSON.stringify). */

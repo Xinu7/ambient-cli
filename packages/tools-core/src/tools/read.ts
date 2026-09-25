@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import type { ToolContext, ToolDefinition } from "@amb/protocol";
 import { z } from "zod";
-import { resolveInWorkspace } from "../paths.js";
+import { resolveReadable } from "../paths.js";
 
 const Input = z.object({
   path: z.string().describe("File path relative to the workspace root"),
@@ -31,7 +31,7 @@ export const readTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
   inputSchema: Input,
   outputSchema: Output,
   async execute(input, ctx: ToolContext) {
-    const abs = resolveInWorkspace(ctx.workspaceRoot, input.path);
+    const abs = resolveReadable(ctx.workspaceRoot, input.path, ctx.readRoots?.list());
     const raw = await readFile(abs, "utf8");
     const all = raw.split(/\r?\n/); // CRLF files show the same clean lines as LF ones
     const start = input.offset ? input.offset - 1 : 0;

@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { listField, parseFrontmatter, textField } from "./frontmatter.js";
 import { MAX_DIR_ENTRIES, isRealDir, readTextCappedSafe, readUserMarkdown } from "./fs-safe.js";
+import { installedPlugins } from "./plugins.js";
 
 /**
  * Discover reusable SUBAGENT presets from a user's existing Claude Code setup (`.claude/agents/*.md`) plus
@@ -114,13 +115,19 @@ export function parseAgent(text: string, fallbackName?: string): AgentPreset | n
 /** Discover agent presets across roots (project > user), first-wins by name. */
 export function discoverAgents(workspaceRoot: string, home: string = homedir()): AgentPreset[] {
   // Project folders never follow symlinks; the user's own ~/.claude/agents may link agents in from elsewhere.
-  const roots: Array<{ dir: string; user: boolean }> = [
+  const roots: Array<{ dir: string; user: boolean; prefix?: string }> = [
     { dir: join(workspaceRoot, ".ambient", "agents"), user: false },
     { dir: join(workspaceRoot, ".claude", "agents"), user: false },
     { dir: join(home, ".claude", "agents"), user: true },
+    // Enabled Claude Code plugins' agents, named `plugin:agent` the way Claude Code names them.
+    ...installedPlugins(workspaceRoot, home).map((p) => ({
+      dir: join(p.root, "agents"),
+      user: false,
+      prefix: `${p.name}:`,
+    })),
   ];
   const byName = new Map<string, AgentPreset>();
-  for (const { dir, user } of roots) {
+  for (const { dir, user, prefix } of roots) {
     if (!isRealDir(dir)) continue;
     let files: string[];
     try {
@@ -136,7 +143,8 @@ export function discoverAgents(workspaceRoot: string, home: string = homedir()):
         ? readUserMarkdown(join(dir, f))
         : readTextCappedSafe(join(dir, f), { root: dir });
       if (text === null) continue;
-      const preset = parseAgent(text, f.replace(/\.md$/, ""));
+      const parsed = parseAgent(text, f.replace(/\.md$/, ""));
+      const preset = parsed && prefix ? { ...parsed, name: `${prefix}${parsed.name}` } : parsed;
       if (preset && !byName.has(preset.name)) byName.set(preset.name, preset);
     }
   }

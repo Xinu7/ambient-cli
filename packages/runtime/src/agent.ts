@@ -86,7 +86,7 @@ import {
   SKILLS_MIN_TOKENS,
 } from "./constants.js";
 import { autoEffortForTask, resolveEffort } from "./effort.js";
-import { executeTools } from "./execute-tools.js";
+import { executeTools, newRunState } from "./execute-tools.js";
 import { runChatWithFailover } from "./failover.js";
 import type {
   CapabilityPort,
@@ -145,6 +145,9 @@ export class Agent {
     // Use the caller's grants array when provided (the TUI passes ONE per session) so an "allow for this
     // session" grant persists across turns; else a fresh per-run array (line/one-shot runs).
     const grants: Grant[] = opts.grants ?? [];
+    // Per-run tool state: folders outside the workspace tools may read (a loaded skill's own files) and
+    // folders whose own instructions were already offered.
+    const runState = newRunState();
     // Run-scoped autonomy brake: consecutive auto-approved mutations, reset whenever a human is asked. `cap`
     // is the EARNED per-model cap (set from the served model's verify track record before each tool batch).
     const autoApproval: { streak: number; cap?: number } = { streak: 0 };
@@ -1254,6 +1257,7 @@ export class Agent {
         grants,
         autoApproval,
         resultChars,
+        runState,
       );
       // Auto-continue cost gate: a segment must land at least one successful tool call to earn another one —
       // a whole segment with nothing succeeding is a stuck run, not progress, so we stop rather than extend.
@@ -1325,7 +1329,7 @@ export class Agent {
       for (const o of outcomes) {
         const fullText = `${o.ok ? stringifyResult(o.result) : `ERROR: ${o.error}`}${
           o.hookNote ? `\n\n[from a hook] ${o.hookNote}` : ""
-        }`;
+        }${o.folderInstructions ? `\n\n${o.folderInstructions}` : ""}`;
         const capped = capToolResult(fullText, perResultCharBudget);
         // Truncation signal must be IDENTITY, not a UTF-16 length compare: capToolResult works in UTF-8 bytes
         // and inserts a "…[N bytes truncated]…" marker, so for multi-byte text (CJK/emoji) the capped string

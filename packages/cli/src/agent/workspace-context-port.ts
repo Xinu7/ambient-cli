@@ -1,5 +1,6 @@
 import {
   discoverInjectableSkills,
+  folderInstructions,
   loadInstructions,
   readMemory,
   readUserMemory,
@@ -39,6 +40,7 @@ export function makeWorkspaceContextPort(
       loadInstructions(cwd, limits, { userFiles: opts.userInstructions === true }).text,
     readMemory: (workspaceRoot) => readMemory(workspaceRoot),
     readUserMemory: () => readUserMemory(userMemoryPath(ambHome())),
+    folderInstructions: (dir) => folderInstructions(dir),
     writeMemory: (workspaceRoot, summary) => writeMemory(workspaceRoot, summary),
     date: () => now().toISOString().slice(0, 10),
     platform: () => process.platform,

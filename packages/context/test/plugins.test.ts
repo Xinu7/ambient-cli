@@ -63,3 +63,19 @@ describe("installed plugins", () => {
     expect(installedPlugins(join(dir, "ws"), join(dir, "nohome"))).toEqual([]);
   });
 });
+
+describe("plugin agents", () => {
+  it("come from enabled plugins, named plugin:agent", async () => {
+    const { home, ws } = setup();
+    const root = join(home, ".claude", "plugins", "cache", "mkt", "alpha", "2.0.0", "agents");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(
+      join(root, "reviewer.md"),
+      "---\nname: reviewer\ndescription: Reviews code\ntools: Read, Grep\n---\nReview carefully.",
+    );
+    const { discoverAgents } = await import("../src/agents.js");
+    const agent = discoverAgents(ws, home).find((a) => a.name === "alpha:reviewer");
+    expect(agent?.description).toBe("Reviews code");
+    expect(agent?.tools).toEqual(["read", "grep"]);
+  });
+});

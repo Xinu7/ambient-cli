@@ -83,6 +83,9 @@ export interface ToolContext {
   /** Characters of this call's result that fit in the caller's context right now (from the served model's
    *  window). Lets a tool that gathers a lot (a subagent wave) share that room fairly. Optional. */
   resultChars?: number;
+  /** Folders outside the workspace this run may READ (a loaded skill's own files — scripts/, references/).
+   *  `add` grants one for the rest of the run. Optional — absent ⇒ reads stay inside the workspace. */
+  readRoots?: { list(): readonly string[]; add(dir: string): void };
 }
 
 /** A tool = serializable manifest + Zod I/O schemas + an execute fn. Not fully serializable (has execute). */

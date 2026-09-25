@@ -3,7 +3,7 @@ import { readdir } from "node:fs/promises";
 import { relative } from "node:path";
 import type { ToolContext, ToolDefinition } from "@amb/protocol";
 import { z } from "zod";
-import { resolveInWorkspace } from "../paths.js";
+import { resolveReadable } from "../paths.js";
 
 const Input = z.object({
   path: z.string().default(".").describe("Directory relative to the workspace root"),
@@ -32,7 +32,7 @@ export const listTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
   inputSchema: Input,
   outputSchema: Output,
   async execute(input, ctx: ToolContext) {
-    const abs = resolveInWorkspace(ctx.workspaceRoot, input.path);
+    const abs = resolveReadable(ctx.workspaceRoot, input.path, ctx.readRoots?.list());
     const rel = relative(ctx.workspaceRoot, abs) || ".";
     let dirents: Dirent[];
     try {
