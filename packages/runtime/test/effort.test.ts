@@ -239,3 +239,23 @@ describe("empty fleet is fatal — the `auto` sentinel never reaches the wire", 
     expect(client.calls.length).toBe(0); // never sent "auto" (or anything) to the model
   });
 });
+
+describe("denied approvals are the user's choice, not the model struggling", () => {
+  it("two batches of denied tool calls do NOT escalate auto effort to max", async () => {
+    const denied = (n: number) => ({
+      content: "",
+      toolCalls: [
+        { id: `tc_${n}`, name: "write", args: { path: `f${n}.txt`, content: "x" }, rawArgs: "{}" },
+      ],
+    });
+    const client = new RecordingClient(
+      [reasoning],
+      [denied(1), denied(2), { content: "ok, stopping", toolCalls: [] }],
+    );
+    await new Agent(client).run(
+      "add a feature",
+      opts({ effort: "auto", mode: "ask", approve: async () => "deny" }),
+    );
+    expect(client.calls[2]?.reasoningEffort).toBe("high");
+  });
+});

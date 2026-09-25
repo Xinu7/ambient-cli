@@ -21,11 +21,17 @@ const stubWriter = () =>
   ({ append() {}, close() {}, path: "/dev/null" }) as unknown as SessionWriter;
 const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function harness(opts: { keyWorks: () => boolean; verify: AccountPort["verify"] }) {
+function harness(opts: {
+  keyWorks: () => boolean;
+  verify: AccountPort["verify"];
+  startupCheck?: AccountPort["startupCheck"];
+}) {
   const prompts: string[] = [];
+  const requests: ChatParams[] = [];
   const client = {
     fetchCatalog: async () => [model],
     chat: async (p: ChatParams) => {
+      requests.push({ ...p, messages: [...p.messages] });
       const last = p.messages.at(-1);
       prompts.push(typeof last?.content === "string" ? last.content : "");
       if (!opts.keyWorks())
@@ -42,9 +48,10 @@ function harness(opts: { keyWorks: () => boolean; verify: AccountPort["verify"] 
     keysUrl: "https://app.ambient.xyz/keys",
     verify: opts.verify,
     save: (k) => saved.push(k),
-    remove: () => {},
+    remove: () => "Signed out on this machine.",
     openKeysPage: () => true,
     mask: (k) => `…${k.slice(-4)}`,
+    ...(opts.startupCheck ? { startupCheck: opts.startupCheck } : {}),
   };
   const ui = render(
     <App
@@ -60,13 +67,13 @@ function harness(opts: { keyWorks: () => boolean; verify: AccountPort["verify"] 
       account={account}
     />,
   );
-  return { ui, saved, prompts };
+  return { ui, saved, prompts, requests };
 }
 
 describe("a key rejected mid-session", () => {
   it("opens the key panel, saves a verified new key, and re-runs the task", async () => {
     let good = false;
-    const { ui, saved, prompts } = harness({
+    const { ui, saved, prompts, requests } = harness({
       keyWorks: () => good,
       verify: async (k) => (k === "sk-new-key-0001" ? "valid" : "invalid"),
     });
@@ -92,6 +99,15 @@ describe("a key rejected mid-session", () => {
     expect(frame).not.toContain("sk-new-key-0001"); // never echoed
     expect(frame).toContain("Signed in with key …0001");
     expect(prompts.filter((p) => p.includes("write the readme")).length).toBeGreaterThanOrEqual(2);
+    // The retried request carries the task ONCE (the failed attempt isn't left in the conversation).
+    const lastReq = requests.at(-1)?.messages ?? [];
+    const copies = lastReq.filter(
+      (m) =>
+        m.role === "user" &&
+        typeof m.content === "string" &&
+        m.content.includes("write the readme"),
+    );
+    expect(copies).toHaveLength(1);
     ui.unmount();
   });
 
@@ -130,15 +146,59 @@ describe("a key rejected mid-session", () => {
           keysUrl: "https://app.ambient.xyz/keys",
           verify: async () => "valid",
           save: () => {},
-          remove: () => {},
+          remove: () => "",
           openKeysPage: () => true,
           mask: (k) => k,
-          startupCheck: Promise.resolve("invalid"),
+          startupCheck: Promise.resolve({ result: "invalid" as const }),
         }}
       />,
     );
     await settle(60);
     expect(ui.lastFrame()).toContain("Your saved Ambient key doesn't work");
+    ui.unmount();
+  });
+});
+
+describe("key panel races", () => {
+  it("Esc while a key is being checked cancels it: nothing is saved and nothing re-runs", async () => {
+    let finish: (r: "valid") => void = () => {};
+    const { ui, saved, prompts } = harness({
+      keyWorks: () => false,
+      verify: () =>
+        new Promise((r) => {
+          finish = r;
+        }),
+    });
+    await settle(30);
+    for (const ch of "do it") ui.stdin.write(ch);
+    ui.stdin.write("\r");
+    await settle(250);
+    ui.stdin.write("sk-late-key-7777");
+    ui.stdin.write("\r");
+    await settle(30);
+    ui.stdin.write("\x1b"); // dismiss while the check is still in flight
+    await settle(30);
+    const before = prompts.length;
+    finish("valid");
+    await settle(100);
+    expect(saved).toEqual([]);
+    expect(prompts.length).toBe(before);
+    expect(ui.lastFrame()).not.toContain("Signed in with key");
+    ui.unmount();
+  });
+
+  it("a launch check that switched to another working key says so", async () => {
+    const { ui } = harness({
+      keyWorks: () => true,
+      verify: async () => "valid",
+      startupCheck: Promise.resolve({
+        result: "valid" as const,
+        note: "Your saved key was rejected, so ambient is using …2222",
+      }),
+    });
+    await settle(80);
+    expect(ui.lastFrame()).toContain("using …2222");
+    expect(ui.lastFrame()).not.toContain("Change your Ambient API key");
     ui.unmount();
   });
 });

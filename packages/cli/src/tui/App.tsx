@@ -249,14 +249,21 @@ export function App(deps: AppDeps): ReactNode {
   const [staticEpoch, setStaticEpoch] = useState(0);
   // The in-app key flow. A run that fails because Ambient rejected the key (revoked or mistyped) opens the
   // key panel and re-runs that task once a working key is saved; /login opens it on demand.
-  const keyFlow = useKeyPrompt(
-    deps.account,
-    (level, text) => dispatch({ t: "notice", level, text }),
-    (text, attachments) => void runTaskRef.current?.(text, attachments),
+  const keyNotice = useCallback(
+    (level: "info" | "warn" | "error", text: string) => dispatch({ t: "notice", level, text }),
+    [],
   );
+  const keyRerun = useCallback(
+    (text: string, attachments: ImageAttachment[]) => void runTaskRef.current?.(text, attachments),
+    [],
+  );
+  const isBusy = useCallback(() => busyRef.current, []);
+  const keyFlow = useKeyPrompt(deps.account, keyNotice, keyRerun, isBusy);
   const keyFlowRef = useRef(keyFlow);
   keyFlowRef.current = keyFlow;
   const authRejectedRef = useRef(false);
+  // Whether the current run executed any tool — decides how a run that died on a rejected key is retried.
+  const toolsRanRef = useRef(false);
   // Discover the user's existing Claude/Codex slash commands ONCE — their names join the palette, their
   // bodies (with $ARGUMENTS/$1 expansion) run as a task on dispatch.
   const customCommands = useMemo(() => {
@@ -526,6 +533,10 @@ export function App(deps: AppDeps): ReactNode {
       setRunActive(true);
       setPlanReview(false); // a run is starting — the previous plan (if any) is no longer awaiting review
       authRejectedRef.current = false;
+      toolsRanRef.current = false;
+      // The conversation as it stood before this run — restored if the run dies on a rejected key before doing
+      // anything, so the retry sends the task once instead of twice.
+      const conversationBefore = conversationRef.current;
       // One session id + writer for the whole TUI launch (minted lazily on the first turn, reset by /clear).
       if (!sessionIdRef.current || !writerRef.current) {
         sessionIdRef.current = newSessionId();
@@ -594,6 +605,7 @@ export function App(deps: AppDeps): ReactNode {
               if (parsed) planRef.current = parsed;
             }
             if (ev.kind === "error" && ev.errorKind === "auth") authRejectedRef.current = true;
+            if (ev.kind === "tool.result") toolsRanRef.current = true;
             dispatch({ t: "event", ev });
           },
           onWriteError: () => {
@@ -733,7 +745,20 @@ export function App(deps: AppDeps): ReactNode {
         const leftoverSteer = steerRef.current;
         if (authRejectedRef.current) {
           authRejectedRef.current = false;
-          keyFlowRef.current.open("rejected", { text: task, attachments: attach });
+          // Mid-run messages wait in the queue (not injected into whatever runs next).
+          if (leftoverSteer.length > 0) {
+            steerRef.current = [];
+            queueRef.current.unshift({ text: leftoverSteer.join("\n"), attachments: [] });
+            setQueued(queueRef.current.map((q) => q.text));
+          }
+          // Nothing ran yet → retry the task as if it never happened. Tools already ran → keep what they did
+          // and ask the model to pick up where it stopped, so nothing is executed twice.
+          if (toolsRanRef.current) {
+            keyFlowRef.current.open("rejected", { text: CONTINUE_AFTER_KEY, attachments: [] });
+          } else {
+            conversationRef.current = conversationBefore;
+            keyFlowRef.current.open("rejected", { text: task, attachments: attach });
+          }
         } else if (leftoverSteer.length > 0) {
           steerRef.current = [];
           setQueued(queueRef.current.map((q) => q.text));
@@ -1058,14 +1083,7 @@ export function App(deps: AppDeps): ReactNode {
         setBuffer("");
         break;
       case "/logout":
-        if (deps.account) {
-          deps.account.remove();
-          dispatch({
-            t: "notice",
-            level: "info",
-            text: "Signed out on this machine. Type /login to add a key (AMBIENT_API_KEY, if set, still applies).",
-          });
-        }
+        if (deps.account) dispatch({ t: "notice", level: "info", text: deps.account.remove() });
         setBuffer("");
         break;
       case "/quit":
@@ -1762,3 +1780,7 @@ function isAllControl(text: string): boolean {
   }
   return true;
 }
+
+/** Sent when a run that already did work died on a rejected key and a working key is now saved. */
+const CONTINUE_AFTER_KEY =
+  "Continue the task from where you stopped — the previous attempt was interrupted when Ambient rejected the API key. Don't redo steps that already completed.";

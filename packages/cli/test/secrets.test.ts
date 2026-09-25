@@ -71,3 +71,54 @@ describe("resolving + removing the key", () => {
     expect(maskKey("abc")).toBe("…");
   });
 });
+
+describe("keychain read matches the write", () => {
+  it("reads THIS CLI's own item (service + account) first, then another Ambient app's key", async () => {
+    const { apiKeyCandidates } = await import("../src/secrets.js");
+    const run: SecretRunner = (_cmd, args) => {
+      if (args.includes("-a") && args.includes("amb")) return "sk-own-cli-key-1111\n";
+      if (args.includes("find-generic-password")) return "sk-other-app-key-2222\n";
+      return "";
+    };
+    const c = apiKeyCandidates({}, { platform: "darwin", run, configDir: dir });
+    expect(c).toEqual([
+      { key: "sk-own-cli-key-1111", source: "keychain" },
+      { key: "sk-other-app-key-2222", source: "keychain-shared" },
+    ]);
+  });
+  it("save, read and delete all target the same service + account", () => {
+    const seen: string[][] = [];
+    const run: SecretRunner = (_c, args, input) => {
+      seen.push(input ? [input] : args);
+      return "";
+    };
+    saveApiKey("sk-same-account-1234", { platform: "darwin", run, configDir: dir });
+    deleteApiKey({ platform: "darwin", run, configDir: dir });
+    resolveApiKeyWithSource({}, { platform: "darwin", run, configDir: dir });
+    const flat = seen.map((a) => a.join(" "));
+    expect(flat[0]).toMatch(/-s "ambient\.xyz" -a "amb"/);
+    expect(flat[1]).toMatch(/-s ambient\.xyz -a amb/);
+    expect(flat[2]).toMatch(/-s ambient\.xyz -a amb/);
+  });
+});
+
+describe("credentials file hardening", () => {
+  it("refuses to write through a planted symlink", async () => {
+    const { symlinkSync, writeFileSync } = await import("node:fs");
+    const target = join(dir, "victim.txt");
+    writeFileSync(target, "untouched");
+    symlinkSync(target, join(dir, "credentials.json"));
+    expect(() =>
+      saveApiKey("sk-SYMLINK-TEST", { platform: "linux", run: () => "", configDir: dir }),
+    ).toThrow();
+    expect(readFileSync(target, "utf8")).toBe("untouched");
+  });
+  it("replaces an existing loose-permission file with a private one", async () => {
+    const { writeFileSync, chmodSync } = await import("node:fs");
+    const p = join(dir, "credentials.json");
+    writeFileSync(p, "{}");
+    chmodSync(p, 0o644);
+    saveApiKey("sk-REPLACED-1234", { platform: "linux", run: () => "", configDir: dir });
+    expect(statSync(p).mode & 0o077).toBe(0);
+  });
+});

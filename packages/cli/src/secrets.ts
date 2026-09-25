@@ -1,5 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { KEYCHAIN_SERVICE } from "@amb/ambient-api";
@@ -33,7 +42,21 @@ export interface SecretEnv {
   configDir?: string;
 }
 
-export type KeySource = "env" | "keychain" | "file";
+/** Where a key came from. `keychain-shared` = an ambient.xyz keychain item saved by another Ambient app. */
+export type KeySource = "env" | "keychain" | "keychain-shared" | "file";
+
+/** Human wording for where a key came from. */
+export const KEY_SOURCE_LABEL: Record<KeySource, string> = {
+  env: "AMBIENT_API_KEY",
+  keychain: "your keychain",
+  "keychain-shared": "another Ambient app's saved key",
+  file: "your credentials file",
+};
+
+export interface KeyCandidate {
+  key: string;
+  source: KeySource;
+}
 
 const defaultRun: SecretRunner = (cmd, args, input) =>
   execFileSync(cmd, args, {
@@ -88,8 +111,14 @@ export function saveApiKey(key: string, e: SecretEnv = {}): void {
   const p = credentialsPath(configDir);
   try {
     mkdirSync(dirname(p), { recursive: true, mode: 0o700 });
-    writeFileSync(p, `${JSON.stringify({ apiKey: clean })}\n`, { mode: 0o600 });
-    chmodSync(p, 0o600); // an existing file keeps its old mode on write — tighten it explicitly
+    chmodSync(dirname(p), 0o700);
+    // Never follow a planted symlink at the credentials path.
+    if (existsSync(p) && lstatSync(p).isSymbolicLink()) throw new Error("symlink");
+    // Write a fresh private temp file (exclusive create, 0600) and rename it over the target, so the key is
+    // never readable through looser permissions an existing file might have.
+    const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify({ apiKey: clean })}\n`, { mode: 0o600, flag: "wx" });
+    renameSync(tmp, p);
   } catch {
     throw new Error(`could not write ${p}`);
   }
@@ -108,21 +137,32 @@ export function deleteApiKey(e: SecretEnv = {}): void {
   rmSync(credentialsPath(configDir), { force: true });
 }
 
-/** Resolve the key and where it came from: env AMBIENT_API_KEY, then the keychain (macOS), then the file. */
-export function resolveApiKeyWithSource(
+/**
+ * Every key available on this machine, in priority order: env AMBIENT_API_KEY, this CLI's own keychain item
+ * (account `amb`), an ambient.xyz keychain item saved by another Ambient app, then the credentials file.
+ * Reading the CLI's OWN item first matters: save/delete target it, so reading "whatever comes first" could
+ * silently use a different app's key.
+ */
+export function apiKeyCandidates(
   env: Record<string, string | undefined> = process.env,
   e: SecretEnv = {},
-): { key: string; source: KeySource } | undefined {
+): KeyCandidate[] {
+  const out: KeyCandidate[] = [];
   const fromEnv = env.AMBIENT_API_KEY?.trim();
-  if (fromEnv) return { key: fromEnv, source: "env" };
+  if (fromEnv) out.push({ key: fromEnv, source: "env" });
   const { platform, run, configDir } = resolveEnv(e);
   if (platform === "darwin") {
-    try {
-      const key = run("security", ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"]).trim();
-      if (key) return { key, source: "keychain" };
-    } catch {
-      // no keychain entry — fall through
-    }
+    const read = (args: string[]): string | undefined => {
+      try {
+        return run("security", ["find-generic-password", ...args, "-w"]).trim() || undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    const own = read(["-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT]);
+    if (own) out.push({ key: own, source: "keychain" });
+    const any = read(["-s", KEYCHAIN_SERVICE]);
+    if (any && any !== own) out.push({ key: any, source: "keychain-shared" });
   }
   const p = credentialsPath(configDir);
   if (existsSync(p)) {
@@ -130,12 +170,20 @@ export function resolveApiKeyWithSource(
       const key = String(
         (JSON.parse(readFileSync(p, "utf8")) as { apiKey?: unknown }).apiKey ?? "",
       ).trim();
-      if (key) return { key, source: "file" };
+      if (key) out.push({ key, source: "file" });
     } catch {
-      // unreadable/corrupt — treat as signed out
+      // unreadable/corrupt — ignore
     }
   }
-  return undefined;
+  return out;
+}
+
+/** The key to use and where it came from (the first candidate), or undefined when signed out. */
+export function resolveApiKeyWithSource(
+  env: Record<string, string | undefined> = process.env,
+  e: SecretEnv = {},
+): KeyCandidate | undefined {
+  return apiKeyCandidates(env, e)[0];
 }
 
 /** Resolve the Ambient API key (env, keychain, credentials file). Never logs the value. */

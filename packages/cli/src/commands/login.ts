@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { KEYS_URL, resolveConfig, verifyApiKey } from "@amb/ambient-api";
 import { bold, cyan, dim } from "../render/color.js";
 import {
+  KEY_SOURCE_LABEL,
   deleteApiKey,
   maskKey,
   resolveApiKey,
@@ -122,15 +123,16 @@ export async function runLogin(): Promise<void> {
 
 /** `ambient logout` — remove the saved key from this machine. */
 export function runLogout(): void {
-  const src = resolveApiKeyWithSource();
+  const before = resolveApiKeyWithSource();
   deleteApiKey();
-  if (src?.source === "env") {
+  const after = resolveApiKeyWithSource();
+  if (after) {
     process.stdout.write(
-      "Removed the saved key. AMBIENT_API_KEY is still set in your environment, so you're still signed in through it.\n",
+      `Removed this CLI's saved key. Still signed in with ${maskKey(after.key)} from ${KEY_SOURCE_LABEL[after.source]}.\n`,
     );
     return;
   }
   process.stdout.write(
-    src ? `Signed out — removed key ${maskKey(src.key)}.\n` : "You weren't signed in.\n",
+    before ? `Signed out — removed key ${maskKey(before.key)}.\n` : "You weren't signed in.\n",
   );
 }

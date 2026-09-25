@@ -33,3 +33,29 @@ describe("stream watchdog wiring", () => {
     expect(t?.idleMs).toBeGreaterThan(0);
   });
 });
+
+describe("a stalled worker", () => {
+  it("gets ONE same-model retry (each stall already cost a full timeout), then fails over", async () => {
+    const { AmbError } = await import("@amb/protocol");
+    const { TEXT_1M } = await import("./fixtures/catalog.js");
+    const stall = () => {
+      throw new AmbError({
+        kind: "transport",
+        message: "stalled",
+        retryable: true,
+        detail: "stream-stall",
+      });
+    };
+    const client = new FixtureClient(catalogOf(TEXT_200K, TEXT_1M), [
+      stall,
+      stall,
+      { content: "served by the other model", toolCalls: [] },
+    ]);
+    const res = await new Agent(client, undefined, { sleep: async () => {} }).run(
+      "hi there friend",
+      runOpts({ requestedModel: TEXT_200K.id }),
+    );
+    expect(client.calls.map((c) => c.model)).toEqual([TEXT_200K.id, TEXT_200K.id, TEXT_1M.id]);
+    expect(res.finalText).toBe("served by the other model");
+  });
+});

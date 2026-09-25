@@ -15,10 +15,20 @@ import { makeCapabilityPort } from "../agent/capability-port.js";
 import { type McpConnection, connectMcp } from "../agent/mcp-connect.js";
 import { openBrowser, signInInteractive } from "../commands/login.js";
 import { type FleetRow, formatFleetRows, laneResolver } from "../render/fleet.js";
-import { NOT_SIGNED_IN, deleteApiKey, maskKey, resolveApiKey, saveApiKey } from "../secrets.js";
+import {
+  KEY_SOURCE_LABEL,
+  NOT_SIGNED_IN,
+  apiKeyCandidates,
+  deleteApiKey,
+  maskKey,
+  resolveApiKey,
+  resolveApiKeyWithSource,
+  saveApiKey,
+} from "../secrets.js";
 import { checkForUpdate, updateCommand } from "../update-check.js";
 import { CURRENT_VERSION } from "../version.js";
 import { App } from "./App.js";
+import type { KeyCheckResult } from "./key-flow.js";
 import type { AgentMode, Effort, Permission } from "./state.js";
 import type { AccountPort } from "./use-key-prompt.js";
 
@@ -98,10 +108,19 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       saveApiKey(key);
       client.setApiKey(key);
     },
-    remove: () => deleteApiKey(),
+    remove: () => {
+      deleteApiKey();
+      // Another key may still apply (the environment, or a key saved by another Ambient app) — say which.
+      const next = resolveApiKeyWithSource();
+      client.setApiKey(next?.key ?? "");
+      return next
+        ? `Removed the saved key. Still signed in with ${maskKey(next.key)} from ${KEY_SOURCE_LABEL[next.source]}.`
+        : "Signed out on this machine. Type /login to add a key.";
+    },
     openKeysPage: () => openBrowser(KEYS_URL),
     mask: maskKey,
-    startupCheck: verifyApiKey(config),
+    envKeyOverrides: Boolean(process.env.AMBIENT_API_KEY?.trim()),
+    startupCheck: startupKeyCheck(config.baseUrl, apiKey, client),
   };
   const cwd = process.cwd();
   // Fetch the fleet and the update check together so neither adds latency to the splash. The update check is
@@ -221,4 +240,28 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     mcpConn.current?.close();
     restore();
   }
+}
+
+/**
+ * Check the saved key at launch (free — no model runs). If it's rejected but another key on this machine works
+ * (e.g. one saved by another Ambient app), switch the live client to it and say so, instead of blocking.
+ */
+async function startupKeyCheck(
+  baseUrl: string,
+  current: string,
+  client: AmbientChatClient,
+): Promise<{ result: KeyCheckResult; note?: string }> {
+  const first = await verifyApiKey({ baseUrl, apiKey: current });
+  if (first !== "invalid") return { result: first };
+  for (const c of apiKeyCandidates()) {
+    if (c.key === current) continue;
+    if ((await verifyApiKey({ baseUrl, apiKey: c.key })) === "valid") {
+      client.setApiKey(c.key);
+      return {
+        result: "valid",
+        note: `Your saved key was rejected, so ambient is using ${maskKey(c.key)} from ${KEY_SOURCE_LABEL[c.source]}. Type /login to set a different one.`,
+      };
+    }
+  }
+  return { result: "invalid" };
 }

@@ -20,9 +20,12 @@ export async function verifyApiKey(
       headers: authHeaders(config),
       signal: ac.signal,
     });
+    void res.body?.cancel().catch(() => {}); // only the status matters — release the connection
     if (res.status === 401 || res.status === 403) return "invalid";
-    if (res.status >= 500) return "unknown";
-    return "valid";
+    // Only a clear "authenticated" answer counts: 405 (right key, wrong method) or a 2xx. Anything else —
+    // a 404 from a mistyped endpoint, a 429, a 5xx — means we couldn't tell.
+    if (res.status === 405 || (res.status >= 200 && res.status < 300)) return "valid";
+    return "unknown";
   } catch {
     return "unknown";
   } finally {

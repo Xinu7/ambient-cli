@@ -16,8 +16,10 @@ describe("verifyApiKey (free check — no inference)", () => {
     expect(await verifyApiKey(cfg, { fetch: status(405) })).toBe("valid");
     expect(await verifyApiKey(cfg, { fetch: status(200) })).toBe("valid");
   });
-  it("5xx or a network failure → unknown (never blocks sign-in)", async () => {
+  it("5xx, 404, 429 or a network failure → unknown (never a false 'signed in')", async () => {
     expect(await verifyApiKey(cfg, { fetch: status(502) })).toBe("unknown");
+    expect(await verifyApiKey(cfg, { fetch: status(404) })).toBe("unknown");
+    expect(await verifyApiKey(cfg, { fetch: status(429) })).toBe("unknown");
     const boom: FetchLike = async () => {
       throw new Error("ECONNRESET");
     };
