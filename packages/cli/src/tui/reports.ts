@@ -36,12 +36,12 @@ export function contextReport(opts: {
   return lines.join("\n");
 }
 
-/** /usage: token counts for this session — never money. */
+/** /usage: token counts for this session's main conversation — never money. */
 export function usageReport(usage: SessionUsage | undefined): string {
   if (!usage || usage.requests === 0) return "Usage · no requests yet this session";
   const cached = usage.cachedTokens > 0 ? ` (${tokens(usage.cachedTokens)} from cache)` : "";
   return [
-    `Usage · this session · ${usage.requests} request${usage.requests === 1 ? "" : "s"}`,
+    `Usage · this session · ${usage.requests} request${usage.requests === 1 ? "" : "s"} (main conversation; subagents and summaries are separate)`,
     `  sent       ${tokens(usage.promptTokens)} tokens${cached}`,
     `  received   ${tokens(usage.completionTokens)} tokens`,
   ].join("\n");

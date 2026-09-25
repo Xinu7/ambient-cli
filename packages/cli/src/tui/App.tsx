@@ -9,7 +9,7 @@ import {
   type ToolDefinition,
   newSessionId,
 } from "@amb/protocol";
-import { UNKNOWN_OUTPUT, budgetsFor } from "@amb/reliability";
+import { AUTO_MODEL, UNKNOWN_OUTPUT, budgetsFor } from "@amb/reliability";
 import {
   Agent,
   type CapabilityPort,
@@ -189,7 +189,8 @@ type Action =
   | { t: "toggleThinking" }
   | { t: "goal"; text: string }
   | { t: "clear"; fresh?: boolean }
-  | { t: "activity"; activity?: Activity };
+  | { t: "activity"; activity?: Activity }
+  | { t: "compacted"; before: number; after: number };
 
 function appReducer(state: ViewState, action: Action): ViewState {
   switch (action.t) {
@@ -223,6 +224,23 @@ function appReducer(state: ViewState, action: Action): ViewState {
     }
     case "activity":
       return { ...state, status: { ...state.status, activity: action.activity } };
+    case "compacted":
+      // Room again: the fill warnings may fire afresh, and "in use" drops by what the summary saved.
+      return {
+        ...state,
+        contextWarned: undefined,
+        status: {
+          ...state.status,
+          ...(state.status.promptEstimate !== undefined
+            ? {
+                promptEstimate: Math.max(
+                  0,
+                  state.status.promptEstimate - (action.before - action.after),
+                ),
+              }
+            : {}),
+        },
+      };
     case "clear":
       // A fresh conversation (idle /clear) also retires the plan; a mid-run clear only wipes the screen.
       return action.fresh
@@ -319,6 +337,10 @@ export function App(deps: AppDeps): ReactNode {
   const [, setFiles] = useState<string[] | undefined>(undefined); // re-render once the list arrives
   const filesRef = useRef<string[] | undefined>(undefined);
   const filesLoadingRef = useRef(false);
+  /** The last query's matches (the list is re-read on every render, and ranking 50k paths isn't free). */
+  const fileMatchCacheRef = useRef<
+    { query: string; files: string[]; matches: string[] } | undefined
+  >(undefined);
   const [fileSel, setFileSel] = useState(0);
   const fileSelRef = useRef(0);
   const [, setMentionClosedAt] = useState<number | undefined>(undefined);
@@ -809,7 +831,15 @@ export function App(deps: AppDeps): ReactNode {
         }
         dispatch({ t: "stop", stopReason: result.stopReason });
         // A long run finishing is worth a heads-up if you've switched to another window.
-        if (Date.now() - runStartRef.current >= BELL_AFTER_MS) ring();
+        if (
+          result.stopReason !== "cancelled" &&
+          Date.now() - runStartRef.current >= BELL_AFTER_MS
+        ) {
+          ring();
+        }
+        // The run may have created or removed files — the @ picker lists them afresh next time.
+        filesRef.current = undefined;
+        filesLoadingRef.current = false;
       } catch (err) {
         // An UNEXPECTED throw (classified errors return a result and carry forward normally): we didn't get
         // this run's messages, so the carried conversation is now behind the durable log. Reset it to [] so the
@@ -996,7 +1026,11 @@ export function App(deps: AppDeps): ReactNode {
       const res = await compactNow({
         client: deps.client,
         conversation: conversationRef.current,
-        model: state.status.reportedModel ?? state.status.targetModel ?? modelRef.current,
+        // The model the next message will go to: the one picked, or (on auto) the one last served.
+        model:
+          modelRef.current !== AUTO_MODEL
+            ? modelRef.current
+            : (state.status.reportedModel ?? state.status.targetModel ?? modelRef.current),
         workspace: workspacePortRef.current,
         workspaceRoot: deps.workspaceRoot,
         sessionId,
@@ -1012,6 +1046,7 @@ export function App(deps: AppDeps): ReactNode {
         dispatch({ t: "notice", level: "info", text: "compaction cancelled — nothing changed" });
       } else if (res.ok) {
         conversationRef.current = res.messages;
+        dispatch({ t: "compacted", before: res.before, after: res.after });
         dispatch({
           t: "notice",
           level: "info",
@@ -1026,6 +1061,14 @@ export function App(deps: AppDeps): ReactNode {
       busyRef.current = false;
       setRunActive(false);
       dispatch({ t: "stop", stopReason: controller.signal.aborted ? "cancelled" : "complete" });
+      // Anything typed while compacting runs now, in order (steers first, then queued messages).
+      const typed = steerRef.current;
+      steerRef.current = [];
+      const next =
+        typed.length > 0 ? { text: typed.join("\n"), attachments: [] } : queueRef.current.shift();
+      setQueued(queueRef.current.map((q) => q.text));
+      if (next && !controller.signal.aborted)
+        void runTaskRef.current?.(next.text, next.attachments);
     }
   };
 
@@ -1317,6 +1360,9 @@ export function App(deps: AppDeps): ReactNode {
 
   /** Files matching the `@` mention being typed at `cursor` (empty when none, or it was closed with Esc). */
   const fileMatchesFor = (text: string, cur: number): string[] => {
+    // The / menu and a recalled prompt own the keys; the picker only opens while composing.
+    if (hist.browsing()) return [];
+    if (text.startsWith("/") && matchSlash(text, customCommands.palette).length > 0) return [];
     const mention = activeMention(text, cur);
     if (!mention) {
       mentionClosedRef.current = undefined; // a new @ later opens the picker again
@@ -1336,9 +1382,15 @@ export function App(deps: AppDeps): ReactNode {
       }
       return [];
     }
-    return (
+    const cached = fileMatchCacheRef.current;
+    if (cached && cached.query === mention.query && cached.files === filesRef.current) {
+      return cached.matches;
+    }
+    const matches = (
       mention.query ? fuzzyRank(mention.query, filesRef.current, (f) => f) : filesRef.current
     ).slice(0, FILE_PICKER_ROWS);
+    fileMatchCacheRef.current = { query: mention.query, files: filesRef.current, matches };
+    return matches;
   };
 
   useInput((ch, key) => {

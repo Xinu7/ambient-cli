@@ -55,7 +55,12 @@ export async function compactNow(opts: {
     { ceiling: opts.capabilities?.learnedCeiling?.(target) },
   );
   // The anchor slot is empty here: the next run puts its own system prompt in front of the conversation.
-  const messages: Msg[] = [{ role: "system", content: "" }, ...opts.conversation];
+  // Earlier runs' task messages come back marked as pinned (each was the current task in its own run);
+  // here they're all history, so they're summarized in order like everything else.
+  const messages: Msg[] = [
+    { role: "system", content: "" },
+    ...opts.conversation.map((m) => (m.pinned ? { ...m, pinned: undefined } : m)),
+  ];
   const before = estimateMessagesTokens(messages);
   const next = await compactConversation(
     opts.client,

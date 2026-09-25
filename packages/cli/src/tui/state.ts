@@ -502,10 +502,26 @@ function addUsage(
 }
 
 /** Count streamed characters toward the in-flight call's live token readout. */
-function addStreamed(status: Status, text: string): Status {
+function addStreamed(status: Status, text: string, now: number): Status {
   const stream = status.stream ?? { chars: 0 };
-  return { ...status, stream: { ...stream, chars: stream.chars + text.length } };
+  // The rate is measured from the first token, so the time the model spends reading the prompt doesn't
+  // drag it down.
+  const since = stream.since ?? (now > 0 && text.length > 0 ? now : undefined);
+  return {
+    ...status,
+    stream: {
+      ...stream,
+      chars: stream.chars + text.length,
+      ...(since !== undefined ? { since } : {}),
+    },
+  };
 }
+
+/** True while an answer is already streaming — reasoning that arrives now is part of the same reply. */
+const answerStreaming = (state: ViewState) => {
+  const last = state.transcript[state.transcript.length - 1];
+  return last?.kind === "assistant" && last.streaming;
+};
 
 /** `now` (wall clock ms) lets the view time reasoning; omitted in replay and most tests. */
 export function reduce(state: ViewState, ev: NewEvent, now = 0): ViewState {
@@ -599,8 +615,9 @@ export function reduce(state: ViewState, ev: NewEvent, now = 0): ViewState {
         ...state,
         status: {
           ...state.status,
-          stream: { chars: 0, ...(now > 0 ? { since: now } : {}) },
-          ...(ev.effort ? { resolvedEffort: toReasoningLevel(ev.effort) } : {}),
+          stream: { chars: 0 },
+          // A model that doesn't reason is sent no effort — don't keep showing the previous model's level.
+          resolvedEffort: ev.effort ? toReasoningLevel(ev.effort) : undefined,
         },
       };
 
@@ -638,11 +655,18 @@ export function reduce(state: ViewState, ev: NewEvent, now = 0): ViewState {
       const text = typeof ev.text === "string" ? ev.text : "";
       if (text.length === 0) return state;
       const buf = (state.thinking + text).slice(-THINKING_BUFFER_CHARS);
+      // Reasoning that arrives once the answer is already streaming (or is only whitespace) doesn't start a
+      // new "thought" — that would split the answer around a thought row.
+      const startsThought =
+        state.thinkingSince === undefined && text.trim().length > 0 && !answerStreaming(state);
       return {
         ...state,
         thinking: buf,
-        thinkingSince: state.thinkingSince ?? (now > 0 ? now : undefined),
-        status: { ...addStreamed(state.status, text), activity: { verb: "Thinking" } },
+        thinkingSince: startsThought && now > 0 ? now : state.thinkingSince,
+        status: {
+          ...addStreamed(state.status, text, now),
+          ...(answerStreaming(state) ? {} : { activity: { verb: "Thinking" } }),
+        },
       };
     }
 
@@ -651,11 +675,11 @@ export function reduce(state: ViewState, ev: NewEvent, now = 0): ViewState {
       // The model moved from thinking to answering → clear the live reasoning tail, keep how long it thought,
       // and say it's answering (unless tools are still running alongside).
       const answering = text.trim().length > 0;
-      const thought = answering ? settleThought(state, now) : state;
+      const thought = answering && !answerStreaming(state) ? settleThought(state, now) : state;
       const counted: ViewState = {
         ...thought,
         status: {
-          ...addStreamed(thought.status, text),
+          ...addStreamed(thought.status, text, now),
           ...(answering && Object.keys(thought.active).length === 0
             ? { activity: { verb: "Answering" } }
             : {}),

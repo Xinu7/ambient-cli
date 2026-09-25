@@ -75,7 +75,8 @@ describe("live output stats", () => {
       [answer("b".repeat(350)), 3_000],
     ]);
     expect(s.status.stream?.chars).toBe(700);
-    expect(streamStats("Answering", s.status.stream, 11_000)).toBe("↓ 200 tok  ·  20 tok/s");
+    // Measured from the first token (at 2s), not from the request — prompt reading isn't output time.
+    expect(streamStats("Answering", s.status.stream, 12_000)).toBe("↓ 200 tok  ·  20 tok/s");
     s = reduce(
       s,
       {
@@ -87,7 +88,7 @@ describe("live output stats", () => {
       },
       11_000,
     );
-    expect(streamStats("Answering", s.status.stream, 11_000)).toBe("↓ 1.2k tok  ·  123 tok/s");
+    expect(streamStats("Answering", s.status.stream, 11_000)).toBe("↓ 1.2k tok  ·  137 tok/s");
     // A new call starts from zero.
     s = reduce(s, request(), 12_000);
     expect(s.status.stream?.chars).toBe(0);
@@ -128,5 +129,33 @@ describe("tool verbs", () => {
       verb: "Asking about an image",
       detail: "what error?",
     });
+  });
+});
+
+describe("reasoning that arrives mid-answer", () => {
+  it("stays part of the same reply — no split answer, no second thought row, nothing left streaming", () => {
+    const final: NewEvent = { ...base, kind: "assistant.final", text: "Hello world" };
+    const s = run([
+      [request("high"), 1_000],
+      [reasoning("plan it"), 2_000],
+      [answer("Hello "), 3_000],
+      [reasoning("\n"), 3_100],
+      [reasoning("more thought"), 3_200],
+      [answer("world"), 3_300],
+      [final, 3_400],
+    ]);
+    expect(s.transcript.map((t) => t.kind)).toEqual(["thought", "assistant"]);
+    const reply = s.transcript[1] as { text: string; streaming: boolean };
+    expect(reply.text).toBe("Hello world");
+    expect(reply.streaming).toBe(false);
+  });
+});
+
+describe("effort shown after a failover", () => {
+  it("clears when the next request goes to a model that doesn't reason", () => {
+    let s = run([[request("max"), 1_000]]);
+    expect(s.status.resolvedEffort).toBe("max");
+    s = reduce(s, request(), 2_000);
+    expect(s.status.resolvedEffort).toBeUndefined();
   });
 });

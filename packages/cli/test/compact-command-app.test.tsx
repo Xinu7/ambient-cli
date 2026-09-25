@@ -132,4 +132,54 @@ describe("/compact, /context and /usage in the app", () => {
     expect(calls).toBe(2);
     unmount();
   });
+  it("a message typed while compacting runs once the compaction is done", async () => {
+    const tasks: string[] = [];
+    const client = {
+      fetchCatalog: async () => catalog,
+      chat: async (p: ChatParams): Promise<TurnCompletion> => {
+        const isSummary = p.messages.some(
+          (m) =>
+            typeof m.content === "string" && m.content.startsWith("Summarize the conversation"),
+        );
+        if (isSummary) {
+          await settle(300); // a summary that takes a moment
+          return { content: "## Goal\nx", toolCalls: [] };
+        }
+        const last = p.messages.at(-1);
+        tasks.push(typeof last?.content === "string" ? last.content.slice(0, 20) : "");
+        return { content: `ANSWER ${"long text ".repeat(1_200)}`, toolCalls: [] };
+      },
+    } as unknown as ChatClient;
+    const { stdin, lastFrame, unmount } = render(
+      <App
+        client={client}
+        makeWriter={(id: string) => new SessionWriter(id, () => new Date().toISOString())}
+        agentMode="build"
+        permission="bypass"
+        effort="auto"
+        requestedModel="vendor/small"
+        maxTurns={5}
+        cwd={ws}
+        workspaceRoot={ws}
+      />,
+    );
+    const typeAndEnter = async (text: string) => {
+      for (const ch of text) stdin.write(ch);
+      await settle(30);
+      stdin.write("\r");
+    };
+    await settle(40);
+    await typeAndEnter("first");
+    await waitFor(lastFrame, "ANSWER");
+    await settle(80);
+    await typeAndEnter("second");
+    await settle(300);
+    await typeAndEnter("/compact");
+    await settle(60);
+    await typeAndEnter("follow up"); // typed while the summary is being written
+    await waitFor(lastFrame, "compacted the conversation");
+    await settle(400);
+    expect(tasks.some((t) => t.startsWith("follow up"))).toBe(true);
+    unmount();
+  });
 });

@@ -83,4 +83,58 @@ describe("@ file picker", () => {
     expect(lastFrame()).not.toContain("Files ·");
     unmount();
   });
+  it("stays out of the / menu: Enter runs the command, the file text is just an argument", async () => {
+    const { stdin, lastFrame, unmount } = mount();
+    await settle(40);
+    await type(stdin, "@"); // load the list once
+    await settle(60);
+    stdin.write("\x15"); // clear
+    await settle(20);
+    await type(stdin, "/usage @pars");
+    expect(lastFrame()).not.toContain("Files ·");
+    stdin.write("\r");
+    await settle(80);
+    expect(lastFrame()).toContain("Usage");
+    unmount();
+  });
+  it("a recalled prompt ending in a mention doesn't trap the arrows or Enter", async () => {
+    const history = ["older prompt", "fix @src/app.ts"];
+    let calls = 0;
+    const client = {
+      fetchCatalog: async () => catalog,
+      chat: async (): Promise<TurnCompletion> => {
+        calls += 1;
+        return { content: "done", toolCalls: [] };
+      },
+    } as unknown as ChatClient;
+    const ui = render(
+      <App
+        client={client}
+        makeWriter={(id: string) => new SessionWriter(id, () => new Date().toISOString())}
+        agentMode="build"
+        permission="bypass"
+        effort="auto"
+        requestedModel="vendor/m"
+        maxTurns={5}
+        cwd="/w"
+        workspaceRoot="/w"
+        listFiles={async () => ["src/app.ts"]}
+        history={{ load: () => history, append: () => {} }}
+      />,
+    );
+    await settle(40);
+    ui.stdin.write("\u001b[A"); // ↑ → "fix @src/app.ts"
+    await settle(60);
+    expect(ui.lastFrame()).toContain("fix @src/app.ts");
+    expect(ui.lastFrame()).not.toContain("Files ·");
+    ui.stdin.write("\u001b[A"); // ↑ again → the older prompt
+    await settle(60);
+    expect(ui.lastFrame()).toContain("older prompt");
+    ui.stdin.write("\u001b[B"); // ↓ back
+    await settle(60);
+    ui.stdin.write("\r"); // Enter sends it
+    await settle(200);
+    expect(calls).toBe(1);
+    ui.unmount();
+  });
 });

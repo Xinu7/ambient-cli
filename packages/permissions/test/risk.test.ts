@@ -282,13 +282,15 @@ describe("classifyToolRisk — Windows destructive commands", () => {
   ])("also treats %s as critical", (cmd) => {
     expect(bash(cmd).level).toBe("critical");
   });
-  it.each(["rm -r -f dist", "rm -R -f build", "rm -rf /Users/alice/proj/node_modules", "rm -rf dist"])(
-    "does not escalate an ordinary cleanup: %s",
-    (cmd) => {
-      expect(bash(cmd).level).not.toBe("critical");
-      expect(bash(cmd).reasons.join(" ")).not.toMatch(/force-deletes a folder tree/);
-    },
-  );
+  it.each([
+    "rm -r -f dist",
+    "rm -R -f build",
+    "rm -rf /Users/alice/proj/node_modules",
+    "rm -rf dist",
+  ])("does not escalate an ordinary cleanup: %s", (cmd) => {
+    expect(bash(cmd).level).not.toBe("critical");
+    expect(bash(cmd).reasons.join(" ")).not.toMatch(/force-deletes a folder tree/);
+  });
   it.each([
     String.raw`rm -r C:\Users\alice`,
     String.raw`rm -r C:\ `,
