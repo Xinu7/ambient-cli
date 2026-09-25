@@ -1,3 +1,4 @@
+import { normalizePastedText } from "../tui/capture.js";
 /**
  * Read a line WITHOUT echoing it — for pasting an API key so it never appears on screen or in scrollback.
  * Uses only PUBLIC stdin APIs (raw mode + `data` events), not the private readline `_writeToOutput` field,
@@ -21,7 +22,7 @@ export async function readSecret(promptText: string): Promise<string> {
           if (ch === "\r" || ch === "\n" || ch === "\x04") {
             // Enter or Ctrl-D → done.
             stdin.removeListener("data", onData);
-            resolve(buf.trim());
+            resolve(cleanSecretInput(buf));
             return;
           }
           if (ch === "\x03") {
@@ -34,7 +35,7 @@ export async function readSecret(promptText: string): Promise<string> {
             buf = buf.slice(0, -1); // backspace
             continue;
           }
-          if (ch >= " ") buf += ch; // printable only — swallow control/escape bytes
+          if (ch >= " " || ch === "\x1b") buf += ch; // keep ESC so paste markers can be stripped whole
         }
       };
       stdin.on("data", onData);
@@ -55,10 +56,18 @@ function readLineFromPipe(): Promise<string> {
       const nl = buf.indexOf("\n");
       if (nl >= 0) {
         process.stdin.removeListener("data", onData);
-        resolve(buf.slice(0, nl).trim());
+        resolve(cleanSecretInput(buf.slice(0, nl)));
       }
     };
     process.stdin.on("data", onData);
-    process.stdin.on("end", () => resolve(buf.trim()));
+    process.stdin.on("end", () => resolve(cleanSecretInput(buf)));
   });
+}
+
+/**
+ * Clean a pasted secret: the shared paste normalizer drops bracketed-paste markers (with or without their ESC
+ * byte) and other escape/control sequences; then surrounding whitespace is trimmed.
+ */
+export function cleanSecretInput(raw: string): string {
+  return normalizePastedText(raw).trim();
 }

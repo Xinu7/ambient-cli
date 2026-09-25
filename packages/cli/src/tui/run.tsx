@@ -1,4 +1,10 @@
-import { type AmbientConfig, fetchCatalog, resolveConfig } from "@amb/ambient-api";
+import {
+  type AmbientConfig,
+  KEYS_URL,
+  fetchCatalog,
+  resolveConfig,
+  verifyApiKey,
+} from "@amb/ambient-api";
 import { discoverSkills, pinSkill, readPinnedSkills, skillSource, unpinSkill } from "@amb/context";
 import type { Grant, ToolDefinition } from "@amb/protocol";
 import { SessionWriter } from "@amb/sessions";
@@ -7,12 +13,14 @@ import { createElement } from "react";
 import { AmbientChatClient } from "../agent/ambient-client.js";
 import { makeCapabilityPort } from "../agent/capability-port.js";
 import { type McpConnection, connectMcp } from "../agent/mcp-connect.js";
+import { openBrowser, signInInteractive } from "../commands/login.js";
 import { type FleetRow, formatFleetRows, laneResolver } from "../render/fleet.js";
-import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
+import { NOT_SIGNED_IN, deleteApiKey, maskKey, resolveApiKey, saveApiKey } from "../secrets.js";
 import { checkForUpdate, updateCommand } from "../update-check.js";
 import { CURRENT_VERSION } from "../version.js";
 import { App } from "./App.js";
 import type { AgentMode, Effort, Permission } from "./state.js";
+import type { AccountPort } from "./use-key-prompt.js";
 
 // We DON'T use the alternate screen buffer: settled turns are committed to the terminal's real scrollback
 // (via Ink's <Static>) so the user can scroll back through history with the trackpad/wheel like a normal
@@ -60,7 +68,12 @@ async function fleetSummary(config: AmbientConfig): Promise<FleetRow[] | undefin
 
 /** Launch the interactive Ink TUI. Requires a TTY (falls back with a hint otherwise). */
 export async function runTui(opts: TuiOptions): Promise<void> {
-  const apiKey = resolveApiKey();
+  let apiKey = resolveApiKey();
+  // First launch with no key: walk the user through signing in right here, then continue into the CLI —
+  // no separate command to discover. A non-interactive shell gets the one-line instructions instead.
+  if (!apiKey && process.stdin.isTTY && process.stdout.isTTY) {
+    if (await signInInteractive({ firstRun: true })) apiKey = resolveApiKey();
+  }
   if (!apiKey) {
     process.stderr.write(`${NOT_SIGNED_IN}\n`);
     process.exitCode = 1;
@@ -76,6 +89,20 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
   const config: AmbientConfig = { baseUrl: resolveConfig().baseUrl, apiKey };
   const client = new AmbientChatClient(config);
+  // Account effects for the in-app key flow. The saved key is checked in the background at launch (free — no
+  // model runs), so a revoked key is caught before the first request instead of failing mid-task.
+  const account: AccountPort = {
+    keysUrl: KEYS_URL,
+    verify: (key) => verifyApiKey({ baseUrl: config.baseUrl, apiKey: key }),
+    save: (key) => {
+      saveApiKey(key);
+      client.setApiKey(key);
+    },
+    remove: () => deleteApiKey(),
+    openKeysPage: () => openBrowser(KEYS_URL),
+    mask: maskKey,
+    startupCheck: verifyApiKey(config),
+  };
   const cwd = process.cwd();
   // Fetch the fleet and the update check together so neither adds latency to the splash. The update check is
   // cached (at most one network call per 6h) and fully best-effort — it never blocks or fails the launch.
@@ -164,6 +191,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       skillsInfo,
       skills: skillRows,
       onTogglePin,
+      account,
     }),
     { exitOnCtrlC: false },
   );

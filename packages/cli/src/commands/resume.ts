@@ -37,6 +37,7 @@ import { makeWorkspaceContextPort } from "../agent/workspace-context-port.js";
 import { loadConfig } from "../config.js";
 import { bold, dim } from "../render/color.js";
 import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
+import { signInInteractive } from "./login.js";
 
 /** True if `relPath` (resolved WITHIN `root`) exists and hashes to `expectedHash` (recovery: did the write
  *  land?). Contained + symlink-safe + size-bounded: a logged `../escape` path or a symlink can't read outside
@@ -148,7 +149,12 @@ export async function runResume(args: string[]): Promise<void> {
     return;
   }
 
-  const apiKey = resolveApiKey();
+  // No key in an interactive terminal: sign in right here, then carry on with the task.
+  const apiKey =
+    resolveApiKey() ??
+    (process.stdin.isTTY && process.stdout.isTTY && (await signInInteractive({ firstRun: true }))
+      ? resolveApiKey()
+      : undefined);
   if (!apiKey) {
     process.stderr.write(`${NOT_SIGNED_IN}\n`);
     process.exitCode = 1;

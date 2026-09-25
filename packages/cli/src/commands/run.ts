@@ -23,10 +23,11 @@ import { makeVerifyPort } from "../agent/verify-port.js";
 import { makeWorkspaceContextPort } from "../agent/workspace-context-port.js";
 import { type AmbConfig, grantsFromConfig, loadConfig } from "../config.js";
 import { bold, dim } from "../render/color.js";
-import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
+import { KEY_REJECTED, NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
 import { attachImageFile, downscaleForWindow } from "../tui/capture.js";
 import { checkForUpdate, updateHint } from "../update-check.js";
 import { effortAliasNote, isParseError, parseEffort, parseMaxTurns } from "./args.js";
+import { signInInteractive } from "./login.js";
 import { mergeStdin, readPipedStdin } from "./stdin.js";
 
 interface RunArgs {
@@ -158,7 +159,12 @@ export async function runAgent(args: string[]): Promise<void> {
     return;
   }
 
-  const apiKey = resolveApiKey();
+  // No key in an interactive terminal: sign in right here, then carry on with the task.
+  const apiKey =
+    resolveApiKey() ??
+    (process.stdin.isTTY && process.stdout.isTTY && (await signInInteractive({ firstRun: true }))
+      ? resolveApiKey()
+      : undefined);
   if (!apiKey) {
     process.stderr.write(`${NOT_SIGNED_IN}\n`);
     process.exitCode = 1;
@@ -183,9 +189,12 @@ export async function runAgent(args: string[]): Promise<void> {
 
   // A persistence failure ABORTS the run: if we can't durably record intent, we must not keep executing
   // mutations. The shared sink persists first, then delivers; in --jsonl mode durable events become JSON lines.
+  // Ambient rejecting the key (revoked or mistyped) gets one clear, actionable line at the end of the run.
+  let keyRejected = false;
   const emit = createDurableEventSink({
     writer,
     consume: (ev: NewEvent) => {
+      if (ev.kind === "error" && ev.errorKind === "auth") keyRejected = true;
       if (jsonl) {
         if (ev.kind !== "assistant.delta" && ev.kind !== "reasoning.delta") {
           process.stdout.write(`${JSON.stringify(ev)}\n`);
@@ -292,6 +301,7 @@ export async function runAgent(args: string[]): Promise<void> {
     } else {
       process.stdout.write(`\n${dim(`[${result.stopReason} · ${result.turns} turn(s)]`)}\n`);
     }
+    if (keyRejected && !jsonl) process.stderr.write(`\n${KEY_REJECTED}\n`);
     // Non-success stop reasons must set a nonzero exit code for scripts/CI.
     if (result.stopReason !== "complete")
       process.exitCode = result.stopReason === "cancelled" ? 130 : 1;

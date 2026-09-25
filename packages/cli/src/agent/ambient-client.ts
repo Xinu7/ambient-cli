@@ -10,7 +10,12 @@ import type { ChatClient, ChatParams, Msg, ToolCall, TurnCompletion } from "@amb
 
 /** The real Ambient adapter: implements the runtime's ChatClient over @amb/ambient-api. Ambient-only. */
 export class AmbientChatClient implements ChatClient {
-  constructor(private readonly config: AmbientConfig) {}
+  constructor(private config: AmbientConfig) {}
+
+  /** Switch to a new API key for every later request (the in-app /login flow). */
+  setApiKey(apiKey: string): void {
+    this.config = { ...this.config, apiKey };
+  }
 
   fetchCatalog(signal?: AbortSignal): Promise<CatalogModel[]> {
     return fetchCatalog(this.config, signal ? { signal } : {});

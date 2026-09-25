@@ -56,6 +56,7 @@ import { Banner } from "./components/Banner.js";
 import { Composer } from "./components/Composer.js";
 import { EffortPicker } from "./components/EffortPicker.js";
 import { Goal } from "./components/Goal.js";
+import { KeyPrompt } from "./components/KeyPrompt.js";
 import { ModelPicker } from "./components/ModelPicker.js";
 import { Plan } from "./components/Plan.js";
 import { Question, type QuestionState } from "./components/Question.js";
@@ -108,6 +109,7 @@ import {
   withStop,
 } from "./state.js";
 import { AmbientTheme } from "./theme.js";
+import { type AccountPort, useKeyPrompt } from "./use-key-prompt.js";
 
 export interface AppDeps {
   client: ChatClient;
@@ -143,6 +145,8 @@ export interface AppDeps {
   skillsInfo?: { total: number; pinned: number };
   /** Full skill rows for the interactive `/skills` browser (loaded at the CLI edge). */
   skills?: SkillRow[];
+  /** Account effects for the in-app key flow (/login, /logout, a rejected or revoked key). */
+  account?: AccountPort;
   /** Pin/unpin a skill from the browser — writes the pin list at the edge; returns the new pinned state. */
   onTogglePin?: (name: string) => boolean;
 }
@@ -243,6 +247,16 @@ export function App(deps: AppDeps): ReactNode {
   const [slashSel, setSlashSel] = useState(0);
   // Bumped by /clear to remount <Static> after the screen + scrollback are wiped.
   const [staticEpoch, setStaticEpoch] = useState(0);
+  // The in-app key flow. A run that fails because Ambient rejected the key (revoked or mistyped) opens the
+  // key panel and re-runs that task once a working key is saved; /login opens it on demand.
+  const keyFlow = useKeyPrompt(
+    deps.account,
+    (level, text) => dispatch({ t: "notice", level, text }),
+    (text, attachments) => void runTaskRef.current?.(text, attachments),
+  );
+  const keyFlowRef = useRef(keyFlow);
+  keyFlowRef.current = keyFlow;
+  const authRejectedRef = useRef(false);
   // Discover the user's existing Claude/Codex slash commands ONCE — their names join the palette, their
   // bodies (with $ARGUMENTS/$1 expansion) run as a task on dispatch.
   const customCommands = useMemo(() => {
@@ -511,6 +525,7 @@ export function App(deps: AppDeps): ReactNode {
       setTick(0);
       setRunActive(true);
       setPlanReview(false); // a run is starting — the previous plan (if any) is no longer awaiting review
+      authRejectedRef.current = false;
       // One session id + writer for the whole TUI launch (minted lazily on the first turn, reset by /clear).
       if (!sessionIdRef.current || !writerRef.current) {
         sessionIdRef.current = newSessionId();
@@ -578,6 +593,7 @@ export function App(deps: AppDeps): ReactNode {
               const parsed = parsePlanTasks(ev.args);
               if (parsed) planRef.current = parsed;
             }
+            if (ev.kind === "error" && ev.errorKind === "auth") authRejectedRef.current = true;
             dispatch({ t: "event", ev });
           },
           onWriteError: () => {
@@ -713,9 +729,13 @@ export function App(deps: AppDeps): ReactNode {
         }
         // Steer messages the agent didn't consume (it finished before the next turn boundary) run as a
         // follow-up turn; otherwise drain the next queued (attachment) message. Either way nothing is lost.
+        // A rejected key pauses both: the key panel opens, and the same task re-runs once a key works.
         const leftoverSteer = steerRef.current;
-        steerRef.current = [];
-        if (leftoverSteer.length > 0) {
+        if (authRejectedRef.current) {
+          authRejectedRef.current = false;
+          keyFlowRef.current.open("rejected", { text: task, attachments: attach });
+        } else if (leftoverSteer.length > 0) {
+          steerRef.current = [];
           setQueued(queueRef.current.map((q) => q.text));
           void runTaskRef.current?.(leftoverSteer.join("\n"), []);
         } else {
@@ -1023,6 +1043,31 @@ export function App(deps: AppDeps): ReactNode {
         setStaticEpoch((n) => n + 1);
         break;
       }
+      case "/login":
+        if (busyRef.current) {
+          dispatch({ t: "notice", level: "warn", text: "busy — /login after the current run" });
+        } else if (!deps.account) {
+          dispatch({
+            t: "notice",
+            level: "warn",
+            text: "Run `ambient login` in your shell to change keys.",
+          });
+        } else {
+          keyFlow.open("change");
+        }
+        setBuffer("");
+        break;
+      case "/logout":
+        if (deps.account) {
+          deps.account.remove();
+          dispatch({
+            t: "notice",
+            level: "info",
+            text: "Signed out on this machine. Type /login to add a key (AMBIENT_API_KEY, if set, still applies).",
+          });
+        }
+        setBuffer("");
+        break;
       case "/quit":
         // Never quit with work still flying — abort the run first so nothing runs on invisibly.
         if (busyRef.current) abortRun();
@@ -1051,6 +1096,8 @@ export function App(deps: AppDeps): ReactNode {
   };
 
   useInput((ch, key) => {
+    // 0) The key panel owns the keyboard while open (Ctrl+C still quits).
+    if (!(key.ctrl && ch === "c") && keyFlow.handleInput(ch, key)) return;
     // 1) A pending approval takes precedence. Two equal paths to the SAME four outcomes (resolveApprovalKey):
     //    move the ▸ cursor with ↑/↓ and confirm with Enter/Space, OR press the y/a/b/n hotkey to jump-and-confirm.
     if (approvalResolver.current) {
@@ -1638,7 +1685,13 @@ export function App(deps: AppDeps): ReactNode {
         {/* FOOTER — composer/modal + status. flexShrink=0 so the clamp never clips the user's input. */}
         <Box flexDirection="column" flexShrink={0}>
           <Box marginTop={1} flexShrink={0}>
-            {question ? (
+            {keyFlow.state ? (
+              <KeyPrompt
+                state={keyFlow.state}
+                width={width}
+                keysUrl={deps.account?.keysUrl ?? ""}
+              />
+            ) : question ? (
               // A pending questionnaire replaces the composer (like the Approval modal) — it owns the keyboard.
               <Question state={question} width={width} />
             ) : pending ? (

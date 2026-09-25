@@ -3,7 +3,7 @@ import { createBuiltinRegistry } from "@amb/tools-core";
 import { githubStatus, githubSummary } from "../agent/github.js";
 import { loadConfig } from "../config.js";
 import { bold, dim } from "../render/color.js";
-import { resolveApiKey } from "../secrets.js";
+import { maskKey, resolveApiKeyWithSource } from "../secrets.js";
 import { checkForUpdate, updateHint } from "../update-check.js";
 import { CURRENT_VERSION } from "../version.js";
 
@@ -36,8 +36,10 @@ export async function runDoctor(): Promise<void> {
     return;
   }
 
-  const key = resolveApiKey();
-  if (key) ok("API key found (env or keychain)");
+  const found = resolveApiKeyWithSource();
+  const key = found?.key;
+  const where = { env: "AMBIENT_API_KEY", keychain: "macOS keychain", file: "credentials file" };
+  if (found) ok(`API key ${maskKey(found.key)} (from ${where[found.source]})`);
   else
     warn(
       `not signed in — 'ambient models' works without a key; run 'ambient login' (or create one at ${KEYS_URL}) to run tasks`,

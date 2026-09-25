@@ -31,6 +31,8 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
   { name: "/attach", args: "<path>", desc: "Attach an image (or press Ctrl+V to paste one)" },
   { name: "/skills", desc: "Show your skills + how the agent uses them" },
+  { name: "/login", desc: "Add or change your Ambient API key (checked before saving)" },
+  { name: "/logout", desc: "Remove the saved API key from this machine" },
   { name: "/clear", desc: "Clear the screen and start a fresh conversation" },
   { name: "/quit", desc: "Exit ambient" },
 ];

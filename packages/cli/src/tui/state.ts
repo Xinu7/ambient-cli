@@ -741,7 +741,9 @@ export function reduce(state: ViewState, ev: NewEvent): ViewState {
             : "busy";
       const text = transient
         ? `${who} is ${state_word} — retrying / failing over…`
-        : `${ev.errorKind}: ${ev.message}`;
+        : ev.errorKind === "auth"
+          ? "Ambient rejected your API key — it may have been revoked or mistyped."
+          : `${ev.errorKind}: ${ev.message}`;
       const last = state.transcript[state.transcript.length - 1];
       if (last && last.kind === "notice" && last.text === text) return state; // collapse the burst
       return pushItem(state, (id) => ({

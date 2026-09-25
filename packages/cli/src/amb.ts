@@ -3,7 +3,7 @@ import { runConfig } from "./commands/config-show.js";
 import { runDoctor } from "./commands/doctor.js";
 import { runEval } from "./commands/eval.js";
 import { runGitHub } from "./commands/github.js";
-import { runLogin } from "./commands/login.js";
+import { runLogin, runLogout } from "./commands/login.js";
 import { runModels } from "./commands/models.js";
 import { runProbe } from "./commands/probe.js";
 import { runResume } from "./commands/resume.js";
@@ -19,7 +19,8 @@ const HELP = `ambient — Ambient CLI (a terminal coding agent for the Ambient n
 
 Usage:
   ambient                                Launch the interactive TUI (in a terminal)
-  ambient login                          Sign in — save your Ambient API key to the keychain
+  ambient login                          Sign in — opens your keys page, checks + saves your key securely
+  ambient logout                         Remove the saved API key from this machine
   ambient tui ["<task>"] [flags]         Same — the Ambient-branded interactive UI
   ambient "<task>"                       Run the coding agent on a task (line UI)
   ambient run "<task>" [flags]           Same as above
@@ -100,6 +101,9 @@ async function main(): Promise<void> {
       break;
     case "login":
       await runLogin();
+      break;
+    case "logout":
+      runLogout();
       break;
     case "config":
       await runConfig(rest);
