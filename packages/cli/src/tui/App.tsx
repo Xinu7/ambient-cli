@@ -610,7 +610,7 @@ export function App(deps: AppDeps): ReactNode {
       dispatch({
         t: "notice",
         level: "info",
-        text: "This project has its own hooks, allow rules or MCP servers. They're off until you review them: /trust",
+        text: "Project hooks, rules and MCP servers are off until you review them: /trust",
       });
     }
   }, []);
@@ -2092,7 +2092,11 @@ export function App(deps: AppDeps): ReactNode {
   // On the splash, launch notes render live under the banner and commit with the rest once the conversation
   // starts. What was already committed (a menu hid the banner for a moment) stays committed — <Static> must
   // only ever grow, or it prints those items a second time.
-  const commitCount = onSplash ? Math.min(committedRef.current, settledCount) : settledCount;
+  // Launch notes stay live while a menu is open too: committing them then would print them ABOVE the banner
+  // that comes back when the menu closes.
+  const commitCount = !conversationStarted
+    ? Math.min(committedRef.current, settledCount)
+    : settledCount;
   // The full banner only when it fits with the launch notes and the composer; otherwise the one-line lockup,
   // so nothing on the first screen gets cut off.
   // Rows a notice takes: a blank line above, then its text word-wrapped beside the 2-column "· " mark.

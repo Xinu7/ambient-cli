@@ -275,7 +275,7 @@ export function makeWorkspaceSettings(opts: {
       const lines: string[] = [
         s.trusted
           ? "This project's settings are trusted:"
-          : "This project's settings ask for the following, which won't apply until you trust them:",
+          : "This project's own settings (off until you trust them):",
       ];
       if (s.projectHooks.length > 0) {
         lines.push(" Hooks (commands that run on your machine):");
@@ -292,8 +292,12 @@ export function makeWorkspaceSettings(opts: {
           lines.push(`  ${m.name} → ${what.length > 70 ? `${what.slice(0, 69)}…` : what}`);
         }
       }
-      if (!s.trusted)
-        lines.push("", "Type /trust yes to trust exactly this (ambient trust yes in a shell).");
+      if (!s.trusted) {
+        lines.push(
+          "",
+          "/trust yes turns on exactly this (ambient trust yes in a shell); a change needs trusting again.",
+        );
+      }
       return lines;
     },
     trust() {

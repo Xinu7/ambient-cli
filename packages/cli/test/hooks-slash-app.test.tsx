@@ -74,7 +74,10 @@ describe("/hooks", () => {
       },
       untrustedCount: () => (trusted ? 0 : 1),
       projectTrusted: () => trusted,
-      trustSummary: () => ["This project's settings ask for the following", "Type /trust yes"],
+      trustSummary: () => [
+        "This project's own settings (off until you trust them):",
+        "/trust yes turns on exactly this",
+      ],
     };
     const { ui, type, requests } = mount(hooks);
     await settle(30);
@@ -87,9 +90,9 @@ describe("/hooks", () => {
     await type("first");
     expect(JSON.stringify(requests.at(-1)?.messages)).not.toContain("HOOK-CONTEXT");
 
-    expect(ui.lastFrame()).toContain("This project has its own hooks");
+    expect(ui.lastFrame()).toContain("Project hooks, rules and MCP servers");
     await type("/trust");
-    expect(ui.lastFrame()).toContain("Type /trust yes");
+    expect(ui.lastFrame()).toContain("/trust yes turns on exactly this");
     expect(trusted).toBe(false);
     await type("/trust yes");
     expect(ui.lastFrame()).toContain("Trusted this project's 1 hook");
