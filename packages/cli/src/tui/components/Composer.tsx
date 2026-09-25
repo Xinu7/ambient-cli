@@ -126,7 +126,7 @@ function EditorView({
 
 /**
  * The input box — ALWAYS visible (idle and in-flight), so there's never any doubt where you type.
- * A clean rounded frame (like Claude Code / Codex) that grows as the text wraps. While a run is active,
+ * A clean rounded frame that grows as the text wraps. While a run is active,
  * typing queues a follow-up for the next run; the placeholder + hint say so. App owns the keystrokes.
  */
 export function Composer({

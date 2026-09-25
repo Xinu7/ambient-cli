@@ -15,7 +15,7 @@ import { gitState } from "./git-state.js";
  */
 export function makeWorkspaceContextPort(now: () => Date = () => new Date()): WorkspaceContextPort {
   return {
-    instructions: (cwd) => loadInstructions(cwd).text,
+    instructions: (cwd, limits) => loadInstructions(cwd, limits).text,
     readMemory: (workspaceRoot) => readMemory(workspaceRoot),
     writeMemory: (workspaceRoot, summary) => writeMemory(workspaceRoot, summary),
     date: () => now().toISOString().slice(0, 10),

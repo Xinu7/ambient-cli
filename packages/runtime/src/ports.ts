@@ -73,8 +73,9 @@ export interface Msg {
  * absent ⇒ inert defaults (no instructions, no memory, no date/platform), which is fine for isolated tests.
  */
 export interface WorkspaceContextPort {
-  /** Concatenated project instruction files (AGENTS.md/CLAUDE.md/…) for `cwd`, or "" if none. */
-  instructions(cwd: string): string;
+  /** Concatenated project instruction files (AGENTS.md/CLAUDE.md/…) for `cwd`, or "" if none, bounded by
+   *  `limits` (characters; sized from the served model) when given. */
+  instructions(cwd: string, limits?: { perFile: number; total: number }): string;
   /** Durable project memory (.ambient/MEMORY.md) for the workspace, or undefined if none. */
   readMemory(workspaceRoot: string): string | undefined;
   /** Persist the compounding project memory (best-effort; never load-bearing). */

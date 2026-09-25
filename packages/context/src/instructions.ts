@@ -45,8 +45,17 @@ export interface LoadedInstructions {
   sources: string[];
 }
 
-/** Load + concatenate instruction files (nearest dir first), deduped and budget-bounded. */
-export function loadInstructions(cwd: string): LoadedInstructions {
+export interface InstructionLimits {
+  perFile: number;
+  total: number;
+}
+
+/** Load + concatenate instruction files (nearest dir first), deduped and budget-bounded. Limits scale with the
+ *  served model (ModelProfile); the defaults are the conservative small-window values. */
+export function loadInstructions(
+  cwd: string,
+  limits: InstructionLimits = { perFile: MAX_PER_FILE, total: MAX_TOTAL },
+): LoadedInstructions {
   const seen = new Set<string>();
   const chunks: string[] = [];
   const sources: string[] = [];
@@ -67,13 +76,15 @@ export function loadInstructions(cwd: string): LoadedInstructions {
       if (seen.has(key)) continue;
       seen.add(key);
       const bounded =
-        trimmed.length > MAX_PER_FILE ? `${trimmed.slice(0, MAX_PER_FILE)}\n…(truncated)` : trimmed;
-      if (total + bounded.length > MAX_TOTAL) break;
+        trimmed.length > limits.perFile
+          ? `${trimmed.slice(0, limits.perFile)}\n…(truncated)`
+          : trimmed;
+      if (total + bounded.length > limits.total) continue; // a later, smaller file may still fit
       total += bounded.length;
       chunks.push(`# From ${name}\n${bounded}`);
       sources.push(path);
     }
-    if (total >= MAX_TOTAL) break;
+    if (total >= limits.total) break;
   }
 
   return { text: chunks.join("\n\n"), sources };

@@ -1,3 +1,4 @@
+import { budgetsFor } from "@amb/reliability";
 import { estimateMessagesTokens } from "./tokens.js";
 
 /**
@@ -49,8 +50,6 @@ export const DEFAULT_COMPACTION: CompactionConfig = {
   anchorCount: 1,
 };
 
-const clampN = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
-
 /**
  * Scale the compaction retention to the SERVED model's window. The fixed 20k-recent + 16k-reserve
  * defaults can't fit a small (≤~32k) model: after a high→low switch the retained tokens alone exceed the
@@ -63,10 +62,13 @@ export function compactionConfigForWindow(
   base: CompactionConfig = DEFAULT_COMPACTION,
 ): CompactionConfig {
   if (!Number.isFinite(contextWindow) || contextWindow <= 0) return base;
+  // Both scale with the window (ModelProfile policy): a 1M-token model keeps far more recent history and
+  // compacts later than a 32K one, with headroom for the next answer + a tool result.
+  const b = budgetsFor(contextWindow, contextWindow);
   return {
     anchorCount: base.anchorCount,
-    keepRecentTokens: clampN(Math.floor(contextWindow * 0.35), 4000, base.keepRecentTokens),
-    reserveTokens: clampN(Math.floor(contextWindow * 0.15), 2000, base.reserveTokens),
+    keepRecentTokens: b.keepRecent,
+    reserveTokens: b.compactReserve,
   };
 }
 

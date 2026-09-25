@@ -6,9 +6,15 @@ import {
   newAttemptId,
   supportsVision,
 } from "@amb/protocol";
-import { backoffSeconds, nextMaxTokens, readySubstitute, streamTimeouts } from "@amb/reliability";
+import {
+  backoffSeconds,
+  budgetsFor,
+  nextMaxTokens,
+  readySubstitute,
+  streamTimeouts,
+} from "@amb/reliability";
 import { fallbackModel, isAbortError } from "./agent-support.js";
-import { DESIRED_OUTPUT, MAX_FAILOVERS, MAX_SAME_MODEL_RETRIES } from "./constants.js";
+import { MAX_FAILOVERS, MAX_SAME_MODEL_RETRIES } from "./constants.js";
 import type {
   CapabilityPort,
   ChatClient,
@@ -111,10 +117,10 @@ export async function runChatWithFailover(
         params.messages,
         ctx.imageTokens ? { imageTokens: ctx.imageTokens } : {},
       ) + estimateTokens(JSON.stringify(params.tools));
-    // Fallback gets its OWN output budget (DESIRED_OUTPUT), not the first model's clamp.
+    // Each model (including a failover) asks for its OWN output budget, derived from its catalog entry.
     const pf = preflight(budget, {
       promptEstimate: promptTokens,
-      requestedOutput: DESIRED_OUTPUT,
+      requestedOutput: budgetsFor(budget.contextWindow, budget.outputCap).desiredOutput,
       reasoning: true,
     });
     if (pf.overflow)

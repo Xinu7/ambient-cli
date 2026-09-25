@@ -58,9 +58,14 @@ describe("budget + preflight", () => {
     expect(toolResultCharBudget(small, 20_000)).toBeLessThan(toolResultCharBudget(big, 20_000));
     // Same model: the cap TIGHTENS as the prompt grows (fewer tokens remaining).
     expect(toolResultCharBudget(small, 28_000)).toBeLessThan(toolResultCharBudget(small, 4000));
-    // Clamped: a nearly-full window floors at the minimum; a huge window caps at the maximum.
+    // Clamped: a nearly-full window floors at the minimum; the ceiling SCALES with the model's window.
     expect(toolResultCharBudget(small, 32_768)).toBe(1500); // MIN
-    expect(toolResultCharBudget(big, 0)).toBe(24_000); // MAX
+    const { budgetsFor } = await import("@amb/reliability");
+    expect(toolResultCharBudget(big, 0)).toBe(
+      budgetsFor(262_144, big.outputCap).toolResultMaxChars,
+    );
+    const huge = budgetFromCatalog(model({ contextLength: 1_048_576, maxOutputLength: 65_536 }));
+    expect(toolResultCharBudget(huge, 0)).toBeGreaterThan(toolResultCharBudget(big, 0));
   });
 
   it("flags overflow when the prompt leaves no room for the output floor", () => {
@@ -104,10 +109,13 @@ describe("fitInjectedBlocks (model-proportional injected context)", () => {
 });
 
 describe("compactionConfigForWindow (retention scaled to the window)", () => {
-  it("a large window keeps the generous defaults (clamped at the base)", () => {
-    const cfg = compactionConfigForWindow(262_144);
-    expect(cfg.keepRecentTokens).toBe(20_000);
-    expect(cfg.reserveTokens).toBe(16_384);
+  it("retention scales with the window — a 1M model keeps far more than a 262K one (no fixed ceiling)", () => {
+    const big = compactionConfigForWindow(262_144);
+    const huge = compactionConfigForWindow(1_048_576);
+    expect(big.keepRecentTokens).toBeGreaterThan(20_000);
+    expect(huge.keepRecentTokens).toBeGreaterThan(big.keepRecentTokens);
+    expect(huge.reserveTokens).toBeGreaterThanOrEqual(big.reserveTokens);
+    expect(big.keepRecentTokens + big.reserveTokens).toBeLessThan(262_144);
   });
   it("a small window shrinks retention so the transcript can fit (not a fixed 20k floor)", () => {
     const cfg = compactionConfigForWindow(32_000);

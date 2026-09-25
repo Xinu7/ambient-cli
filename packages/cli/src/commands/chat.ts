@@ -7,14 +7,13 @@ import {
 } from "@amb/ambient-api";
 import { budgetFromCatalog, estimateTokens, preflight } from "@amb/context";
 import { AmbError } from "@amb/protocol";
-import { resolveRequestedModel, streamTimeouts } from "@amb/reliability";
+import { profileFor, resolveRequestedModel, streamTimeouts } from "@amb/reliability";
 import { cyan, dim } from "../render/color.js";
 import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
 import { mergeStdin, readPipedStdin } from "./stdin.js";
 
 const SYSTEM =
   "You are amb, a concise expert coding assistant running on the Ambient network. Be direct.";
-const DESIRED_OUTPUT = 8192;
 
 interface ChatArgs {
   model?: string;
@@ -111,7 +110,7 @@ export async function runChat(args: string[]): Promise<void> {
   const pf = model
     ? preflight(budgetFromCatalog(model), {
         promptEstimate,
-        requestedOutput: DESIRED_OUTPUT,
+        requestedOutput: profileFor(target, model).budgets.desiredOutput,
         reasoning: true,
       })
     : undefined;
@@ -122,7 +121,7 @@ export async function runChat(args: string[]): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  const maxTokens = pf?.sentOutput ?? DESIRED_OUTPUT;
+  const maxTokens = pf?.sentOutput ?? profileFor(target, model).budgets.desiredOutput;
 
   const req: ChatRequest = {
     model: target,

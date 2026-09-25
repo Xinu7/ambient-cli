@@ -28,12 +28,14 @@ import {
 } from "@amb/protocol";
 import {
   AUTO_MODEL,
+  type ModelProfile,
   type RoutedRole,
   autonomyCap,
   backoffSeconds,
   nextMaxTokens,
   parseOverflowMax,
   pickForRole,
+  profileFor,
   resolveRequestedModel,
   shouldEscalate,
 } from "@amb/reliability";
@@ -58,7 +60,6 @@ import { assistedProtocol, parseAssistedResponse, stripActionBlock } from "./ass
 import { type ContentPart, buildUserContent, toDataUri } from "./attachments.js";
 import { compact, reduceContext } from "./compaction-runner.js";
 import {
-  DESIRED_OUTPUT,
   FAILED_BATCHES_TO_ESCALATE,
   INJECTED_CONTEXT_FRACTION,
   MALFORMED_STRIKES_TO_DEMOTE,
@@ -67,10 +68,8 @@ import {
   MAX_IDENTICAL_TOOL_BATCHES,
   MAX_VERIFY_ATTEMPTS,
   REPO_MAP_FRACTION,
-  REPO_MAP_MAX_TOKENS,
   REPO_MAP_MIN_TOKENS,
   SKILLS_FRACTION,
-  SKILLS_MAX_TOKENS,
   SKILLS_MIN_TOKENS,
 } from "./constants.js";
 import { autoEffortForTask, resolveEffort } from "./effort.js";
@@ -225,7 +224,19 @@ export class Agent {
     // anchor stays (system + the new instruction) and compaction can never summarize the goal away.
     // Workspace fs/env come through the injected (required) port — the runtime state machine itself never
     // touches fs/clock/env, so it stays deterministic + replayable.
-    const baseInstructions = opts.workspace.instructions(opts.cwd);
+    // Every budget below comes from the served model's live catalog entry (ModelProfile) — no fixed ceilings,
+    // so a 1M-context model gets proportionally more room than a 32K one with no code change.
+    const profileOf = (id: string): ModelProfile =>
+      profileFor(
+        id,
+        liveCatalog.find((m) => m.id === id),
+        { ceiling: opts.capabilities?.learnedCeiling?.(id) },
+      );
+    const targetProfile = profileOf(target);
+    const baseInstructions = opts.workspace.instructions(opts.cwd, {
+      perFile: targetProfile.budgets.instructionsPerFileChars,
+      total: targetProfile.budgets.instructionsTotalChars,
+    });
     // Read-only git snapshot at run start (branch / changed files / recent commits) — computed once and folded
     // into the anchor so the agent starts oriented without spending a tool call. Undefined outside a repo.
     const gitBlock = opts.workspace.git?.(opts.cwd);
@@ -259,7 +270,7 @@ export class Agent {
       opts.capabilities?.learnedCeiling?.(target),
     ).contextWindow;
     const repoMapBudget = Math.min(
-      REPO_MAP_MAX_TOKENS,
+      targetProfile.budgets.repoMapMaxTokens,
       Math.floor(modelWindow * REPO_MAP_FRACTION),
     );
     const repoMapBlock =
@@ -270,7 +281,10 @@ export class Agent {
     // full body in on demand. BUDGETED to a small share of the SERVED window (same pattern as the repo map) so
     // it scales with the model — a 33k mini model gets a handful, a 262k flagship the full set — and never
     // clobbers a small window; the rest stay evocable by name. Below the floor, the catalog is skipped.
-    const skillsBudget = Math.min(SKILLS_MAX_TOKENS, Math.floor(modelWindow * SKILLS_FRACTION));
+    const skillsBudget = Math.min(
+      targetProfile.budgets.skillsMaxTokens,
+      Math.floor(modelWindow * SKILLS_FRACTION),
+    );
     const skillsBlock =
       skillsBudget >= SKILLS_MIN_TOKENS
         ? renderSkillIndex(opts.workspace.skills(opts.workspaceRoot), skillsBudget)
@@ -515,7 +529,7 @@ export class Agent {
         const promptEstimate = estimateMessagesTokens(messages, estimateOpts()) + toolTokens;
         const pf = preflight(budget, {
           promptEstimate,
-          requestedOutput: DESIRED_OUTPUT,
+          requestedOutput: profileOf(target).budgets.desiredOutput,
           reasoning: true,
         });
         emit({
@@ -603,7 +617,7 @@ export class Agent {
               model: target,
               messages: reqMessages,
               tools: reqTools,
-              maxTokens: DESIRED_OUTPUT,
+              maxTokens: profileOf(target).budgets.desiredOutput,
               signal: opts.signal,
               onContent: () => {},
               onReasoning: () => {},

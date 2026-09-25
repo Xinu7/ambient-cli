@@ -171,7 +171,7 @@ describe("learned ceiling (lower-only)", () => {
   });
 });
 
-describe("readySubstitute when the catalog flags EVERY model cold (live reality)", () => {
+describe("readySubstitute when the catalog flags every model cold", () => {
   const fleet = [model("a/one", false), model("b/two", false), model("c/three", false)];
   it("initial resolution serves the requested model as-is (the flag is a hint)", () => {
     expect(readySubstitute("a/one", fleet)).toBeNull();

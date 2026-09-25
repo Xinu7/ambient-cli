@@ -1,5 +1,11 @@
 import type { CatalogModel } from "@amb/protocol";
-import { SAFE_MAX_OUTPUT_TOKENS, effectiveWindow, floorMaxTokens } from "@amb/reliability";
+import {
+  SAFE_MAX_OUTPUT_TOKENS,
+  UNKNOWN_WINDOW,
+  budgetsFor,
+  effectiveWindow,
+  floorMaxTokens,
+} from "@amb/reliability";
 import { DEFAULT_BYTES_PER_TOKEN, estimateTokens } from "./tokens.js";
 
 /**
@@ -58,11 +64,12 @@ export interface ModelBudget {
   outputCap: number;
 }
 
-const FALLBACK_WINDOW = 128_000;
 export const DEFAULT_RESERVE = 1024;
 
 export function budgetFromCatalog(m: CatalogModel, learnedCeiling?: number): ModelBudget {
-  const window = effectiveWindow(m.contextLength, learnedCeiling) ?? FALLBACK_WINDOW;
+  // A model that publishes no window is budgeted conservatively (same default as ModelProfile).
+  const window =
+    effectiveWindow(m.contextLength ?? UNKNOWN_WINDOW, learnedCeiling) ?? UNKNOWN_WINDOW;
   const outputCap = Math.min(m.maxOutputLength ?? SAFE_MAX_OUTPUT_TOKENS, SAFE_MAX_OUTPUT_TOKENS);
   return { model: m.id, contextWindow: window, outputCap };
 }
@@ -115,8 +122,6 @@ export function preflight(
 const CHARS_PER_TOKEN = 3.5;
 /** Never below this — a tool result must always show SOMETHING useful. */
 const MIN_TOOL_RESULT_CHARS = 1_500;
-/** Never above this — don't let a huge-window model bloat one result to megabytes. */
-const MAX_TOOL_RESULT_CHARS = 24_000;
 /** A single tool result may occupy at most this fraction of the REMAINING window. */
 const TOOL_RESULT_WINDOW_FRACTION = 0.25;
 
@@ -126,11 +131,16 @@ const TOOL_RESULT_WINDOW_FRACTION = 0.25;
  * missing half of context budgeting (the roadmap's input-side ceiling caps the prompt; tool RESULTS are what
  * actually blow the window on small open models).
  */
-export function toolResultCharBudget(budget: ModelBudget, promptTokens: number): number {
+export function toolResultCharBudget(
+  budget: ModelBudget,
+  promptTokens: number,
+  // The ceiling scales with the model (a 1M-token model can keep far more of one result than a 32K one).
+  maxChars: number = budgetsFor(budget.contextWindow, budget.outputCap).toolResultMaxChars,
+): number {
   // Normalize non-finite inputs (a NaN prompt estimate must never propagate to a NaN cap).
   const prompt = Number.isFinite(promptTokens) ? promptTokens : 0;
   const window = Number.isFinite(budget.contextWindow) ? budget.contextWindow : 0;
   const remainingTokens = Math.max(0, window - prompt);
   const chars = Math.round(remainingTokens * CHARS_PER_TOKEN * TOOL_RESULT_WINDOW_FRACTION);
-  return Math.min(MAX_TOOL_RESULT_CHARS, Math.max(MIN_TOOL_RESULT_CHARS, chars));
+  return Math.min(maxChars, Math.max(MIN_TOOL_RESULT_CHARS, chars));
 }
