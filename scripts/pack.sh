@@ -31,7 +31,10 @@ mkdir -p "$REPO/dist-pack"
 ( cd "$stage" && npm pack --silent --pack-destination "$REPO/dist-pack" >/dev/null )
 
 TGZ="$REPO/dist-pack/${NAME}-${VERSION}.tgz"
-echo "✓ packed  →  $TGZ"
+# A version-free copy too: attached to every GitHub release so
+# https://github.com/xinu7/ambient-cli/releases/latest/download/ambient-code.tgz always installs the latest.
+cp "$TGZ" "$REPO/dist-pack/${NAME}.tgz"
+echo "✓ packed  →  $TGZ  (+ ${NAME}.tgz)"
 echo
 echo "  Install it:"
 echo "      npm i -g \"$TGZ\""
