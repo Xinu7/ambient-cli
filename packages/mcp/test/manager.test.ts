@@ -101,3 +101,30 @@ describe("startMcpServers", () => {
     expect(logs.some((l) => l.includes("duplicates"))).toBe(true);
   });
 });
+
+describe("starting several servers", () => {
+  it("starts them together, so one that never answers holds nothing up, and keeps config order", async () => {
+    const quick = fakeSpawn({ a: [{ name: "one" }], c: [{ name: "three" }] });
+    const spawn: StartOptions["spawn"] = (cfg) => {
+      const server = "args" in cfg ? cfg.args?.[0] : undefined;
+      if (server !== "hang") return quick?.(cfg) as ReturnType<NonNullable<StartOptions["spawn"]>>;
+      return {
+        transport: { send: () => {}, onMessage: () => {}, onClose: () => {}, close: () => {} },
+      };
+    };
+    const logs: string[] = [];
+    const started = Date.now();
+    const session = await startMcpServers(
+      [
+        { name: "a", config: { command: "x", args: ["a"] } },
+        { name: "hang", config: { command: "x", args: ["hang"] } },
+        { name: "hang2", config: { command: "x", args: ["hang"] } },
+        { name: "c", config: { command: "x", args: ["c"] } },
+      ],
+      { spawn, initTimeoutMs: 300, onLog: (m) => logs.push(m) },
+    );
+    expect(Date.now() - started).toBeLessThan(550); // two 300ms timeouts overlapped, not added
+    expect(session.tools.map((t) => t.manifest.name)).toEqual(["mcp__a__one", "mcp__c__three"]);
+    expect(logs.filter((l) => l.includes("unavailable"))).toHaveLength(2);
+  });
+});

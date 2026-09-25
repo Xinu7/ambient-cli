@@ -47,45 +47,54 @@ export async function startMcpServers(
 ): Promise<McpSession> {
   const log = opts.onLog ?? (() => {});
   const spawnFn = opts.spawn ?? defaultSpawn;
+
+  // Servers start in PARALLEL (one slow or dead server must not hold up the rest); their tools are then
+  // registered in config order, so the tool list — and the prompt it feeds — is the same every time.
+  const started = await Promise.all(
+    specs.map(async (spec) => {
+      let client: McpClient | undefined;
+      try {
+        const { transport } = spawnFn(spec.config);
+        client = new McpClient(
+          new JsonRpcClient(transport, { requestTimeoutMs: opts.initTimeoutMs ?? 15_000 }),
+          { ...(opts.callTimeoutMs ? { callTimeoutMs: opts.callTimeoutMs } : {}) },
+        );
+        await client.initialize();
+        return { spec, client, discovered: await client.listTools() };
+      } catch (e) {
+        // The server spawned but failed to initialize/list — close it so we don't leak the child process.
+        try {
+          client?.close();
+        } catch {
+          /* already gone */
+        }
+        log(`mcp: ${spec.name} unavailable — skipped (${(e as Error).message})`);
+        return undefined;
+      }
+    }),
+  );
+
   const clients: McpClient[] = [];
   const tools: ToolDefinition[] = [];
   const seen = new Set<string>(); // tool ids already claimed — a duplicate is skipped, never a crash
-
-  for (const spec of specs) {
-    let client: McpClient | undefined;
-    try {
-      const { transport } = spawnFn(spec.config);
-      client = new McpClient(
-        new JsonRpcClient(transport, { requestTimeoutMs: opts.initTimeoutMs ?? 15_000 }),
-        { ...(opts.callTimeoutMs ? { callTimeoutMs: opts.callTimeoutMs } : {}) },
-      );
-      await client.initialize();
-      const discovered = await client.listTools();
-      let added = 0;
-      for (const t of discovered) {
-        const def = mcpToolToDefinition(spec.name, t, client);
-        if (!def) continue;
-        // Two tools that collapse to the same id (a same-server duplicate, or a server/tool name pair that
-        // aliases another) must NOT reach the registry — register() throws on a dup and would abort the run.
-        if (seen.has(def.manifest.name)) {
-          log(`mcp: ${spec.name} tool ${def.manifest.name} duplicates an existing tool — skipped`);
-          continue;
-        }
-        seen.add(def.manifest.name);
-        tools.push(def);
-        added += 1;
+  for (const s of started) {
+    if (!s) continue;
+    let added = 0;
+    for (const t of s.discovered) {
+      const def = mcpToolToDefinition(s.spec.name, t, s.client);
+      if (!def) continue;
+      // Two tools that collapse to the same id (a same-server duplicate, or a server/tool name pair that
+      // aliases another) must NOT reach the registry — register() throws on a dup and would abort the run.
+      if (seen.has(def.manifest.name)) {
+        log(`mcp: ${s.spec.name} tool ${def.manifest.name} duplicates an existing tool — skipped`);
+        continue;
       }
-      clients.push(client);
-      log(`mcp: ${spec.name} → ${added} tool(s)`);
-    } catch (e) {
-      // The server spawned but failed to initialize/list — close it so we don't leak the child process.
-      try {
-        client?.close();
-      } catch {
-        /* already gone */
-      }
-      log(`mcp: ${spec.name} unavailable — skipped (${(e as Error).message})`);
+      seen.add(def.manifest.name);
+      tools.push(def);
+      added += 1;
     }
+    clients.push(s.client);
+    log(`mcp: ${s.spec.name} → ${added} tool(s)`);
   }
 
   return {
