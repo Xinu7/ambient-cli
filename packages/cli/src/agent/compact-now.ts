@@ -13,8 +13,8 @@ export type CompactNowResult =
   | { ok: true; messages: Msg[]; before: number; after: number; model: string }
   | { ok: false; reason: string };
 
-/** How much recent conversation `/compact` keeps word for word (a share of the model's window). */
-const KEEP_RECENT_SHARE = 0.05;
+/** Below this, a summary would be about as long as what it replaces — not worth a model call. */
+const MIN_WORTH_COMPACTING_TOKENS = 3_000;
 
 /**
  * `/compact [focus]`: summarize the carried conversation now, sized to the model that will read it, keeping
@@ -35,6 +35,13 @@ export async function compactNow(opts: {
   capabilities?: CapabilityPort;
 }): Promise<CompactNowResult> {
   if (opts.conversation.length < 3) return { ok: false, reason: "nothing to compact yet" };
+  const size = estimateMessagesTokens([...opts.conversation]);
+  if (size < MIN_WORTH_COMPACTING_TOKENS) {
+    return {
+      ok: false,
+      reason: `the conversation is only ${formatTokens(size)} tokens — nothing worth compacting yet`,
+    };
+  }
   let catalog: Awaited<ReturnType<ChatClient["fetchCatalog"]>>;
   try {
     catalog = await opts.client.fetchCatalog(opts.signal);
@@ -63,7 +70,8 @@ export async function compactNow(opts: {
     profile.window,
     opts.workspace.readMemory(opts.workspaceRoot) ?? "",
     {
-      keepRecentTokens: Math.floor(profile.window * KEEP_RECENT_SHARE),
+      // Keep just the latest exchange word for word; everything before it is summarized.
+      keepRecentTokens: estimateMessagesTokens(lastExchange(opts.conversation)),
       ...(opts.focus?.trim() ? { focus: opts.focus.trim() } : {}),
     },
   );
@@ -76,3 +84,11 @@ export async function compactNow(opts: {
     model: target,
   };
 }
+
+/** The last user message and everything after it. */
+function lastExchange(conversation: readonly Msg[]): Msg[] {
+  const i = conversation.findLastIndex((m) => m.role === "user");
+  return i < 0 ? [] : conversation.slice(i);
+}
+
+const formatTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));

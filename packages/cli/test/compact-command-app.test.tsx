@@ -95,4 +95,41 @@ describe("/compact, /context and /usage in the app", () => {
     expect(lastFrame()).not.toContain("compacted context (");
     unmount();
   });
+  it("says a short conversation isn't worth compacting, without calling a model", async () => {
+    let calls = 0;
+    const client = {
+      fetchCatalog: async () => catalog,
+      chat: async (): Promise<TurnCompletion> => {
+        calls += 1;
+        return { content: `short answer ${calls}`, toolCalls: [] };
+      },
+    } as unknown as ChatClient;
+    const { stdin, lastFrame, unmount } = render(
+      <App
+        client={client}
+        makeWriter={(id: string) => new SessionWriter(id, () => new Date().toISOString())}
+        agentMode="build"
+        permission="bypass"
+        effort="auto"
+        requestedModel="vendor/small"
+        maxTurns={5}
+        cwd={ws}
+        workspaceRoot={ws}
+      />,
+    );
+    const send = async (text: string, until: string) => {
+      for (const ch of text) stdin.write(ch);
+      await settle(30);
+      stdin.write("\r");
+      await waitFor(lastFrame, until);
+      await settle(60);
+    };
+    await settle(40);
+    await send("one", "short answer 1");
+    await send("two", "short answer 2");
+    await send("/compact", "nothing worth compacting");
+    expect(lastFrame()).toMatch(/only \d+ tokens — nothing worth compacting yet/);
+    expect(calls).toBe(2);
+    unmount();
+  });
 });
