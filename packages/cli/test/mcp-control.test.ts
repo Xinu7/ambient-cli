@@ -25,6 +25,9 @@ describe("MCP status and sign-in in a session", () => {
     let closed = 0;
     const connectImpl = async (): Promise<McpConnection> => ({
       tools: [],
+      currentTools: () => [],
+      prompts: [],
+      getPrompt: async () => "",
       notices: [],
       close: () => {
         closed++;
@@ -79,5 +82,47 @@ describe("MCP status and sign-in in a session", () => {
 
   it("says when no servers are configured", () => {
     expect(mcpReport([])).toBe("No MCP servers configured.");
+  });
+});
+
+describe("MCP prompts as slash commands", () => {
+  it("maps typed words to the prompt's arguments, the last one taking the rest", async () => {
+    const asked: Array<Record<string, string>> = [];
+    const ctl = makeMcpControl({
+      workspaceRoot: ws,
+      connect: {},
+      store: makeTokenStore({ platform: "linux", configDir: ws }),
+      connectImpl: async () => ({
+        tools: [],
+        currentTools: () => [],
+        notices: [],
+        close: () => {},
+        servers: [],
+        prompts: [
+          {
+            server: "gh",
+            prompt: {
+              name: "review",
+              description: "Review a pull request",
+              arguments: [{ name: "pr", required: true }, { name: "focus" }],
+            },
+          },
+        ],
+        getPrompt: async (_s, _n, args) => {
+          asked.push(args);
+          return "PROMPT TEXT";
+        },
+      }),
+    });
+    await ctl.start();
+    expect(ctl.promptCommands()).toEqual([
+      { name: "/mcp__gh__review", desc: "Review a pull request (gh)", args: "<pr> [focus]" },
+    ]);
+    expect(await ctl.expandPrompt("/mcp__gh__review", '42 "error handling" and tests')).toBe(
+      "PROMPT TEXT",
+    );
+    expect(asked[0]).toEqual({ pr: "42", focus: "error handling and tests" });
+    await expect(ctl.expandPrompt("/mcp__gh__review", "")).rejects.toThrow("needs pr");
+    await expect(ctl.expandPrompt("/mcp__gh__other", "")).rejects.toThrow("isn't available");
   });
 });

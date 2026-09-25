@@ -19,7 +19,27 @@ export interface McpControl {
   login(name: string, onUrl: (url: string) => void): Promise<string>;
   /** The tools connected right now. */
   tools(): ToolDefinition[];
+  /** Prompts the servers offer, as slash commands (`/mcp__server__prompt`). */
+  promptCommands(): McpPromptCommand[];
+  /** A prompt's text with its arguments filled in from what the user typed after the command. */
+  expandPrompt(command: string, args: string): Promise<string>;
   close(): void;
+}
+
+export interface McpPromptCommand {
+  /** `/mcp__server__prompt` */
+  name: string;
+  desc: string;
+  args?: string;
+}
+
+const promptCommandName = (server: string, prompt: string) => `/mcp__${server}__${prompt}`;
+
+/** Split typed arguments on spaces, keeping "quoted phrases" together. */
+export function splitArgs(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)) out.push(m[1] ?? m[2] ?? m[3] ?? "");
+  return out;
 }
 
 export function makeMcpControl(opts: {
@@ -47,7 +67,38 @@ export function makeMcpControl(opts: {
   return {
     start: () => reconnect().catch(() => {}),
     status: () => current?.servers,
-    tools: () => current?.tools ?? [],
+    tools: () => current?.currentTools() ?? [],
+    promptCommands: () =>
+      (current?.prompts ?? [])
+        .filter((p) => /^[\w.-]+$/.test(p.prompt.name))
+        .map((p) => ({
+          name: promptCommandName(p.server, p.prompt.name),
+          desc: `${p.prompt.description?.replace(/\s+/g, " ").slice(0, 80) ?? "MCP prompt"} (${p.server})`,
+          ...(p.prompt.arguments?.length
+            ? {
+                args: p.prompt.arguments
+                  .map((a) => (a.required ? `<${a.name}>` : `[${a.name}]`))
+                  .join(" "),
+              }
+            : {}),
+        })),
+    async expandPrompt(command, text) {
+      const entry = current?.prompts.find(
+        (p) => promptCommandName(p.server, p.prompt.name) === command,
+      );
+      if (!entry || !current) throw new Error(`${command} isn't available right now`);
+      const words = splitArgs(text);
+      const declared = entry.prompt.arguments ?? [];
+      const args: Record<string, string> = {};
+      declared.forEach((a, i) => {
+        // The last declared argument takes the rest of what was typed.
+        const value = i === declared.length - 1 ? words.slice(i).join(" ") : words[i];
+        if (value) args[a.name] = value;
+      });
+      const missing = declared.filter((a) => a.required && !args[a.name]).map((a) => a.name);
+      if (missing.length > 0) throw new Error(`${command} needs ${missing.join(", ")}`);
+      return current.getPrompt(entry.server, entry.prompt.name, args);
+    },
     close() {
       closed = true;
       current?.close();

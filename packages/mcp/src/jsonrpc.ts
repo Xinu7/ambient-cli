@@ -82,6 +82,7 @@ export class JsonRpcClient {
   private readonly pending = new Map<number, Pending>();
   private closed = false;
   private readonly timeoutMs: number;
+  private notificationHandler: (method: string, params: unknown) => void = () => {};
 
   constructor(
     private readonly transport: Transport,
@@ -108,6 +109,11 @@ export class JsonRpcClient {
     });
   }
 
+  /** Receive the server's notifications (e.g. `notifications/tools/list_changed`). */
+  onNotification(cb: (method: string, params: unknown) => void): void {
+    this.notificationHandler = cb;
+  }
+
   /** Fire-and-forget notification (no id, no response). */
   notify(method: string, params?: unknown): void {
     if (this.closed) return;
@@ -123,10 +129,36 @@ export class JsonRpcClient {
     if (!msg || typeof msg !== "object") return;
     const m = msg as {
       id?: unknown;
+      method?: unknown;
+      params?: unknown;
       result?: unknown;
       error?: { message?: string; code?: number; data?: unknown };
     };
-    if (typeof m.id !== "number") return; // a request/notification FROM the server — ignored (v1: no callbacks)
+    if (typeof m.method === "string") {
+      if (m.id === undefined) {
+        try {
+          this.notificationHandler(m.method, m.params);
+        } catch {
+          // a handler failure never breaks the connection
+        }
+        return;
+      }
+      // A request FROM the server: answer ping; decline everything else (no sampling/roots from us), so the
+      // server isn't left waiting.
+      if (typeof m.id === "number" || typeof m.id === "string") {
+        const reply =
+          m.method === "ping"
+            ? { jsonrpc: "2.0", id: m.id, result: {} }
+            : {
+                jsonrpc: "2.0",
+                id: m.id,
+                error: { code: -32601, message: "method not supported" },
+              };
+        if (!this.closed) this.transport.send(`${JSON.stringify(reply)}\n`);
+      }
+      return;
+    }
+    if (typeof m.id !== "number") return;
     const p = this.pending.get(m.id);
     if (!p) return;
     this.pending.delete(m.id);

@@ -34,7 +34,7 @@ import type { ReactNode } from "react";
 import { compactNow } from "../agent/compact-now.js";
 import { createDurableEventSink } from "../agent/event-sink.js";
 import { fireAndForget } from "../agent/hooks.js";
-import { type McpControl, mcpReport } from "../agent/mcp-control.js";
+import { type McpControl, mcpReport, splitArgs } from "../agent/mcp-control.js";
 import { buildRegistry } from "../agent/registry.js";
 import { makeSubagentTool } from "../agent/subagent-tool.js";
 import { makeVerifyPort } from "../agent/verify-port.js";
@@ -179,7 +179,7 @@ export interface AppDeps {
   /** The workspace's files for the `@` picker (listed at the edge, on first use). */
   listFiles?: () => Promise<string[]>;
   /** The session's MCP servers: status for /mcp, and sign-in with /mcp login. */
-  mcp?: Pick<McpControl, "status" | "login">;
+  mcp?: Pick<McpControl, "status" | "login" | "promptCommands" | "expandPrompt">;
   /** Include the user's global Claude Code / Codex instruction files (config `claudeSettings`). */
   userInstructions?: boolean;
   /** This workspace's hooks and permission rules: applied per run, listed by /hooks and /permissions. */
@@ -438,6 +438,8 @@ export function App(deps: AppDeps): ReactNode {
     }
     return { palette, bodies };
   }, [deps.workspaceRoot, deps.skills]);
+  // MCP prompts join the menu as `/mcp__server__prompt` once their servers connect (in the background).
+  const commandPalette = [...customCommands.palette, ...(deps.mcp?.promptCommands() ?? [])];
   const [picker, setPickerState] = useState<"model" | "effort" | "skills" | null>(null);
   const [pickerSel, setPickerSelState] = useState(0);
   const [approvalSel, setApprovalSelState] = useState(0);
@@ -1177,7 +1179,7 @@ export function App(deps: AppDeps): ReactNode {
         dispatch({
           t: "notice",
           level: "info",
-          text: helpText(SLASH_COMMANDS, customCommands.palette.length),
+          text: helpText(SLASH_COMMANDS, commandPalette.length),
         });
         break;
       case "/tools": {
@@ -1454,6 +1456,26 @@ export function App(deps: AppDeps): ReactNode {
         exit();
         break;
       default: {
+        // An MCP server's prompt → ask the server for its text, then run that as the task.
+        const mcp = deps.mcp;
+        if (command.name.startsWith("/mcp__") && mcp) {
+          if (busyRef.current) {
+            dispatch({
+              t: "notice",
+              level: "warn",
+              text: `busy — wait for the current run before running ${command.name}`,
+            });
+            break;
+          }
+          setBuffer("");
+          void mcp
+            .expandPrompt(command.name, arg)
+            .then((text) => runTaskRef.current?.(text))
+            .catch((e: unknown) =>
+              dispatch({ t: "notice", level: "warn", text: (e as Error).message }),
+            );
+          break;
+        }
         // A discovered Claude/Codex command → expand its template with the args and run it as a task.
         const body = customCommands.bodies.get(command.name);
         if (body === undefined) {
@@ -1467,8 +1489,7 @@ export function App(deps: AppDeps): ReactNode {
           });
         } else {
           setBuffer("");
-          const tokens = arg.trim().length > 0 ? arg.trim().split(/\s+/) : [];
-          void runTaskRef.current?.(expandCommand(body, tokens));
+          void runTaskRef.current?.(expandCommand(body, splitArgs(arg)));
         }
       }
     }
@@ -1479,7 +1500,7 @@ export function App(deps: AppDeps): ReactNode {
   const fileMatchesFor = (text: string, cur: number): string[] => {
     // The / menu and a recalled prompt own the keys; the picker only opens while composing.
     if (hist.browsing()) return [];
-    if (text.startsWith("/") && matchSlash(text, customCommands.palette).length > 0) return [];
+    if (text.startsWith("/") && matchSlash(text, commandPalette).length > 0) return [];
     const mention = activeMention(text, cur);
     if (!mention) {
       mentionClosedRef.current = undefined; // a new @ later opens the picker again
@@ -1646,7 +1667,7 @@ export function App(deps: AppDeps): ReactNode {
       // The slash menu owns the arrows only while it's showing (a recalled "/Users/…" prompt has no menu).
       (!inputRef.current.startsWith("/") ||
         hist.browsing() ||
-        matchSlash(inputRef.current, customCommands.palette).length === 0);
+        matchSlash(inputRef.current, commandPalette).length === 0);
     // Composer caret motion. Left/Right/Home/End always move the caret; Up/Down move it only when the buffer
     // spans multiple visual rows — otherwise they fall through to the subagent-expand shortcut below (so
     // watching a wave keeps ↑/↓ = expand/collapse; Ctrl+O toggles it regardless). Precedence:
@@ -1831,7 +1852,7 @@ export function App(deps: AppDeps): ReactNode {
     }
 
     // 4) Slash-command palette.
-    const slashMatches = matchSlash(inputRef.current, customCommands.palette);
+    const slashMatches = matchSlash(inputRef.current, commandPalette);
     if (inputRef.current.startsWith("/") && slashMatches.length > 0) {
       if (key.escape) {
         // Esc closes the menu only. Dismissing a menu must never kill a run in flight (a second Esc does).
@@ -2006,7 +2027,7 @@ export function App(deps: AppDeps): ReactNode {
     state.transcript.some((t) => t.kind !== "notice" && t.kind !== "receipt") ||
     state.transcript.reduce((n, t) => n + ("text" in t ? t.text.split("\n").length : 1), 0) >
       SPLASH_NOTE_LINES;
-  const slashMatches = matchSlash(input, customCommands.palette);
+  const slashMatches = matchSlash(input, commandPalette);
   const showSlash = input.startsWith("/") && slashMatches.length > 0 && !pending && picker === null;
   const fileMatches = picker === null && !pending ? fileMatchesFor(input, cursor) : [];
   const showFiles = !showSlash && fileMatches.length > 0;

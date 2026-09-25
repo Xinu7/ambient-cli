@@ -40,8 +40,69 @@ export type CallToolResult = z.infer<typeof CallToolResult>;
  * Every response is validated with Zod at the boundary (an untrusted server can't hand us a malformed shape
  * the rest of the app then trusts). v1 supports tools only (resources/prompts deferred).
  */
+const ResourceSchema = z.object({
+  uri: z.string(),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  mimeType: z.string().optional(),
+});
+export type McpResource = z.infer<typeof ResourceSchema>;
+const ListResourcesResult = z.object({ resources: z.array(ResourceSchema).default([]) });
+const ReadResourceResult = z.object({
+  contents: z
+    .array(
+      z
+        .object({
+          uri: z.string().optional(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+          blob: z.string().optional(),
+        })
+        .passthrough(),
+    )
+    .default([]),
+});
+
+const PromptSchema = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+  arguments: z
+    .array(
+      z.object({
+        name: z.string(),
+        description: z.string().optional(),
+        required: z.boolean().optional(),
+      }),
+    )
+    .optional(),
+});
+export type McpPrompt = z.infer<typeof PromptSchema>;
+const ListPromptsResult = z.object({ prompts: z.array(PromptSchema).default([]) });
+const GetPromptResult = z.object({
+  messages: z
+    .array(
+      z.object({
+        role: z.string(),
+        content: z.object({ type: z.string(), text: z.string().optional() }).passthrough(),
+      }),
+    )
+    .default([]),
+});
+
+/** What a server said it can do in the handshake. */
+export interface McpCapabilities {
+  tools?: { listChanged?: boolean };
+  resources?: unknown;
+  prompts?: unknown;
+}
+
+const MAX_RESOURCES = 512;
+const MAX_PROMPTS = 256;
+
 export class McpClient {
   private readonly callTimeoutMs: number;
+  /** Filled in by initialize(). */
+  capabilities: McpCapabilities = {};
   constructor(
     private readonly rpc: JsonRpcClient,
     opts: { callTimeoutMs?: number } = {},
@@ -51,12 +112,77 @@ export class McpClient {
 
   /** Perform the MCP handshake. Must complete before listTools/callTool. */
   async initialize(): Promise<void> {
-    await this.rpc.request("initialize", {
+    const result = (await this.rpc.request("initialize", {
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: {},
       clientInfo: { name: "ambient-cli", version: "0.1.0" },
-    });
+    })) as { capabilities?: unknown } | undefined;
+    const caps = result?.capabilities;
+    this.capabilities = caps && typeof caps === "object" ? (caps as McpCapabilities) : {};
     this.rpc.notify("notifications/initialized");
+  }
+
+  /** Called when the server says its tool list changed. */
+  onToolsChanged(cb: () => void): void {
+    this.rpc.onNotification((method) => {
+      if (method === "notifications/tools/list_changed") cb();
+    });
+  }
+
+  async listResources(): Promise<McpResource[]> {
+    const raw = boundArrayField(
+      await this.rpc.request("resources/list", {}),
+      "resources",
+      MAX_RESOURCES,
+    );
+    const parsed = ListResourcesResult.safeParse(raw);
+    if (!parsed.success)
+      throw new JsonRpcError(`malformed resources/list: ${parsed.error.message}`);
+    return parsed.data.resources;
+  }
+
+  /** A resource's contents as bounded text (binary parts are described, not included). */
+  async readResource(uri: string): Promise<string> {
+    const raw = boundArrayField(
+      await this.rpc.request("resources/read", { uri }, this.callTimeoutMs),
+      "contents",
+      MAX_CONTENT_PARTS,
+    );
+    const parsed = ReadResourceResult.safeParse(raw);
+    if (!parsed.success)
+      throw new JsonRpcError(`malformed resources/read: ${parsed.error.message}`);
+    const text = parsed.data.contents
+      .map((c) =>
+        typeof c.text === "string"
+          ? c.text
+          : `[binary ${c.mimeType ?? "data"}, ${Math.floor(((c.blob ?? "").length * 3) / 4)} bytes]`,
+      )
+      .join("\n")
+      .trim();
+    return text.length > MAX_RESULT_CHARS ? `${text.slice(0, MAX_RESULT_CHARS)}…` : text;
+  }
+
+  async listPrompts(): Promise<McpPrompt[]> {
+    const raw = boundArrayField(await this.rpc.request("prompts/list", {}), "prompts", MAX_PROMPTS);
+    const parsed = ListPromptsResult.safeParse(raw);
+    if (!parsed.success) throw new JsonRpcError(`malformed prompts/list: ${parsed.error.message}`);
+    return parsed.data.prompts;
+  }
+
+  /** A prompt's messages flattened to text (what gets sent as the user's task). */
+  async getPrompt(name: string, args: Record<string, string>): Promise<string> {
+    const raw = boundArrayField(
+      await this.rpc.request("prompts/get", { name, arguments: args }, this.callTimeoutMs),
+      "messages",
+      MAX_CONTENT_PARTS,
+    );
+    const parsed = GetPromptResult.safeParse(raw);
+    if (!parsed.success) throw new JsonRpcError(`malformed prompts/get: ${parsed.error.message}`);
+    const text = parsed.data.messages
+      .map((m) => (typeof m.content.text === "string" ? m.content.text : `[${m.content.type}]`))
+      .join("\n\n")
+      .trim();
+    return text.length > MAX_RESULT_CHARS ? `${text.slice(0, MAX_RESULT_CHARS)}…` : text;
   }
 
   /** Discover the server's tools (count-bounded BEFORE validation, then validated). */

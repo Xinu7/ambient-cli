@@ -1,5 +1,5 @@
 import { type McpServerSpec, loadMcpConfig } from "@amb/context";
-import { McpHttpError, startMcpServers } from "@amb/mcp";
+import { McpHttpError, type McpPromptEntry, startMcpServers } from "@amb/mcp";
 import type { ToolDefinition } from "@amb/protocol";
 
 /** Where a configured server stands after connecting. */
@@ -14,10 +14,22 @@ export interface McpServerStatus {
 
 export interface McpConnection {
   tools: ToolDefinition[];
+  /** The tools as they are now (servers can announce a changed list). */
+  currentTools: () => ToolDefinition[];
   close: () => void;
   notices: string[];
   servers: McpServerStatus[];
+  prompts: McpPromptEntry[];
+  getPrompt: (server: string, name: string, args: Record<string, string>) => Promise<string>;
 }
+
+const NOTHING = {
+  tools: [] as ToolDefinition[],
+  currentTools: () => [] as ToolDefinition[],
+  close: () => {},
+  prompts: [] as McpPromptEntry[],
+  getPrompt: () => Promise.reject(new Error("no MCP servers are connected")),
+};
 
 /** Sign-in for remote servers: a stored access token to send, and a refreshed one after a 401. */
 export interface McpAuthPort {
@@ -50,7 +62,7 @@ export async function connectMcp(
   const specs = opts.load
     ? opts.load()
     : loadMcpConfig(workspaceRoot, process.env, undefined, { plugins: opts.plugins === true });
-  if (specs.length === 0) return { tools: [], close: () => {}, notices: [], servers: [] };
+  if (specs.length === 0) return { ...NOTHING, notices: [], servers: [] };
 
   const notices: string[] = [];
   const usable: McpServerSpec[] = [];
@@ -87,7 +99,7 @@ export async function connectMcp(
   }
   const ordered = (): McpServerStatus[] =>
     specs.map((s) => statuses.get(s.name)).filter((x): x is McpServerStatus => x !== undefined);
-  if (usable.length === 0) return { tools: [], close: () => {}, notices, servers: ordered() };
+  if (usable.length === 0) return { ...NOTHING, notices, servers: ordered() };
 
   const auth = opts.auth;
   const configs = await Promise.all(
@@ -144,7 +156,15 @@ export async function connectMcp(
       });
     }
   }
-  return { tools: session.tools, close: session.close, notices, servers: ordered() };
+  return {
+    tools: session.tools,
+    currentTools: session.currentTools ?? (() => session.tools),
+    close: session.close,
+    notices,
+    servers: ordered(),
+    prompts: session.prompts ?? [],
+    getPrompt: session.getPrompt ?? NOTHING.getPrompt,
+  };
 }
 
 function baseStatus(s: McpServerSpec): Omit<McpServerStatus, "state" | "tools"> {

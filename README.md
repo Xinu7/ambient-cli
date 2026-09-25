@@ -98,8 +98,8 @@ rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
 - **Brings your setup.** Reads your existing `.claude/agents`, skills, slash commands, instruction files
   (`AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules`, with `@path` imports), and MCP
   servers (`.mcp.json`, `claude mcp add`, and Codex `config.toml`; stdio, Streamable HTTP and SSE; header or
-  bearer-token auth from your environment, or OAuth sign-in with `/mcp login <server>`) so what you already
-  use works on Ambient models. When your MCP servers bring more tools than the model has room for, it sees an index and loads
+  bearer-token auth from your environment, or OAuth sign-in with `/mcp login <server>`; their resources are
+  readable and their prompts run as `/mcp__server__prompt`) so what you already use works on Ambient models. When your MCP servers bring more tools than the model has room for, it sees an index and loads
   the ones it needs on demand.
 - **Hooks and permission rules, the Claude Code way.** Hook commands (`PreToolUse`, `PostToolUse`,
   `UserPromptSubmit`, `Stop`, `SubagentStop`, `SessionStart`, `SessionEnd`, `PreCompact`, `Notification`)
