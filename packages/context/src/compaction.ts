@@ -1,4 +1,4 @@
-import { UNKNOWN_OUTPUT, budgetsFor } from "@amb/reliability";
+import { UNKNOWN_OUTPUT, UNKNOWN_WINDOW, budgetsFor } from "@amb/reliability";
 import { estimateMessagesTokens } from "./tokens.js";
 
 /**
@@ -44,16 +44,17 @@ export interface CompactionConfig {
   anchorCount: number;
 }
 
+/** Used only when no window is known: the ModelProfile budgets for a conservative unknown model. */
+const UNKNOWN_BUDGETS = budgetsFor(UNKNOWN_WINDOW, UNKNOWN_OUTPUT);
 export const DEFAULT_COMPACTION: CompactionConfig = {
-  reserveTokens: 16_384,
-  keepRecentTokens: 20_000,
+  reserveTokens: UNKNOWN_BUDGETS.compactReserve,
+  keepRecentTokens: UNKNOWN_BUDGETS.keepRecent,
   anchorCount: 1,
 };
 
 /**
- * Scale the compaction retention to the SERVED model's window. The fixed 20k-recent + 16k-reserve
- * defaults can't fit a small (≤~32k) model: after a high→low switch the retained tokens alone exceed the
- * usable window, so compaction can't shrink the transcript below the ceiling and the run dead-ends in
+ * Scale the compaction retention to the SERVED model's window. Fixed retention/reserve numbers can't fit a
+ * small (≤~32k) model: after a high→low switch the retained tokens alone exceed the usable window, so compaction can't shrink the transcript below the ceiling and the run dead-ends in
  * "blocked". Deriving both from the window lets a small model retain proportionally less and continue (lossy)
  * rather than hard-block, while a large model keeps the generous defaults (the clamps cap at the defaults).
  */

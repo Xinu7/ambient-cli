@@ -8,7 +8,6 @@ const r = (id: string, avail: FleetRow["avail"] = "ready"): FleetRow => ({
   ctx: "",
   lane: "direct",
   vision: "vision:no",
-  price: "",
 });
 
 describe("fleetChanges", () => {
@@ -18,5 +17,8 @@ describe("fleetChanges", () => {
       "no longer offered: b/y",
     ]);
     expect(fleetChanges([r("a/x")], [r("a/x", "cold")])).toEqual([]);
+  });
+  it("announces nothing when there was no earlier list to compare with", () => {
+    expect(fleetChanges([], [r("a/x"), r("b/y")])).toEqual([]);
   });
 });

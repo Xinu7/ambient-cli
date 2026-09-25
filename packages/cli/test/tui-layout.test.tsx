@@ -33,7 +33,6 @@ const fleet: FleetRow[] = [
     ctx: "262k",
     lane: "direct",
     vision: "vision:no",
-    price: "",
   },
 ];
 

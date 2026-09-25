@@ -202,7 +202,6 @@ describe("App: approval interaction end to end", () => {
       ctx: "262k",
       lane: "direct" as const,
       vision: "vision:no",
-      price: "",
     },
   ];
   const catalog: CatalogModel[] = [

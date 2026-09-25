@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { CapabilityStore, laneFor, resolveRecord } from "@amb/capabilities";
 import { type CatalogModel, type Lane, availability, supportsVision } from "@amb/protocol";
+import { rankVisionModels } from "@amb/reliability";
 import { ambHome } from "@amb/sessions";
 
 export interface FleetRow {
@@ -9,7 +10,8 @@ export interface FleetRow {
   ctx: string;
   lane: Lane;
   vision: string;
-  price: string;
+  /** Order in which the vision relay would pick this model (0 = first); absent for models without vision. */
+  visionRank?: number;
 }
 
 function ctxLabel(n?: number): string {
@@ -21,11 +23,6 @@ function laneLabel(lane: Lane): string {
 }
 function visionLabel(m: CatalogModel): string {
   return supportsVision(m) ? "vision:yes" : "vision:no";
-}
-function priceLabel(m: CatalogModel): string {
-  const p = m.pricing;
-  if (!p || (p.input == null && p.output == null)) return "";
-  return `$${p.input ?? 0}/${p.output ?? 0}`;
 }
 
 const RANK: Record<FleetRow["avail"], number> = { ready: 0, unknown: 1, cold: 2 };
@@ -42,15 +39,19 @@ export function formatFleetRows(
   models: CatalogModel[],
   resolveLane: (m: CatalogModel) => Lane,
 ): FleetRow[] {
+  const visionOrder = rankVisionModels(models);
   return models
-    .map((m) => ({
-      avail: availability(m),
-      id: m.id,
-      ctx: ctxLabel(m.contextLength),
-      lane: resolveLane(m),
-      vision: visionLabel(m),
-      price: priceLabel(m),
-    }))
+    .map((m) => {
+      const rank = visionOrder.indexOf(m.id);
+      return {
+        avail: availability(m),
+        id: m.id,
+        ctx: ctxLabel(m.contextLength),
+        lane: resolveLane(m),
+        vision: visionLabel(m),
+        ...(rank >= 0 ? { visionRank: rank } : {}),
+      };
+    })
     .sort((a, b) => RANK[a.avail] - RANK[b.avail] || a.id.localeCompare(b.id));
 }
 
@@ -77,7 +78,7 @@ function defaultColor(): boolean {
   return !process.env.NO_COLOR && Boolean(process.stdout.isTTY);
 }
 
-/** Render the fleet view as terminal lines. Availability + evidence-based lane + vision + price, ready first. */
+/** Render the fleet view as terminal lines. Availability + evidence-based lane + vision, ready first. */
 export function renderFleet(
   models: CatalogModel[],
   opts: { color?: boolean; resolveLane?: (m: CatalogModel) => Lane } = {},
@@ -91,7 +92,7 @@ export function renderFleet(
   const header = `AMBIENT FLEET — ${models.length} models, ${readyCount} ready`;
   const lines: string[] = [useColor ? `${C.bold}${header}${C.reset}` : header, ""];
   for (const r of rows) {
-    const line = `${availLabel(r.avail)}  ${r.id.padEnd(idW)}  ${r.ctx.padStart(6)}  ${laneLabel(r.lane).padEnd(laneW)}  ${r.vision}${r.price ? `  ${r.price}` : ""}`;
+    const line = `${availLabel(r.avail)}  ${r.id.padEnd(idW)}  ${r.ctx.padStart(6)}  ${laneLabel(r.lane).padEnd(laneW)}  ${r.vision}`;
     lines.push(useColor ? `${colorFor(r.avail)}${line}${C.reset}` : line);
   }
   return lines;

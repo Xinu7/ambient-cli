@@ -57,3 +57,27 @@ describe("renderFleet", () => {
     expect(out.some((l) => l.includes("\x1b["))).toBe(true);
   });
 });
+
+describe("fleet display", () => {
+  it("never shows money, even when the catalog carries pricing", () => {
+    const out = renderFleet([m("a/ready", true, { pricing: { input: 0.5, output: 2 } })], {
+      color: false,
+      resolveLane: declaredLane,
+    });
+    expect(out.join("\n")).not.toMatch(/\$|0\.5/);
+  });
+  it("orders vision models the way the relay will try them", () => {
+    const rows = formatFleetRows(
+      [
+        m("v/cold", false, { inputModalities: ["text", "image"] }),
+        m("v/ready", true, { inputModalities: ["text", "image"] }),
+        m("t/text", true),
+      ],
+      declaredLane,
+    );
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(byId.get("v/ready")?.visionRank).toBe(0);
+    expect(byId.get("v/cold")?.visionRank).toBe(1);
+    expect(byId.get("t/text")?.visionRank).toBeUndefined();
+  });
+});

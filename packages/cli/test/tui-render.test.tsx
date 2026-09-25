@@ -27,7 +27,6 @@ const fleet4: FleetRow[] = Array.from({ length: 4 }, (_, i) => ({
   ctx: "262k",
   lane: "direct" as const,
   vision: "vision:no",
-  price: "",
 }));
 
 describe("tui render", () => {
@@ -680,7 +679,6 @@ describe("tui render", () => {
         ctx: "262k",
         lane: "direct",
         vision: "vision:yes",
-        price: "",
       },
       {
         avail: "cold",
@@ -688,7 +686,6 @@ describe("tui render", () => {
         ctx: "33k",
         lane: "assisted",
         vision: "vision:no",
-        price: "",
       },
     ];
     const { lastFrame, unmount } = render(

@@ -2,6 +2,7 @@ import type { CatalogModel } from "@amb/protocol";
 import { describe, expect, it } from "vitest";
 import {
   type ChatMsg,
+  DEFAULT_COMPACTION,
   budgetFromCatalog,
   buildSummaryRequest,
   compactionConfigForWindow,
@@ -126,7 +127,10 @@ describe("compactionConfigForWindow (retention scaled to the window)", () => {
     expect(cfg.keepRecentTokens + cfg.reserveTokens).toBeLessThan(32_000);
   });
   it("an invalid window falls back to the base config", () => {
-    expect(compactionConfigForWindow(0).keepRecentTokens).toBe(20_000);
+    expect(compactionConfigForWindow(0)).toEqual(DEFAULT_COMPACTION);
+    // …which is itself sized for a conservative unknown model, so it fits the smallest assumed window.
+    const d = DEFAULT_COMPACTION;
+    expect(d.keepRecentTokens + d.reserveTokens).toBeLessThan(32_768);
   });
 });
 

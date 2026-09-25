@@ -19,7 +19,6 @@ const fleet: FleetRow[] = [
     ctx: "262k",
     lane: "direct",
     vision: "vision:no",
-    price: "",
   },
   {
     avail: "cold",
@@ -27,7 +26,6 @@ const fleet: FleetRow[] = [
     ctx: "33k",
     lane: "assisted",
     vision: "vision:no",
-    price: "",
   },
   {
     avail: "ready",
@@ -35,7 +33,6 @@ const fleet: FleetRow[] = [
     ctx: "203k",
     lane: "direct",
     vision: "vision:no",
-    price: "",
   },
 ];
 

@@ -10,6 +10,9 @@ import type { CatalogModel } from "@amb/protocol";
 import type { ChatClient, ChatParams, Msg, ToolCall, TurnCompletion } from "@amb/runtime";
 
 /** The real Ambient adapter: implements the runtime's ChatClient over @amb/ambient-api. Ambient-only. */
+/** How old a cached catalog may be and still stand in when a fetch fails. */
+const STALE_LIMIT_MS = 10 * 60_000;
+
 export class AmbientChatClient implements ChatClient {
   private cached: { at: number; models: CatalogModel[] } | undefined;
   private readonly ttlMs: number;
@@ -46,7 +49,8 @@ export class AmbientChatClient implements ChatClient {
       this.cached = { at: Date.now(), models };
       return models;
     } catch (e) {
-      if (c && !signal?.aborted) return c.models; // keep working on the last good fleet
+      // Keep working on the last good fleet through a brief outage — but not on a list that's long out of date.
+      if (c && !signal?.aborted && Date.now() - c.at < STALE_LIMIT_MS) return c.models;
       throw e;
     }
   }

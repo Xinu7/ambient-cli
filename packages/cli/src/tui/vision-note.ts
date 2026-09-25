@@ -11,9 +11,10 @@ export function visionNote(
 ): string | undefined {
   if (!fleet || fleet.length === 0) return undefined;
   const short = (id: string) => id.split("/").pop() ?? id;
-  const vision = fleet.filter((r) => r.vision === "vision:yes");
-  const rank = (r: FleetRow) => (r.avail === "ready" ? 0 : r.avail === "unknown" ? 1 : 2);
-  const describer = [...vision].sort((a, b) => rank(a) - rank(b))[0];
+  // The same order the relay tries vision models in, so the note names the model that will actually look.
+  const describer = fleet
+    .filter((r) => r.visionRank !== undefined)
+    .sort((a, b) => (a.visionRank ?? 0) - (b.visionRank ?? 0))[0];
   const chosen = fleet.find((r) => r.id === requested);
   if (chosen) {
     if (chosen.vision === "vision:yes") return undefined;
