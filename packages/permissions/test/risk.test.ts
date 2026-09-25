@@ -221,3 +221,20 @@ describe("decide — autonomy brake (consecutive auto-approve cap)", () => {
     expect(d.effect).toBe("allow");
   });
 });
+
+describe("classifyToolRisk — Windows destructive commands", () => {
+  const bash = (command: string) => classifyToolRisk("bash", { command });
+  it("flags recursive deletes of a drive or profile root as critical", () => {
+    expect(bash(String.raw`rd /s /q C:\ `).level).toBe("critical");
+    expect(bash("rmdir /s /q %USERPROFILE%").level).toBe("critical");
+    expect(bash(String.raw`Remove-Item -Recurse -Force C:\Windows`).level).toBe("critical");
+    expect(bash("format D: /q").level).toBe("critical");
+    expect(bash(String.raw`C:\Windows\System32\cmd.exe /c rd /s /q C:\ `).level).not.toBe("none");
+  });
+  it("flags other recursive deletes as elevated, and leaves reads alone", () => {
+    expect(bash(String.raw`del /f /s /q build\*`).level).toBe("elevated");
+    expect(bash("Remove-Item -Recurse -Force node_modules").level).toBe("elevated");
+    expect(bash("Get-ChildItem -Recurse src").level).toBe("none");
+    expect(bash("dir /s").level).toBe("none");
+  });
+});

@@ -91,6 +91,6 @@ export function parseShellCommands(command: string): ShellCommand[] {
 
 /** The command basename (drops a leading path: `/bin/rm` → `rm`). */
 export function baseName(name: string): string {
-  const parts = name.split("/");
+  const parts = name.split(/[\\/]/); // POSIX and Windows separators
   return parts[parts.length - 1] ?? name;
 }

@@ -30,6 +30,69 @@ function isCatastrophicTarget(a: string): boolean {
   );
 }
 
+/** Windows delete targets that are catastrophic: a drive root, the user profile, or a system folder. */
+function isCatastrophicWindowsTarget(a: string): boolean {
+  const t = a.trim().replace(/^["']|["']$/g, "");
+  return (
+    /^[a-z]:[\\/]?\*?$/i.test(t) ||
+    /^(%userprofile%|\$env:userprofile|%systemroot%|\$env:systemroot|~)[\\/]?$/i.test(t) ||
+    /^[a-z]:[\\/](windows|users|program files( \(x86\))?|programdata)[\\/]?$/i.test(t)
+  );
+}
+
+/**
+ * Windows (cmd / PowerShell) destructive commands, tokenized the Windows way: backslashes are literal path
+ * separators (the POSIX tokenizer would eat them as escapes) and only double quotes group words. Wrapped
+ * commands (`cmd /c …`, `powershell -Command …`) are classified too.
+ */
+function windowsCommandRisk(command: string, risk: Risk, depth = 0): void {
+  for (const segment of command.split(/&&|\|\||[&|;\n]/)) {
+    const argv = segment.match(/"[^"]*"|\S+/g)?.map((t) => t.replace(/^"|"$/g, "")) ?? [];
+    if (argv.length === 0) continue;
+    const base = baseName(argv[0] as string)
+      .toLowerCase()
+      .replace(/\.exe$/, "");
+    if (depth < 2 && ["cmd", "powershell", "pwsh"].includes(base)) {
+      const i = argv.findIndex((a) => /^(\/c|\/k|-c|-command)$/i.test(a));
+      if (i >= 0) windowsCommandRisk(argv.slice(i + 1).join(" "), risk, depth + 1);
+      continue;
+    }
+    windowsRisk(base, argv, risk);
+  }
+}
+
+/** Classify one Windows command. `base` is lower-cased without `.exe`. */
+function windowsRisk(base: string, argv: string[], risk: Risk): void {
+  const opts = argv.slice(1).map((a) => a.toLowerCase());
+  const targets = argv.slice(1).filter((a) => !/^[-/]/.test(a));
+  const has = (...names: string[]) => opts.some((o) => names.includes(o));
+  const catastrophic = targets.some(isCatastrophicWindowsTarget);
+  if ((base === "rd" || base === "rmdir") && has("/s")) {
+    risk.add(
+      catastrophic ? "critical" : "elevated",
+      catastrophic ? "recursive delete of a drive or profile root" : "recursively deletes a folder",
+    );
+  } else if ((base === "del" || base === "erase") && has("/s")) {
+    risk.add(catastrophic ? "critical" : "elevated", "recursively deletes files");
+  } else if (
+    (base === "remove-item" || base === "ri") &&
+    has("-recurse", "-r") &&
+    has("-force", "-fo", "-f")
+  ) {
+    risk.add(
+      catastrophic ? "critical" : "elevated",
+      catastrophic ? "recursive delete of a drive or system folder" : "force-deletes a folder tree",
+    );
+  } else if (
+    base === "format" ||
+    base === "diskpart" ||
+    base === "format-volume" ||
+    base === "clear-disk"
+  ) {
+    risk.add("critical", "formats or repartitions a disk");
+  }
+}
+
 const CREDENTIAL_PATH =
   /(?:^|\/)(?:\.ssh\/|\.aws\/|\.gnupg\/|id_[rd]sa|\.env(?:$|\.)|\.npmrc|\.netrc|\.pypirc)/;
 
@@ -86,6 +149,7 @@ function classifyBash(command: string): RiskAssessment {
   const bounded = command.length > 16_000 ? command.slice(0, 16_000) : command;
   if (FORK_BOMB.test(bounded)) risk.add("critical", "looks like a fork bomb");
 
+  windowsCommandRisk(bounded, risk);
   const cmds = parseShellCommands(command);
   const effectiveNames: string[] = [];
 

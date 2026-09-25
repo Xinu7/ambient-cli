@@ -13,10 +13,36 @@ const MAX_SYMLINK_DEPTH = 40;
  * fully resolve its target (recursively) and re-verify containment before continuing.
  */
 export function resolveInWorkspace(workspaceRoot: string, p: string): string {
-  const rootReal = realpathSyncSafe(resolve(workspaceRoot));
-  const abs = isAbsolute(p) ? resolve(p) : resolve(rootReal, p);
+  const typedRoot = resolve(workspaceRoot);
+  const rootReal = realpathSyncSafe(typedRoot);
+  const input = WIN ? (fromGitBashPath(p) ?? p) : p;
+  let abs = isAbsolute(input) ? resolve(input) : resolve(rootReal, input);
+  // An absolute path may be spelled through the root AS TYPED rather than its real path (macOS /var →
+  // /private/var, a Windows junction or 8.3 short name): rebase it onto the real root before checking.
+  if (!contains(rootReal, abs) && contains(typedRoot, abs)) {
+    abs = rootReal + abs.slice(typedRoot.length);
+  }
   if (!contains(rootReal, abs)) throw new Error(`path escapes the workspace: ${p}`);
+  if (WIN && relativeSegments(rootReal, abs).some(isReservedWindowsSegment)) {
+    throw new Error(`reserved Windows file name or stream in path: ${p}`);
+  }
   return resolveChecked(rootReal, abs, 0);
+}
+
+const WIN = process.platform === "win32";
+
+/** Git Bash / MSYS spelling of a Windows path (`/c/Users/x`) → `C:\Users\x`; undefined for anything else. */
+export function fromGitBashPath(p: string): string | undefined {
+  const m = /^\/([A-Za-z])(\/.*)?$/.exec(p);
+  if (!m?.[1]) return undefined;
+  return `${m[1].toUpperCase()}:${(m[2] ?? "\\").replace(/\//g, "\\")}`;
+}
+
+/** A Windows device name (CON, NUL, COM1, …, with any extension) or an alternate data stream (`a.txt:s`). */
+export function isReservedWindowsSegment(segment: string): boolean {
+  if (segment.includes(":")) return true;
+  const stem = (segment.split(".")[0] ?? "").toUpperCase();
+  return /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(stem);
 }
 
 /**
@@ -88,13 +114,16 @@ function existsPath(p: string): boolean {
 }
 
 function contains(root: string, target: string): boolean {
-  const withSep = root.endsWith(sep) ? root : `${root}${sep}`;
-  return target === root || target.startsWith(withSep);
+  // Windows paths are case-insensitive (C:\Proj and c:\proj are the same folder).
+  const r = WIN ? root.toLowerCase() : root;
+  const t = WIN ? target.toLowerCase() : target;
+  const withSep = r.endsWith(sep) ? r : `${r}${sep}`;
+  return t === r || t.startsWith(withSep);
 }
 
 function realpathSyncSafe(p: string): string {
   try {
-    return realpathSync(p);
+    return realpathSync.native(p); // native also expands Windows 8.3 short names
   } catch {
     return p;
   }
