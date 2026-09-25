@@ -30,6 +30,7 @@ import { checkForUpdate, updateCommand } from "../update-check.js";
 import { CURRENT_VERSION } from "../version.js";
 import { App } from "./App.js";
 import { installAsciiFallback, needsAsciiFallback } from "./ascii-console.js";
+import { appendHistory, historyPath, loadHistory } from "./history.js";
 import { checkStartupKey } from "./startup-key.js";
 import type { AgentMode, Effort, Permission } from "./state.js";
 import type { AccountPort } from "./use-key-prompt.js";
@@ -226,6 +227,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       skills: skillRows,
       onTogglePin,
       account,
+      history: {
+        load: () => loadHistory(historyPath(cwd)),
+        append: (text: string) => appendHistory(historyPath(cwd), text),
+      },
       refreshFleet: async () => {
         const models = await client.fetchCatalog(undefined, { fresh: true });
         return formatFleetRows(models, laneResolver());

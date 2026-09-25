@@ -56,6 +56,7 @@ import { Banner } from "./components/Banner.js";
 import { Composer } from "./components/Composer.js";
 import { EffortPicker } from "./components/EffortPicker.js";
 import { Goal } from "./components/Goal.js";
+import { HistorySearch } from "./components/HistorySearch.js";
 import { KeyPrompt } from "./components/KeyPrompt.js";
 import { ModelPicker } from "./components/ModelPicker.js";
 import { Plan } from "./components/Plan.js";
@@ -111,6 +112,7 @@ import {
 } from "./state.js";
 import { AmbientTheme } from "./theme.js";
 import { type AccountPort, useKeyPrompt } from "./use-key-prompt.js";
+import { type HistoryPort, usePromptHistory } from "./use-prompt-history.js";
 import { visionNote } from "./vision-note.js";
 
 export interface AppDeps {
@@ -153,6 +155,8 @@ export interface AppDeps {
   refreshFleet?: () => Promise<FleetRow[] | undefined>;
   /** Pin/unpin a skill from the browser — writes the pin list at the edge; returns the new pinned state. */
   onTogglePin?: (name: string) => boolean;
+  /** Prompt history for ↑/↓ recall and Ctrl+R search, persisted at the edge per workspace. */
+  history?: HistoryPort;
 }
 
 type Action =
@@ -362,6 +366,7 @@ export function App(deps: AppDeps): ReactNode {
   );
   const busyRef = useRef(false);
   const inputRef = useRef("");
+  const hist = usePromptHistory(deps.history);
   const cursorRef = useRef(0); // read synchronously by the key handler (mirrors the input-ref pattern)
   const goalColRef = useRef<number | undefined>(undefined); // sticky column across a run of ↑/↓ moves
   const queueRef = useRef<{ text: string; attachments: ImageAttachment[] }[]>([]);
@@ -1232,6 +1237,22 @@ export function App(deps: AppDeps): ReactNode {
       return;
     }
 
+    // 2b) Ctrl+R searches previous prompts; while searching, the search line owns the keyboard.
+    if (hist.searching()) {
+      if (key.escape) setBuffer(hist.searchCancel());
+      else if (key.return) setBuffer(hist.searchAccept());
+      else if (key.ctrl && ch === "r") hist.searchOlder();
+      else if (key.backspace || key.delete) hist.searchBackspace();
+      else if (ch && !key.ctrl && !key.meta && !isAllControl(ch)) {
+        hist.searchType(normalizePastedText(ch).replace(/\s*\n\s*/g, " "));
+      }
+      return;
+    }
+    if (key.ctrl && ch === "r" && pickerRef.current === null) {
+      hist.startSearch(inputRef.current);
+      return;
+    }
+
     // Ctrl+T toggles the live model-reasoning view anytime (view-only; safe mid-run).
     if (key.ctrl && ch === "t") {
       dispatch({ t: "toggleThinking" });
@@ -1285,12 +1306,24 @@ export function App(deps: AppDeps): ReactNode {
         const next = key.upArrow
           ? moveUp(inputRef.current, cursorRef.current, w, goalColRef.current)
           : moveDown(inputRef.current, cursorRef.current, w, goalColRef.current);
-        setBuffer(inputRef.current, next);
-        return;
+        // Already at the very start (↑) or end (↓): the key moves on to prompt history instead.
+        if (next !== cursorRef.current) {
+          setBuffer(inputRef.current, next);
+          return;
+        }
       }
     }
-    if (hasRunningSubagent && arrowsFree && (key.downArrow || key.upArrow)) {
+    if (hasRunningSubagent && arrowsFree && !hist.browsing() && (key.downArrow || key.upArrow)) {
       setSubagentExpanded(key.downArrow === true);
+      return;
+    }
+    // ↑/↓ on the composer recall previous prompts (↓ past the newest gives back the unsent draft).
+    if (arrowsFree && !key.ctrl && !key.meta && (key.upArrow || key.downArrow)) {
+      const text = key.upArrow ? hist.older(inputRef.current) : hist.newer();
+      if (text !== undefined) {
+        setBuffer(text);
+        goalColRef.current = undefined;
+      }
       return;
     }
 
@@ -1474,6 +1507,7 @@ export function App(deps: AppDeps): ReactNode {
       // Allow an image-only send (attachment + no text) — a common "look at this" flow.
       if (!task && !canRunPlan && !canApprovePlan && !hasAttach) return;
       const attach = attachmentsRef.current;
+      if (task && !(busyRef.current && cancellingRef.current)) hist.record(task);
       if (busyRef.current) {
         if (cancellingRef.current) return;
         if (!task && !hasAttach) return;
@@ -1511,6 +1545,7 @@ export function App(deps: AppDeps): ReactNode {
         : deleteBackAt(inputRef.current, cursorRef.current);
       setBuffer(r.text, r.cursor);
       goalColRef.current = undefined;
+      hist.stopBrowsing();
       return;
     }
     // A MULTI-char burst (a paste / drag-drop). Normalize it FIRST — strip bracketed-paste markers + stray
@@ -1534,6 +1569,7 @@ export function App(deps: AppDeps): ReactNode {
       const ins = insertAt(inputRef.current, cursorRef.current, burst);
       setBuffer(ins.text, ins.cursor);
       goalColRef.current = undefined;
+      hist.stopBrowsing();
     }
   });
 
@@ -1770,27 +1806,30 @@ export function App(deps: AppDeps): ReactNode {
             ) : (
               // The composer IS the single plan-review surface (one clear prompt, no second overlapping
               // banner): in plan-review it shows a "PLAN READY" header + a signal border; Enter approves.
-              <Composer
-                value={input}
-                cursor={cursor}
-                running={runActive}
-                width={width}
-                agentMode={state.status.agentMode}
-                maxRows={composerMaxRows}
-                attachments={attachments}
-                visionNote={
-                  attachments.length > 0
-                    ? visionNote(state.status.requestedModel, fleet)
-                    : undefined
-                }
-                planReview={planAwaitingReview}
-                planReviewSteps={state.plan.filter((t) => t.status !== "done").length}
-                planReady={
-                  !runActive &&
-                  state.status.agentMode === "build" &&
-                  state.plan.some((t) => t.status !== "done")
-                }
-              />
+              <Box flexDirection="column">
+                {hist.search ? <HistorySearch search={hist.search} width={width} /> : null}
+                <Composer
+                  value={input}
+                  cursor={cursor}
+                  running={runActive}
+                  width={width}
+                  agentMode={state.status.agentMode}
+                  maxRows={composerMaxRows}
+                  attachments={attachments}
+                  visionNote={
+                    attachments.length > 0
+                      ? visionNote(state.status.requestedModel, fleet)
+                      : undefined
+                  }
+                  planReview={planAwaitingReview}
+                  planReviewSteps={state.plan.filter((t) => t.status !== "done").length}
+                  planReady={
+                    !runActive &&
+                    state.status.agentMode === "build" &&
+                    state.plan.some((t) => t.status !== "done")
+                  }
+                />
+              </Box>
             )}
           </Box>
           <Box flexShrink={0}>

@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
+import { fuzzyRank } from "../fuzzy.js";
 import { AmbientTheme } from "../theme.js";
 
 export interface SlashCommand {
@@ -51,12 +52,30 @@ export function matchSlash(input: string, extra: SlashCommand[] = []): SlashComm
     seen.add(name);
     matched.push(c);
   }
+  if (matched.length === 0 && isFuzzyToken(token)) return fuzzySlash(token, extra);
   // Exact match first, then the rest in their original (builtins-then-discovered) order.
   return matched.sort((a, b) => {
     const ae = a.name.slice(1).toLowerCase() === token ? 0 : 1;
     const be = b.name.slice(1).toLowerCase() === token ? 0 : 1;
     return ae - be;
   });
+}
+
+/** Loose matching is for command-shaped typos only: a path (`/tmp/x`, `/Users/me`) must never pick a command. */
+function isFuzzyToken(token: string): boolean {
+  return token.length >= 2 && /^[a-z0-9:_-]+$/.test(token);
+}
+
+/** No prefix hit → rank every command by a loose in-order match of the name (e.g. `/cmpt` → `/compact`). */
+function fuzzySlash(token: string, extra: SlashCommand[]): SlashCommand[] {
+  const seen = new Set<string>();
+  const unique = [...SLASH_COMMANDS, ...extra].filter((c) => {
+    const name = c.name.toLowerCase();
+    if (seen.has(name)) return false;
+    seen.add(name);
+    return true;
+  });
+  return fuzzyRank(token, unique, (c) => c.name.slice(1));
 }
 
 /**
