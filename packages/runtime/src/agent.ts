@@ -53,6 +53,7 @@ import {
   sanitizeContinuation,
   stringifyResult,
   stubCarriedImages,
+  stubImageParts,
   withGoalReminder,
   withTurnBudget,
 } from "./agent-support.js";
@@ -466,6 +467,46 @@ export class Agent {
         if (!text) continue;
         messages.push({ role: "user", content: text });
         emit({ schemaVersion: 1, kind: "steer", sessionId, turnId, text });
+      }
+
+      // ── mid-run MODEL SWITCH (/model while a run is flying): applied at this turn boundary, then everything
+      // below re-fits to the new model — its window (anchor + compaction), its lane, its effort support, and
+      // image parts (stubbed if it can't see them). ──
+      const switchTo = opts.nextModel?.();
+      if (switchTo && switchTo !== target) {
+        try {
+          liveCatalog = await this.client.fetchCatalog(opts.signal); // the fleet may have changed since launch
+        } catch {
+          // keep the catalog we have
+        }
+        const resolved = resolveRequestedModel(switchTo, liveCatalog)?.target ?? switchTo;
+        if (resolved !== target) {
+          const from = target;
+          target = resolved;
+          const next = liveCatalog.find((m) => m.id === target);
+          if (!next || !supportsVision(next)) {
+            messages = stubImageParts(messages, `— not visible to ${target}`);
+            imageTokensFn = undefined;
+          }
+          const nextWindow = profileOf(target).window;
+          anchorWindow = nextWindow;
+          baseSystem = buildBaseAnchor(nextWindow);
+          messages[0] = {
+            role: "system",
+            content: currentPlanBlock ? `${baseSystem}\n\n${currentPlanBlock}` : baseSystem,
+          };
+          emit({
+            schemaVersion: 1,
+            kind: "handoff",
+            sessionId,
+            turnId,
+            from,
+            to: target,
+            role: "user",
+            reason: "you switched models",
+            lane: this.laneOf(target, liveCatalog, opts.capabilities),
+          });
+        }
       }
 
       // ── context management: compact if we're near the window. Counts toward MAX_COMPACTIONS. ──

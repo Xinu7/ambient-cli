@@ -289,6 +289,17 @@ export function TranscriptRow({
     }
 
     case "handoff":
+      // The user's own mid-run switch reads as a calm receipt, not a failover.
+      if (item.role === "user") {
+        return (
+          <Box marginTop={1}>
+            <Text color={AmbientTheme.signal}>↪ </Text>
+            <Text color={AmbientTheme.dim} wrap="truncate">
+              {clip(`switched to ${item.to} — continuing from here`, Math.max(1, width - 2))}
+            </Text>
+          </Box>
+        );
+      }
       // A role handoff (planner→executor→…) — distinct glyph ⇢ from the ↪ substitution receipt below.
       return (
         <Box marginTop={1}>

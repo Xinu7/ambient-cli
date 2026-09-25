@@ -198,6 +198,9 @@ export interface RunOptions {
   effort?: EffortSetting;
   /** The level the previous run in this session used, so a short "continue" keeps it under `auto`. */
   priorEffort?: ReasoningLevel;
+  /** Polled at each turn boundary: a model id the user switched to mid-run (e.g. /model), consumed once. The
+   *  switch applies from the next turn and re-fits the conversation to the new model. */
+  nextModel?: () => string | undefined;
   /** Polled at each turn boundary: true makes the NEXT turn the final, tool-free wrap-up (e.g. a subagent
    *  past its soft deadline reports what it found instead of being killed mid-work). */
   wrapUp?: () => boolean;

@@ -267,6 +267,8 @@ export function App(deps: AppDeps): ReactNode {
   // Set when a session's FIRST run died on a rejected key before doing anything: its only logged turn is that
   // failed attempt, so the retry must not rebuild context from the log (it would carry the task twice).
   const skipLogReplayRef = useRef(false);
+  // A model chosen while a run is flying — handed to the agent at its next turn boundary, then cleared.
+  const pendingSwitchRef = useRef<string | undefined>(undefined);
   // Discover the user's existing Claude/Codex slash commands ONCE — their names join the palette, their
   // bodies (with $ARGUMENTS/$1 expansion) run as a task on dispatch.
   const customCommands = useMemo(() => {
@@ -676,6 +678,11 @@ export function App(deps: AppDeps): ReactNode {
           readArtifact: (handle) => readObject(sessionId, handle),
           effort: effortRef.current,
           ...(lastEffortRef.current ? { priorEffort: lastEffortRef.current } : {}),
+          nextModel: () => {
+            const m = pendingSwitchRef.current;
+            pendingSwitchRef.current = undefined;
+            return m;
+          },
         };
 
         // Build the registry with the `subagent` tool per-run, capturing THIS run's mode/approver/verify.
@@ -872,24 +879,28 @@ export function App(deps: AppDeps): ReactNode {
     setBuffer("");
   };
 
+  /** Pick a model: the next run uses it, and a run in flight switches to it at its next step. */
+  const chooseModel = (id: string): void => {
+    modelRef.current = id;
+    dispatch({ t: "model", model: id });
+    if (busyRef.current) {
+      pendingSwitchRef.current = id;
+      dispatch({ t: "notice", level: "info", text: `switching to ${id} at the next step…` });
+    } else {
+      dispatch({ t: "notice", level: "info", text: `model → ${id}` });
+    }
+  };
+
   const runSlash = (command: SlashCommand, arg: string): void => {
     // Config commands change what the NEXT run does — refuse them mid-run so the flightline never
     // misrepresents the run that's already flying (its mode/permission/model were captured at launch).
-    const CONFIG = new Set([
-      "/model",
-      "/models",
-      "/effort",
-      "/plan",
-      "/build",
-      "/ask",
-      "/accept",
-      "/bypass",
-    ]);
+    // (/model is allowed mid-run: the switch applies at the next step and the agent re-fits to the new model.)
+    const CONFIG = new Set(["/effort", "/plan", "/build", "/ask", "/accept", "/bypass"]);
     if (busyRef.current && CONFIG.has(command.name)) {
       dispatch({
         t: "notice",
         level: "warn",
-        text: "finish or cancel the current run first (esc) to change mode/model",
+        text: "finish or cancel the current run first (esc) to change mode or effort",
       });
       setBuffer("");
       return;
@@ -932,9 +943,7 @@ export function App(deps: AppDeps): ReactNode {
       }
       case "/model":
         if (arg) {
-          modelRef.current = arg;
-          dispatch({ t: "model", model: arg });
-          dispatch({ t: "notice", level: "info", text: `model → ${arg}` });
+          chooseModel(arg.trim());
           setBuffer(""); // openModelPicker clears the else-branch; the arg branch must too
         } else {
           openModelPicker();
@@ -1278,11 +1287,7 @@ export function App(deps: AppDeps): ReactNode {
       }
       if (key.return) {
         const row = list[pickerSelRef.current];
-        if (row) {
-          modelRef.current = row.id;
-          dispatch({ t: "model", model: row.id });
-          dispatch({ t: "notice", level: "info", text: `model → ${row.id}` });
-        }
+        if (row) chooseModel(row.id);
         setPicker(null);
         return;
       }

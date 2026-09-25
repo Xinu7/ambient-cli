@@ -97,17 +97,24 @@ export function withTurnBudget(
  * blind model the stale parts would make every request 400.
  */
 export function stubCarriedImages(msgs: readonly Msg[]): Msg[] {
+  // A carried message is history: an earlier run's pinned task is no longer the current one.
+  return stubImageParts(
+    msgs.map((m) => (m.pinned ? { ...m, pinned: undefined } : m)),
+    "from an earlier message — not re-sent",
+  );
+}
+
+/** Replace every image part with a numbered text stub (`[image #N <note>]`), keeping all other fields. */
+export function stubImageParts(msgs: readonly Msg[], note: string): Msg[] {
   let n = 0;
-  return msgs.map((msg) => {
-    // A carried message is history: an earlier run's pinned task is no longer the current one.
-    const m: Msg = msg.pinned ? { ...msg, pinned: undefined } : msg;
+  return msgs.map((m) => {
     if (!Array.isArray(m.content)) return m;
     const parts = m.content as Array<{ type?: string; text?: string }>;
     if (!parts.some((p) => p?.type === "image_url")) return m;
     const text = parts
       .map((p) =>
         p?.type === "image_url"
-          ? `[image #${++n} from an earlier message — not re-sent]`
+          ? `[image #${++n} ${note}]`
           : typeof p?.text === "string"
             ? p.text
             : "",
