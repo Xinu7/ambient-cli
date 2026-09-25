@@ -33,9 +33,10 @@ import { ToolRegistry, createBuiltinRegistry, resolveInWorkspace } from "@amb/to
 import { AmbientChatClient } from "../agent/ambient-client.js";
 import { makeCapabilityPort } from "../agent/capability-port.js";
 import { makeVerifyPort } from "../agent/verify-port.js";
+import { resolveWorkingApiKey } from "../agent/working-key.js";
 import { makeWorkspaceContextPort } from "../agent/workspace-context-port.js";
 import { bold, dim } from "../render/color.js";
-import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
+import { NOT_SIGNED_IN } from "../secrets.js";
 
 /** Per-task wall-clock deadline: bounds a stalled catalog/SSE that `maxTurns` (iteration count) can't (MED#3). */
 const TASK_DEADLINE_MS = 300_000;
@@ -189,7 +190,10 @@ export async function runEval(args: string[]): Promise<void> {
     return;
   }
 
-  const apiKey = resolveApiKey();
+  // A rejected saved key falls back to another key on this machine that works (and says so).
+  const working = await resolveWorkingApiKey(resolveConfig().baseUrl);
+  if (working?.note) process.stderr.write(`${working.note}\n`);
+  const apiKey = working?.key;
   if (!apiKey) {
     process.stderr.write(`${NOT_SIGNED_IN}\n`);
     process.exitCode = 1;

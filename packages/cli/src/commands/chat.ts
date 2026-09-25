@@ -8,8 +8,9 @@ import {
 import { budgetFromCatalog, estimateTokens, preflight } from "@amb/context";
 import { AmbError } from "@amb/protocol";
 import { profileFor, resolveRequestedModel, streamTimeouts } from "@amb/reliability";
+import { resolveWorkingApiKey } from "../agent/working-key.js";
 import { cyan, dim } from "../render/color.js";
-import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
+import { NOT_SIGNED_IN } from "../secrets.js";
 import { mergeStdin, readPipedStdin } from "./stdin.js";
 
 const SYSTEM =
@@ -76,7 +77,10 @@ export async function runChat(args: string[]): Promise<void> {
     return;
   }
 
-  const apiKey = resolveApiKey();
+  // A rejected saved key falls back to another key on this machine that works (and says so).
+  const working = await resolveWorkingApiKey(resolveConfig().baseUrl);
+  if (working?.note) process.stderr.write(`${working.note}\n`);
+  const apiKey = working?.key;
   if (!apiKey) {
     process.stderr.write(`${onboarding()}\n`);
     process.exitCode = 1;

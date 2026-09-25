@@ -248,7 +248,8 @@ function appReducer(state: ViewState, action: Action): ViewState {
             ...clearTranscript(state),
             plan: [],
             contextWarned: undefined,
-            status: { ...state.status, usage: undefined },
+            // A fresh conversation starts its token counts from zero too.
+            status: { ...state.status, usage: undefined, tokensUsed: undefined },
           }
         : clearTranscript(state);
   }

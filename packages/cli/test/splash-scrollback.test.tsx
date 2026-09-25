@@ -61,3 +61,42 @@ describe("splash and scrollback", () => {
     unmount();
   });
 });
+
+describe("/clear", () => {
+  it("starts the token counts over", async () => {
+    const client = {
+      fetchCatalog: async () => catalog,
+      chat: async (): Promise<TurnCompletion> =>
+        ({
+          content: "PONG",
+          toolCalls: [],
+          usage: { promptTokens: 5_000, completionTokens: 100 },
+        }) as TurnCompletion,
+    } as unknown as ChatClient;
+    const { stdin, lastFrame, unmount } = render(
+      <App
+        client={client}
+        makeWriter={(id: string) => new SessionWriter(id, () => new Date().toISOString())}
+        agentMode="build"
+        permission="bypass"
+        effort="auto"
+        requestedModel="vendor/m"
+        maxTurns={5}
+        cwd="/w"
+        workspaceRoot="/w"
+      />,
+    );
+    const send = async (text: string) => {
+      for (const ch of text) stdin.write(ch);
+      await settle(40);
+      stdin.write("\r");
+      await settle(200);
+    };
+    await settle(40);
+    await send("ping");
+    expect(lastFrame()).toMatch(/5\.1k tok/);
+    await send("/clear");
+    expect(lastFrame()).not.toMatch(/5\.1k tok/);
+    unmount();
+  });
+});

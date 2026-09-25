@@ -9,8 +9,9 @@ import { CapabilityStore, laneFor, probedRecord, resolveRecord } from "@amb/capa
 import { AmbError, type CatalogModel } from "@amb/protocol";
 import { streamTimeouts } from "@amb/reliability";
 import { ambHome } from "@amb/sessions";
+import { resolveWorkingApiKey } from "../agent/working-key.js";
 import { bold, dim } from "../render/color.js";
-import { NOT_SIGNED_IN, resolveApiKey } from "../secrets.js";
+import { NOT_SIGNED_IN } from "../secrets.js";
 
 /** A minimal tool the probe asks the model to call, to test native tool-calling. */
 const PROBE_TOOL = {
@@ -67,7 +68,10 @@ export async function runProbe(args: string[]): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  const apiKey = resolveApiKey();
+  // A rejected saved key falls back to another key on this machine that works (and says so).
+  const working = await resolveWorkingApiKey(resolveConfig().baseUrl);
+  if (working?.note) process.stderr.write(`${working.note}\n`);
+  const apiKey = working?.key;
   if (!apiKey) {
     process.stderr.write(`${NOT_SIGNED_IN}\n`);
     process.exitCode = 1;
