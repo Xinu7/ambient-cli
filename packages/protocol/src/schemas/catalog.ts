@@ -113,8 +113,10 @@ export function supportsVision(m: Pick<CatalogModel, "inputModalities">): boolea
 export const CatalogResponseSchema = z
   .object({
     object: z.string().optional(),
-    data: z.array(RawCatalogModelSchema).optional(),
-    models: z.array(RawCatalogModelSchema).optional(),
+    // Rows are validated ONE BY ONE in normalizeCatalog: a single malformed (or newer-shaped) model entry is
+    // skipped instead of failing the whole catalog.
+    data: z.array(z.unknown()).optional(),
+    models: z.array(z.unknown()).optional(),
   })
   .refine((r) => r.data !== undefined || r.models !== undefined, {
     message: "catalog response missing a data/models envelope",
@@ -126,8 +128,10 @@ export function normalizeCatalog(res: CatalogResponse): CatalogModel[] {
   const rows = res.data ?? res.models ?? [];
   const seen = new Set<string>();
   const out: CatalogModel[] = [];
-  for (const raw of rows) {
-    const m = normalizeCatalogModel(raw);
+  for (const row of rows) {
+    const parsed = RawCatalogModelSchema.safeParse(row);
+    if (!parsed.success) continue; // a malformed row never takes the rest of the fleet down with it
+    const m = normalizeCatalogModel(parsed.data);
     if (seen.has(m.id)) continue;
     seen.add(m.id);
     out.push(m);

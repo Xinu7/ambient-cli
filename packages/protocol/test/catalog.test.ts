@@ -61,3 +61,37 @@ describe("normalizeCatalog", () => {
     expect(list[1]?.isReady).toBe(true);
   });
 });
+
+describe("forward compatibility", () => {
+  it("one malformed model row is skipped — it never breaks the whole catalog", async () => {
+    const { CatalogResponseSchema, normalizeCatalog } = await import("../src/index.js");
+    const res = CatalogResponseSchema.parse({
+      object: "list",
+      data: [
+        { id: "good/one", context_length: 32768 },
+        { name: "no id at all" },
+        { id: "", context_length: 1 },
+        {
+          id: "good/two",
+          context_length: "1048576",
+          supported_features: ["tools", "future_feature"],
+        },
+      ],
+    });
+    const models = normalizeCatalog(res);
+    expect(models.map((m) => m.id)).toEqual(["good/one", "good/two"]);
+    expect(models[1]?.contextLength).toBe(1_048_576);
+    expect(models[1]?.supportedFeatures).toContain("future_feature");
+  });
+  it("unknown new fields and modalities pass through parsing without error", async () => {
+    const { CatalogResponseSchema, normalizeCatalog } = await import("../src/index.js");
+    const models = normalizeCatalog(
+      CatalogResponseSchema.parse({
+        data: [
+          { id: "v/omni", input_modalities: ["text", "image", "video"], brand_new_field: { x: 1 } },
+        ],
+      }),
+    );
+    expect(models[0]?.inputModalities).toEqual(["text", "image", "video"]);
+  });
+});
