@@ -116,9 +116,10 @@ describe("plan review — a prominent approve/revise prompt when a plan is ready
     // Exactly one plan-review affordance — the separate bordered banner is gone, so "PLAN READY" appears once.
     expect((banner.match(/Plan ready/g) ?? []).length).toBe(1);
 
-    // Empty Enter APPROVES → flips to Build and executes the plan.
+    // Empty Enter APPROVES → flips to Build and executes the plan (DONE3 = the build run's answer; DONE2 was
+    // the plan run's).
     stdin.write("\r");
-    await waitFor(lastFrame, "DONE");
+    await waitFor(lastFrame, "DONE3");
 
     // The approving run ran in BUILD mode and its instruction is to execute the prepared plan.
     expect(modes[modes.length - 1]).toBe("build");

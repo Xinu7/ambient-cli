@@ -188,4 +188,23 @@ describe("learned request outcomes", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("survives a tool-calling evidence write (learn → put)", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { CapabilityStore } = await import("../src/index.js");
+    const dir = mkdtempSync(join(tmpdir(), "amb-cap-"));
+    try {
+      const s = new CapabilityStore(join(dir, "caps.json"));
+      for (let i = 0; i < 3; i++) s.recordOutcome("m/x", true, 1_000);
+      s.put(learnedRecord("m/x", true, Date.now()));
+      const rec = s.get("m/x");
+      expect(rec?.samples).toBe(3);
+      expect(rec?.okRate).toBe(1);
+      expect(rec?.latencyMs).toBe(1_000);
+      expect(rec?.toolCalling).toBe("yes");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

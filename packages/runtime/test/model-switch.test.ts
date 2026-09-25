@@ -17,6 +17,15 @@ const readCall = (n: number) => ({
   toolCalls: [{ id: `tc_${n}`, name: "list", args: { path: "." }, rawArgs: "{}" }],
 });
 
+const IMG = {
+  id: "img1",
+  mediaType: "image/png" as const,
+  dataBase64: "iVBORw0KGgo=",
+  bytes: 8,
+  sha256: "abc",
+  source: "file" as const,
+};
+
 describe("switching models mid-run", () => {
   it("applies a /model switch at the next turn boundary and says so", async () => {
     const events: NewEvent[] = [];
@@ -106,29 +115,25 @@ describe("switching models mid-run", () => {
     }
   });
 
-  it("switching from a vision model to a blind one stubs the image parts (no 400)", async () => {
+  it("switching from a vision model to a blind one has the image described for it (no 400)", async () => {
     let pending: string | undefined;
     const client = new FixtureClient(catalogOf(VISION_32K, TEXT_200K), [
-      (p) => {
+      () => {
         pending = TEXT_200K.id;
         return readCall(1);
       },
+      // The vision model describes the image for the blind one at the switch.
+      { content: "A dialog reading ERROR 4172: disk quota exceeded", toolCalls: [] },
       { content: "ok", toolCalls: [] },
     ]);
+    const events: NewEvent[] = [];
     await new Agent(client).run(
       "what's in the picture?",
       runOpts({
         requestedModel: VISION_32K.id,
-        attachments: [
-          {
-            id: "img1",
-            mediaType: "image/png",
-            dataBase64: "iVBORw0KGgo=",
-            bytes: 8,
-            sha256: "abc",
-            source: "file",
-          },
-        ],
+        emit: (e) => events.push(e),
+        attachments: [IMG],
+        sessionImages: [IMG],
         nextModel: () => {
           const m = pending;
           pending = undefined;
@@ -145,5 +150,42 @@ describe("switching models mid-run", () => {
     );
     expect(hasImage).toBe(false);
     expect(client.calls[0]?.messages.some((m) => Array.isArray(m.content))).toBe(true); // it WAS sent natively first
+    const task = blind?.messages.find((m) => m.pinned);
+    expect(String(task?.content)).toContain("ERROR 4172");
+    // The blind model can ask follow-up questions about the image.
+    expect(JSON.stringify(blind?.tools)).toContain("ask_vision");
+    expect(events.some((e) => e.kind === "vision.relay.started")).toBe(true);
+  });
+
+  it("numbers carried image stubs session-wide so they match ask_vision", async () => {
+    const client = new FixtureClient(catalogOf(TEXT_200K, VISION_32K), [
+      { content: "a chart", toolCalls: [] }, // relay description of the new image
+      { content: "ok", toolCalls: [] },
+    ]);
+    const prior: Msg[] = [
+      { role: "user", content: "[image #1 from an earlier message — not re-sent]\nfirst" },
+      { role: "assistant", content: "seen" },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "second" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+        ],
+      },
+      { role: "assistant", content: "seen too" },
+    ];
+    await new Agent(client).run(
+      "and this one?",
+      runOpts({
+        requestedModel: TEXT_200K.id,
+        priorMessages: prior,
+        attachments: [IMG],
+        sessionImages: [IMG, IMG, IMG],
+      }),
+    );
+    const sent = client.calls.find((c) => c.model === TEXT_200K.id)?.messages ?? [];
+    expect(sent.map((m) => String(m.content)).join("\n")).toContain(
+      "[image #2 from an earlier message",
+    );
   });
 });

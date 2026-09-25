@@ -59,13 +59,16 @@ export class CapabilityStore {
     ) {
       return; // keep the stronger, still-fresh evidence
     }
-    // Sticky fields (ceiling + verify stats) outlive tool-calling evidence — carry them forward when the
+    // Sticky fields (ceiling, verify stats, request outcomes) outlive tool-calling evidence — carry them forward when the
     // incoming record doesn't set them, so a `learn()` write never wipes a model's earned-autonomy record.
     const merged: CapabilityRecord = {
       ...rec,
       ceiling: rec.ceiling ?? existing?.ceiling,
       verifyRuns: rec.verifyRuns ?? existing?.verifyRuns,
       verifyFirstTryPasses: rec.verifyFirstTryPasses ?? existing?.verifyFirstTryPasses,
+      okRate: rec.okRate ?? existing?.okRate,
+      latencyMs: rec.latencyMs ?? existing?.latencyMs,
+      samples: rec.samples ?? existing?.samples,
     };
     this.records.set(rec.modelId, merged);
     this.persist();

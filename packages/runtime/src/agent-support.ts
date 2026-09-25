@@ -108,17 +108,31 @@ export function withTurnBudget(
  * message they were attached to: re-sending base64 every turn wastes the window, and after a switch to a
  * blind model the stale parts would make every request 400.
  */
-export function stubCarriedImages(msgs: readonly Msg[]): Msg[] {
+export function stubCarriedImages(msgs: readonly Msg[], firstNumber = 0): Msg[] {
   // A carried message is history: an earlier run's pinned task is no longer the current one.
   return stubImageParts(
     msgs.map((m) => (m.pinned ? { ...m, pinned: undefined } : m)),
     "from an earlier message — not re-sent",
+    firstNumber,
   );
 }
 
-/** Replace every image part with a numbered text stub (`[image #N <note>]`), keeping all other fields. */
-export function stubImageParts(msgs: readonly Msg[], note: string): Msg[] {
+/** How many image parts are still inline in `msgs`. */
+export function countImageParts(msgs: readonly Msg[]): number {
   let n = 0;
+  for (const m of msgs) {
+    if (!Array.isArray(m.content)) continue;
+    for (const p of m.content as Array<{ type?: string }>) if (p?.type === "image_url") n++;
+  }
+  return n;
+}
+
+/**
+ * Replace every image part with a numbered text stub (`[image #N <note>]`), keeping all other fields.
+ * Numbering starts after `firstNumber` so it matches the session-wide image numbers `ask_vision` uses.
+ */
+export function stubImageParts(msgs: readonly Msg[], note: string, firstNumber = 0): Msg[] {
+  let n = firstNumber;
   return msgs.map((m) => {
     if (!Array.isArray(m.content)) return m;
     const parts = m.content as Array<{ type?: string; text?: string }>;

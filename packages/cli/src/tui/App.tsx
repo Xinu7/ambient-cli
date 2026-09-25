@@ -561,6 +561,7 @@ export function App(deps: AppDeps): ReactNode {
     async (task: string, attach: ImageAttachment[] = []) => {
       if (busyRef.current) return;
       busyRef.current = true;
+      pendingSwitchRef.current = undefined; // a switch picked during an earlier run already set modelRef
       runStartRef.current = Date.now();
       setTick(0);
       setRunActive(true);
@@ -576,6 +577,7 @@ export function App(deps: AppDeps): ReactNode {
         writerRef.current = deps.makeWriter(sessionIdRef.current);
         persistedGoalRef.current = undefined; // a fresh session log hasn't recorded the goal yet
         conversationRef.current = []; // a fresh session starts with no carried-forward conversation
+        sessionImagesRef.current = []; // image numbers restart with the session
       }
       const sessionId = sessionIdRef.current;
       const writer = writerRef.current;
@@ -743,7 +745,6 @@ export function App(deps: AppDeps): ReactNode {
         if (result.messages && result.messages.length > 1) {
           conversationRef.current = result.messages.slice(1);
           skipLogReplayRef.current = false;
-          sessionImagesRef.current = [];
         }
         dispatch({ t: "stop", stopReason: result.stopReason });
       } catch (err) {
@@ -922,6 +923,7 @@ export function App(deps: AppDeps): ReactNode {
       pendingSwitchRef.current = id;
       dispatch({ t: "notice", level: "info", text: `switching to ${id} at the next step…` });
     } else {
+      pendingSwitchRef.current = undefined;
       dispatch({ t: "notice", level: "info", text: `model → ${id}` });
     }
   };

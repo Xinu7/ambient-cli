@@ -51,6 +51,7 @@ import {
   SUMMARY_MARKER,
   capToolResult,
   catalogHash,
+  countImageParts,
   fallbackModel,
   flattenNativeToolTurns,
   isAbortError,
@@ -228,12 +229,16 @@ export class Agent {
     // A model that can't see images gets `ask_vision` whenever the session has images: it can ask a vision
     // model targeted follow-up questions instead of relying only on the one-time description.
     this.sessionImages = opts.sessionImages ?? opts.attachments ?? [];
-    const served = liveCatalog.find((m) => m.id === target);
-    if (
-      this.sessionImages.length > 0 &&
-      !(served && supportsVision(served)) &&
-      !this.registry.has("ask_vision")
-    ) {
+    /** Offer `ask_vision` when the model being served can't see the session's images (also after a switch). */
+    const ensureAskVision = (servedId: string): boolean => {
+      const served = liveCatalog.find((m) => m.id === servedId);
+      if (
+        this.sessionImages.length === 0 ||
+        (served && supportsVision(served)) ||
+        this.registry.has("ask_vision")
+      ) {
+        return false;
+      }
       this.registry.register(
         makeAskVisionTool({
           client: this.client,
@@ -242,13 +247,18 @@ export class Agent {
           targetWindow: () => profileOf(target).window,
         }),
       );
-    }
-    const advertisedTools =
-      opts.mode === "plan"
-        ? this.registry.list().filter((t) => t.manifest.effects.every((e) => e === "read"))
-        : this.registry.list();
-    const tools = toOpenAITools(advertisedTools);
-    const toolTokens = estimateTokens(JSON.stringify(tools));
+      return true;
+    };
+    ensureAskVision(target);
+    const advertise = () => {
+      const list =
+        opts.mode === "plan"
+          ? this.registry.list().filter((t) => t.manifest.effects.every((e) => e === "read"))
+          : this.registry.list();
+      return toOpenAITools(list);
+    };
+    let tools = advertise();
+    let toolTokens = estimateTokens(JSON.stringify(tools));
 
     // Warm-continue resume: prior-session context is injected into the SYSTEM prompt, so the message
     // anchor stays (system + the new instruction) and compaction can never summarize the goal away.
@@ -365,79 +375,94 @@ export class Agent {
     const estimateOpts = (): { imageTokens?: (part: unknown) => number } =>
       imageTokensFn ? { imageTokens: imageTokensFn } : {};
     const attachments = opts.attachments ?? [];
-    if (attachments.length > 0) {
-      const relayViaText = async (reason: "blind" | "no-fit"): Promise<void> => {
+    /**
+     * The task message's content for a given served model: images as parts when it can see them and they fit
+     * its window, otherwise a text description from a vision model (the relay). Re-run after a model switch.
+     */
+    const prepareTaskContent = async (
+      modelId: string,
+      window: number,
+    ): Promise<{ content: string | ContentPart[]; imageTokens?: (part: unknown) => number }> => {
+      if (attachments.length === 0) return { content: userInput };
+      const relayViaText = async (): Promise<{ content: string }> => {
         const relay = await relayImageToText({
           client: this.client,
           catalog: liveCatalog,
           imageDataUris: attachments.map(toDataUri),
           userText: userInput,
           signal: opts.signal,
-          targetWindow: modelWindow,
+          targetWindow: window,
           onAttempt: (visionModel, imageCount) =>
             emit({
               schemaVersion: 1,
               kind: "vision.relay.started",
               sessionId,
               turnId,
-              targetModel: target,
+              targetModel: modelId,
               visionModel,
               imageCount,
             }),
         });
-        firstUserContent = injectDescription(userInput, relay);
         emit({
           schemaVersion: 1,
           kind: "vision.relay",
           sessionId,
           turnId,
-          targetModel: target,
+          targetModel: modelId,
           imageCount: attachments.length,
           outcome: relay.outcome,
           ...(relay.visionModel ? { visionModel: relay.visionModel } : {}),
           ...(relay.tried && relay.tried.length > 0 ? { tried: relay.tried } : {}),
           ...(relay.description ? { descriptionChars: relay.description.length } : {}),
         });
-        void reason;
+        return { content: injectDescription(userInput, relay) };
       };
-      if (supportsVision(servedModel)) {
-        const plan = planImages(modelWindow);
-        const fit = fitImages(attachments, modelWindow, estimateTokens(userInput), plan);
-        if (fit.kept.length > 0) {
-          firstUserContent = buildUserContent(userInput, fit.kept, true);
-          imageTokensFn = () => fit.perImageTokens; // accurate per-image cost for this window's plan
-          emit({
-            schemaVersion: 1,
-            kind: "vision.relay",
-            sessionId,
-            turnId,
-            targetModel: target,
-            imageCount: fit.kept.length,
-            outcome: "native",
-          });
-        } else {
-          await relayViaText("no-fit"); // even one image can't fit this window → describe instead
-        }
-      } else {
-        await relayViaText("blind");
-      }
+      const model = liveCatalog.find((m) => m.id === modelId) ?? fallbackModel(modelId);
+      if (!supportsVision(model)) return relayViaText();
+      const fit = fitImages(attachments, window, estimateTokens(userInput), planImages(window));
+      if (fit.kept.length === 0) return relayViaText(); // even one image can't fit this window
+      emit({
+        schemaVersion: 1,
+        kind: "vision.relay",
+        sessionId,
+        turnId,
+        targetModel: modelId,
+        imageCount: fit.kept.length,
+        outcome: "native",
+      });
+      return {
+        content: buildUserContent(userInput, fit.kept, true),
+        imageTokens: () => fit.perImageTokens, // accurate per-image cost for this window's plan
+      };
+    };
+    {
+      const prepared = await prepareTaskContent(target, modelWindow);
+      firstUserContent = prepared.content;
+      imageTokensFn = prepared.imageTokens;
     }
     // Seed with the fresh system anchor, the carried-forward prior conversation (lossless, already compacted
     // by the last run if it grew), then this message's new user turn. On the first message priorMessages is
     // empty → the classic [system, user] pair. The runtime's own compaction manages growth from here.
     // sanitizeContinuation trims any dangling tool-call turn so appending the new user message stays wire-valid.
+    // Images still inline in the carried conversation are the newest earlier ones, so their stubs continue the
+    // session-wide numbering that `ask_vision` uses (earlier images were stubbed on their own next message).
+    const priorSessionImages = this.sessionImages.length - attachments.length;
     const carried = opts.priorMessages
-      ? stubCarriedImages(sanitizeContinuation(opts.priorMessages))
+      ? stubCarriedImages(
+          sanitizeContinuation(opts.priorMessages),
+          Math.max(0, priorSessionImages - countImageParts(opts.priorMessages)),
+        )
       : [];
     // The git snapshot changes after every edit, so it rides with THIS request's task message rather than the
     // system prompt: the system prompt + earlier conversation then stay a byte-identical, cacheable prefix.
-    if (gitBlock) {
+    const withGitNote = (content: string | ContentPart[]): string | ContentPart[] => {
+      if (!gitBlock) return content;
       const note = `\n\n<repository_state note="at the start of this request — re-check with git as you go">\n${gitBlock}\n</repository_state>`;
-      firstUserContent =
-        typeof firstUserContent === "string"
-          ? `${firstUserContent}${note}`
-          : [...firstUserContent, { type: "text", text: note.trim() }];
-    }
+      return typeof content === "string"
+        ? `${content}${note}`
+        : [...content, { type: "text", text: note.trim() }];
+    };
+    firstUserContent = withGitNote(firstUserContent);
     let messages: Msg[] = [
       // Fold the seeded plan (if any) into the anchor from turn 1 so a multi-message session adheres to it
       // before the model re-calls `plan`; the in-loop fold keeps it current as the model updates the plan.
@@ -534,12 +559,31 @@ export class Agent {
         if (resolved !== target) {
           const from = target;
           target = resolved;
+          const nextWindow = profileOf(target).window;
+          // Re-fit this message's images to the new model: parts it can see (re-planned for its window), or a
+          // description from a vision model when it can't — never silently dropped.
+          const taskIdx = messages.findIndex((m) => m.pinned);
+          if (attachments.length > 0 && taskIdx > 0) {
+            const prepared = await prepareTaskContent(target, nextWindow);
+            messages[taskIdx] = {
+              ...(messages[taskIdx] as Msg),
+              content: withGitNote(prepared.content),
+            };
+            imageTokensFn = prepared.imageTokens;
+          }
           const next = liveCatalog.find((m) => m.id === target);
           if (!next || !supportsVision(next)) {
-            messages = stubImageParts(messages, `— not visible to ${target}`);
+            messages = stubImageParts(
+              messages,
+              `— not visible to ${target}`,
+              Math.max(0, priorSessionImages - countImageParts(messages)),
+            );
             imageTokensFn = undefined;
           }
-          const nextWindow = profileOf(target).window;
+          if (ensureAskVision(target)) {
+            tools = advertise();
+            toolTokens = estimateTokens(JSON.stringify(tools));
+          }
           anchorWindow = nextWindow;
           baseSystem = buildBaseAnchor(nextWindow);
           messages[0] = {

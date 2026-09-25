@@ -171,6 +171,48 @@ describe("vision relay — batching, caching, progress", () => {
     expect(again.description).toContain("a red error dialog");
   });
 
+  it("describes again for a different question (a description is written for its request)", async () => {
+    const cache = new Map();
+    let calls = 0;
+    const c = client(async () => {
+      calls += 1;
+      return { content: `answer ${calls}`, toolCalls: [] };
+    });
+    const base = { client: c, catalog: [vision("q/vl")], imageDataUris: URIS, signal: sig, cache };
+    await relayImageToText({ ...base, userText: "what is the error?" });
+    const other = await relayImageToText({ ...base, userText: "what colour is the button?" });
+    expect(calls).toBe(2);
+    expect(other.description).toContain("answer 2");
+  });
+
+  it("keeps per-image labels when some images come from the cache", async () => {
+    const cache = new Map();
+    const one = ["data:image/png;base64,AAAA"];
+    const two = [...one, "data:image/png;base64,BBBB"];
+    let n = 0;
+    const c = client(async () => ({ content: `desc${++n}`, toolCalls: [] }));
+    // A tiny vision window forces one image per request, so each is cached on its own.
+    const small = { ...vision("q/vl"), contextLength: 4_000 };
+    await relayImageToText({
+      client: c,
+      catalog: [small],
+      imageDataUris: one,
+      userText: "?",
+      signal: sig,
+      cache,
+    });
+    const both = await relayImageToText({
+      client: c,
+      catalog: [small],
+      imageDataUris: two,
+      userText: "?",
+      signal: sig,
+      cache,
+    });
+    expect(both.description).toContain("Image #1: desc1");
+    expect(both.description).toContain("#2");
+  });
+
   it("reports each attempt before it starts (so the UI can show it working)", async () => {
     const started: string[] = [];
     await relayImageToText({

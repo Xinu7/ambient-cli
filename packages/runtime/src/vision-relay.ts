@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { AmbError, type CatalogModel, supportsVision } from "@amb/protocol";
-import { UNKNOWN_WINDOW, rankVisionModels, streamTimeouts } from "@amb/reliability";
+import { UNKNOWN_OUTPUT, UNKNOWN_WINDOW, rankVisionModels, streamTimeouts } from "@amb/reliability";
 import type { ChatClient } from "./ports.js";
 
 /**
@@ -78,7 +78,9 @@ export function clearRelayCache(): void {
   sharedCache.clear();
 }
 
-const imageKey = (uri: string) => createHash("sha256").update(uri).digest("hex");
+/** A description is written for one request, so it's reused only for the same image AND the same ask. */
+const imageKey = (uri: string, ask: string) =>
+  createHash("sha256").update(uri).update("\0").update(ask).digest("hex");
 
 /** Images per request so they fit the vision model's window (at least one). */
 function batchSize(window: number): number {
@@ -94,7 +96,8 @@ function batchSize(window: number): number {
 export async function relayImageToText(deps: RelayDeps): Promise<RelayResult> {
   const { client, catalog, imageDataUris, userText, signal } = deps;
   const cache = deps.cache ?? sharedCache;
-  const keys = imageDataUris.map(imageKey);
+  const ask = deps.instruction ?? userText.trim().slice(0, 600);
+  const keys = imageDataUris.map((uri) => imageKey(uri, ask));
   const labelled = (texts: string[]) =>
     texts.length === 1
       ? (texts[0] as string)
@@ -116,23 +119,28 @@ export async function relayImageToText(deps: RelayDeps): Promise<RelayResult> {
     deps.onAttempt?.(id, imageDataUris.length);
     const model = catalog.find((m) => m.id === id);
     const window = model?.contextLength ?? UNKNOWN_WINDOW;
-    // Room for a thorough description: the vision model's own output cap, bounded by what the READER can hold.
+    const size = batchSize(window);
+    const batches = Math.ceil(imageDataUris.length / size);
+    // Room for a thorough description: the vision model's own output cap, with ALL batches together bounded
+    // by a tenth of what the READER can hold.
     const descTokens = Math.max(
       512,
       Math.min(
-        model?.maxOutputLength ?? 4_096,
-        Math.floor((deps.targetWindow ?? UNKNOWN_WINDOW) * 0.1),
-        8_192,
+        model?.maxOutputLength ?? UNKNOWN_OUTPUT,
+        Math.floor(((deps.targetWindow ?? UNKNOWN_WINDOW) * 0.1) / batches),
       ),
     );
-    const size = batchSize(window);
     try {
       const out: string[] = [];
       for (let start = 0; start < imageDataUris.length; start += size) {
         const idx = [...imageDataUris.keys()].slice(start, start + size);
         const hit = idx.map((i) => cache.get(keys[i] as string));
         if (hit.every((h): h is string => typeof h === "string")) {
-          out.push(...hit);
+          out.push(
+            ...hit.map((h, j) =>
+              imageDataUris.length === 1 ? h : `Image #${start + j + 1}: ${h}`,
+            ),
+          );
           continue;
         }
         const batch = idx.map((i) => imageDataUris[i] as string);
