@@ -45,6 +45,8 @@ export interface DynamicContext {
   date?: string;
   /** Host platform; omitted from the prompt when absent. */
   platform?: string;
+  /** The shell the `bash` tool runs (e.g. "bash", "PowerShell"); omitted when absent. */
+  shell?: string;
   /** The user's session-long north-star objective (set via `/goal`); pinned high in the prompt when present. */
   goal?: string;
   /** Compact git snapshot (branch / changed files / recent commits) at run start; omitted when absent. */
@@ -62,6 +64,9 @@ export function buildSystemPrompt(ctx: DynamicContext): string {
       : "",
     `Working directory: ${ctx.cwd}`,
     ctx.platform ? `Platform: ${ctx.platform}` : "",
+    ctx.shell
+      ? `Shell for the bash tool: ${ctx.shell}${ctx.shell === "PowerShell" ? " — write PowerShell commands, not bash" : ""}`
+      : "",
     ctx.date ? `Date: ${ctx.date}` : "",
     `Active model: ${ctx.model}`,
     ctx.git ? `\nGit (at run start — re-check with git as you go):\n${ctx.git}` : "",

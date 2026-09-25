@@ -2,6 +2,9 @@ import { spawn } from "node:child_process";
 import type { ToolContext, ToolDefinition } from "@amb/protocol";
 import { z } from "zod";
 import { BoundedCapture } from "../capture.js";
+import { killProcessTree, machineShell, shellInvocation } from "../shell.js";
+
+const SHELL = machineShell();
 
 const Input = z.object({
   command: z.string().describe("Shell command to run in the workspace"),
@@ -22,7 +25,10 @@ export const bashTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
   manifest: {
     name: "bash",
     version: "1",
-    description: "Run a shell command in the workspace and capture stdout/stderr/exit code.",
+    description:
+      SHELL.kind === "pwsh" || SHELL.kind === "powershell"
+        ? "Run a command in the workspace and capture stdout/stderr/exit code. This machine's shell is PowerShell — write PowerShell syntax (e.g. Get-ChildItem, Select-String, $env:VAR), not bash."
+        : `Run a shell command in the workspace (${SHELL.label}) and capture stdout/stderr/exit code.`,
     effects: ["process", "read", "write"],
     idempotency: "non-idempotent",
     parallelSafe: false,
@@ -33,30 +39,22 @@ export const bashTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
   outputSchema: Output,
   execute(input, ctx: ToolContext) {
     return new Promise((resolve, reject) => {
-      // `detached: true` makes the shell its OWN process-group leader so a timeout/abort can kill the WHOLE
-      // tree. Without it `child.kill()` hits only `/bin/sh`; a command that spawns children (a dev server, a
-      // background job, `npm test` → node) leaves them running (leak) AND holding the stdout pipe, so `close`
-      // never fires and the tool promise HANGS forever (same class as the MCP-server leak).
-      const child = spawn(input.command, {
+      // On POSIX `detached: true` makes the shell its OWN process-group leader so a timeout/abort can kill the
+      // WHOLE tree (a dev server or `npm test` → node would otherwise keep the stdout pipe open and hang the
+      // tool). On Windows `detached` would open a console window; the tree is killed with `taskkill /T`.
+      const child = spawn(SHELL.path, shellInvocation(SHELL, input.command), {
         cwd: ctx.cwd,
-        shell: true,
         env: process.env,
-        detached: true,
+        detached: process.platform !== "win32",
+        windowsHide: true,
       });
       const outCap = new BoundedCapture(MAX_OUTPUT);
       const errCap = new BoundedCapture(MAX_OUTPUT);
       let timedOut = false;
 
       const killTree = () => {
-        try {
-          if (typeof child.pid === "number") process.kill(-child.pid, "SIGKILL"); // negative pid = the group
-        } catch {
-          try {
-            child.kill("SIGKILL");
-          } catch {
-            /* already gone */
-          }
-        }
+        if (typeof child.pid === "number") killProcessTree(child.pid);
+        else child.kill("SIGKILL");
       };
 
       const timer = setTimeout(() => {
@@ -84,8 +82,8 @@ export const bashTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
         resolve({
           command: input.command,
           exitCode: code,
-          stdout: outCap.text(),
-          stderr: errCap.text(),
+          stdout: cleanTerminalOutput(outCap.text()),
+          stderr: cleanTerminalOutput(errCap.text()),
           truncated: outCap.truncated || errCap.truncated,
           timedOut,
         });
@@ -93,3 +91,22 @@ export const bashTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
     });
   },
 };
+
+/**
+ * Make captured terminal output readable as text: CRLF → LF, a line redrawn with bare `\r` (progress bars)
+ * keeps only its final state, and ANSI color/cursor sequences are removed.
+ */
+export function cleanTerminalOutput(text: string): string {
+  return (
+    text
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping real terminal escape sequences
+      .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+      .replace(/\r\n/g, "\n")
+      .split("\n")
+      .map((line) => {
+        const parts = line.split("\r");
+        return parts[parts.length - 1] ?? "";
+      })
+      .join("\n")
+  );
+}

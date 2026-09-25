@@ -39,7 +39,12 @@ import {
   resolveRequestedModel,
   shouldEscalate,
 } from "@amb/reliability";
-import { type ToolRegistry, createBuiltinRegistry, toOpenAITools } from "@amb/tools-core";
+import {
+  type ToolRegistry,
+  createBuiltinRegistry,
+  machineShell,
+  toOpenAITools,
+} from "@amb/tools-core";
 import {
   SPILL_NOTE,
   SUMMARY_MARKER,
@@ -306,6 +311,7 @@ export class Agent {
         mode: opts.mode,
         date: opts.workspace.date(),
         platform: opts.workspace.platform(),
+        shell: machineShell().label,
         ...(opts.goal ? { goal: opts.goal } : {}),
         ...(gitBlock ? { git: gitBlock } : {}),
         ...(combined ? { instructions: combined } : {}),

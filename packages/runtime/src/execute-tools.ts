@@ -8,7 +8,7 @@ import {
   isReadOnly,
   newToolCallId,
 } from "@amb/protocol";
-import { type ToolRegistry, sha256 } from "@amb/tools-core";
+import { type ToolRegistry, isPosixShell, machineShell, sha256 } from "@amb/tools-core";
 import type { Approver, RunOptions, ToolCall } from "./ports.js";
 import { previewResult } from "./tool-result-preview.js";
 
@@ -88,11 +88,11 @@ async function runOne(
   // A read-only bash command (git status / log / diff, ls, cat, grep …) is downgraded to a `read` effect so
   // it auto-allows and works in plan mode, instead of prompting like an arbitrary shell call. The classifier
   // is deliberately strict — any redirection / substitution / mutating form keeps the full process effects.
-  const effectiveEffects = refineBashEffects(
-    tool.manifest.name,
-    parsed.data,
-    tool.manifest.effects,
-  );
+  // The classifier parses POSIX shell syntax; with a PowerShell-backed tool (Windows without Git Bash) its
+  // quoting rules don't hold, so nothing is downgraded — every command asks as a full process call.
+  const effectiveEffects = isPosixShell(machineShell())
+    ? refineBashEffects(tool.manifest.name, parsed.data, tool.manifest.effects)
+    : tool.manifest.effects;
   const readOnlyCall = effectiveEffects.length > 0 && effectiveEffects.every((e) => e === "read");
   const permInput: PermissionInput = {
     principal: "model",

@@ -6,3 +6,4 @@ export * from "./diff.js";
 export * from "./capture.js";
 export * from "./openai-schema.js";
 export * from "./tools/index.js";
+export * from "./shell.js";
