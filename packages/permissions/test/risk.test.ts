@@ -72,6 +72,9 @@ describe("classifyToolRisk — bash", () => {
 
 describe("classifyToolRisk — writes to sensitive files", () => {
   it("flags a write/edit/apply_patch to a credential or exec-hijack path", () => {
+    expect(classifyToolRisk("notebook_edit", { path: ".git/hooks/x.ipynb" }).level).toBe(
+      "elevated",
+    );
     expect(classifyToolRisk("write", { path: ".ssh/authorized_keys" }).level).toBe("elevated");
     expect(classifyToolRisk("edit", { path: "project/.env" }).level).toBe("elevated");
     expect(classifyToolRisk("write", { path: ".git/hooks/pre-commit" }).level).toBe("elevated");

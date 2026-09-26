@@ -90,6 +90,7 @@ describe("which outputs are guarded", () => {
     ["mcp_read_resource", ["read"], true],
     ["mcp__srv__search", ["read", "network"], true],
     ["ask_vision", ["read"], true],
+    ["view_image", ["read"], true],
     ["load_tools", ["read"], true],
     ["bash", ["process"], true],
     ["web_fetch", ["network"], true],

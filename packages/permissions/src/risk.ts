@@ -323,7 +323,12 @@ export function classifyToolRisk(toolName: string, args: Record<string, unknown>
     return classifyBash(args.command);
   }
 
-  if (toolName === "write" || toolName === "edit" || toolName === "apply_patch") {
+  if (
+    toolName === "write" ||
+    toolName === "edit" ||
+    toolName === "apply_patch" ||
+    toolName === "notebook_edit"
+  ) {
     const reasons: string[] = [];
     for (const p of pathsOf(args)) {
       // Normalize Windows separators + case before matching. Over-flagging a case-variant (`.ENV`) on a

@@ -169,7 +169,7 @@ export function linkedTargetRisk(
   args: Record<string, unknown>,
   workspaceRoot: string,
 ): string[] {
-  if (toolName !== "write" && toolName !== "edit" && toolName !== "apply_patch") return [];
+  if (!["write", "edit", "apply_patch", "notebook_edit"].includes(toolName)) return [];
   const spelled: string[] = [];
   if (typeof args.path === "string") spelled.push(args.path);
   if (Array.isArray(args.edits)) {
