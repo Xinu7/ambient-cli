@@ -108,4 +108,23 @@ describe("childRegistry — preset tool confinement", () => {
     expect(names).toContain("read");
     expect(names).not.toContain("write");
   });
+  it("children get MCP tools: builders all, scouts the read-only ones, presets by tool or server", () => {
+    const mcp = (name: string, effects: ("read" | "process")[]) =>
+      ({
+        ...childRegistry("builder").list()[0],
+        manifest: { ...childRegistry("builder").list()[0]?.manifest, name, effects },
+      }) as never;
+    const tools = [mcp("mcp__docs__search", ["read"]), mcp("mcp__gh__merge", ["process"])];
+    const names = (r: ReturnType<typeof childRegistry>) => r.list().map((t) => t.manifest.name);
+    expect(names(childRegistry("builder", undefined, tools))).toEqual(
+      expect.arrayContaining(["mcp__docs__search", "mcp__gh__merge"]),
+    );
+    const scout = names(childRegistry("scout", undefined, tools));
+    expect(scout).toContain("mcp__docs__search");
+    expect(scout).not.toContain("mcp__gh__merge");
+    expect(names(childRegistry("builder", ["read", "mcp__gh"], tools)).sort()).toEqual([
+      "mcp__gh__merge",
+      "read",
+    ]);
+  });
 });

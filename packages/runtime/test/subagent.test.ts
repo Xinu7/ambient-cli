@@ -283,6 +283,49 @@ describe("runSubagents", () => {
   });
 });
 
+describe("a child's questions reach the user", () => {
+  it("labelled with the child's name, one at a time", async () => {
+    let open = 0;
+    let most = 0;
+    const questions: string[] = [];
+    const ask = async (req: { question: string }) => {
+      open++;
+      most = Math.max(most, open);
+      questions.push(req.question);
+      await new Promise((r) => setTimeout(r, 10));
+      open--;
+      return { answer: "use pnpm", cancelled: false } as never;
+    };
+    const askCall = {
+      content: "",
+      toolCalls: [
+        { id: "tc_q", name: "ask_user", args: { question: "npm or pnpm?" }, rawArgs: "{}" },
+      ],
+    };
+    const out = await runSubagents(
+      [
+        { label: "api", role: "builder" as const, prompt: "set up" },
+        { label: "ui", role: "builder" as const, prompt: "set up" },
+      ],
+      ctx(),
+      {
+        ...deps(),
+        client: new MockClient([
+          askCall,
+          askCall,
+          { content: "done", toolCalls: [] },
+          { content: "done", toolCalls: [] },
+        ]),
+        ask: ask as never,
+        buildChildRegistry: () => createBuiltinRegistry(),
+      },
+    );
+    expect(out.results).toHaveLength(2);
+    expect(questions.sort()).toEqual(["api asks: npm or pnpm?", "ui asks: npm or pnpm?"]);
+    expect(most).toBe(1);
+  });
+});
+
 describe("childWorkspace", () => {
   it("a child can read memory but never writes it", async () => {
     const { childWorkspace } = await import("../src/subagent.js");

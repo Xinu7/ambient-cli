@@ -9,10 +9,12 @@ import {
 } from "@amb/protocol";
 import {
   type Approver,
+  type AskPort,
   type CapabilityPort,
   type ChatClient,
   type EffortSetting,
   type HooksPort,
+  type SubagentDeps,
   type SubagentRole,
   type VerifyPort,
   type WorkspaceContextPort,
@@ -23,6 +25,8 @@ import { ToolRegistry, createBuiltinRegistry } from "@amb/tools-core";
 import { z } from "zod";
 
 const MAX_SUBAGENTS_PER_RUN = 16;
+
+const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 export interface SubagentToolDeps {
   client: ChatClient;
@@ -44,6 +48,10 @@ export interface SubagentToolDeps {
   now?: () => number;
   /** The user's agent presets, listed in the tool description so the model can pick one by name. */
   presets?: readonly AgentPreset[];
+  /** The session's MCP tools right now — children get them too (scouts only the read-only ones). */
+  mcpTools?: () => readonly ToolDefinition[];
+  /** Asking the user a question; a child's question reaches them labelled with the child's name. */
+  ask?: AskPort;
 }
 
 /** Room for the preset list in the tool description (it rides along with every request). */
@@ -89,6 +97,12 @@ const Spec = z.object({
 });
 const Input = z.object({
   spawn: z.array(Spec).min(1).max(MAX_SUBAGENTS_PER_RUN),
+  background: z
+    .boolean()
+    .optional()
+    .describe(
+      "Run this wave in the background: you keep working, and its report arrives as a message when it's done (you'll get it before your final answer)",
+    ),
 });
 const Output = z.object({
   summary: z.string(),
@@ -112,7 +126,11 @@ const CHILD_EXCLUDED_TOOLS = new Set(["remember"]);
  *  declares `tools:`, the registry is further restricted to that intersection — the preset's allow-list is
  *  ENFORCED, not merely parsed, so a `tools: Read, Grep` builder can't write/exec even under a bypass parent.
  *  Exported for direct unit testing of the confinement. */
-export function childRegistry(role: SubagentRole, allowedTools?: string[]): ToolRegistry {
+export function childRegistry(
+  role: SubagentRole,
+  allowedTools?: string[],
+  mcpTools: readonly ToolDefinition[] = [],
+): ToolRegistry {
   const full = createBuiltinRegistry();
   const allow = allowedTools && allowedTools.length > 0 ? new Set(allowedTools) : undefined;
   const reg = new ToolRegistry();
@@ -121,6 +139,13 @@ export function childRegistry(role: SubagentRole, allowedTools?: string[]): Tool
     if (CHILD_EXCLUDED_TOOLS.has(t.manifest.name)) continue;
     const roleOk = role === "builder" || isReadOnly(t.manifest); // scouts/oracles: read-only only
     if (roleOk && (!allow || allow.has(t.manifest.name))) reg.register(t);
+  }
+  // MCP tools on the same terms. A preset's list may name a whole server (`mcp__github`) or one tool.
+  const allowsMcp = (name: string) =>
+    !allow || allow.has(name) || [...allow].some((a) => name.startsWith(`${a}__`));
+  for (const t of mcpTools) {
+    const roleOk = role === "builder" || isReadOnly(t.manifest);
+    if (roleOk && allowsMcp(t.manifest.name) && !reg.has(t.manifest.name)) reg.register(t);
   }
   return reg;
 }
@@ -186,50 +211,69 @@ export function makeSubagentTool(deps: SubagentToolDeps): ToolDefinition {
       const presets = new Map<string, AgentPreset>(
         discoverAgents(ctx.workspaceRoot).map((a) => [a.name, a]),
       );
-      const out = await runSubagents(
-        input.spawn.map((s) => {
-          const preset = s.preset ? presets.get(s.preset) : undefined;
-          // A preset that edits files runs as a builder; its own prompt becomes the child's instructions.
-          const role = preset?.writes && s.role !== "builder" ? "builder" : s.role;
-          return {
-            label: s.label,
-            role,
-            prompt: s.prompt,
-            ...(preset?.body ? { instructions: preset.body } : {}),
-            ...(s.preset ? { preset: s.preset } : {}),
-            ...((s.model ?? preset?.model) ? { model: s.model ?? preset?.model } : {}),
-            ...(s.maxTurns ? { maxTurns: s.maxTurns } : {}),
-            // Enforce the preset's declared tool allow-list (parsed in discoverAgents) on the child registry.
-            ...(preset?.tools && preset.tools.length > 0 ? { allowedTools: preset.tools } : {}),
-          };
-        }),
-        {
-          scope: ctx.scope,
-          toolCallId: ctx.toolCallId,
-          emit: ctx.emit,
-          signal: ctx.signal,
-          cwd: ctx.cwd,
-          ...(ctx.resultChars !== undefined ? { resultChars: ctx.resultChars } : {}),
-          workspaceRoot: ctx.workspaceRoot,
-        },
-        {
-          client: deps.client,
-          workspace: deps.workspace,
-          approve: deps.approve,
-          parentMode: deps.parentMode,
-          ...(deps.capabilities ? { capabilities: deps.capabilities } : {}),
-          ...(deps.effort ? { effort: deps.effort } : {}),
-          ...(deps.goal ? { goal: deps.goal } : {}),
-          ...(deps.verify ? { verify: deps.verify } : {}),
-          ...(deps.hooks ? { hooks: deps.hooks } : {}),
-          ...(deps.permissionRules ? { permissionRules: deps.permissionRules } : {}),
-          ...(deps.hurry ? { hurry: deps.hurry } : {}),
-          buildChildRegistry: childRegistry,
-          childSink: childSink(now),
-          artifactStore: childArtifactStore,
-          now,
-        },
-      );
+      const specs = input.spawn.map((s) => {
+        const preset = s.preset ? presets.get(s.preset) : undefined;
+        // A preset that edits files runs as a builder; its own prompt becomes the child's instructions.
+        const role = preset?.writes && s.role !== "builder" ? "builder" : s.role;
+        return {
+          label: s.label,
+          role,
+          prompt: s.prompt,
+          ...(preset?.body ? { instructions: preset.body } : {}),
+          ...(s.preset ? { preset: s.preset } : {}),
+          ...((s.model ?? preset?.model) ? { model: s.model ?? preset?.model } : {}),
+          ...(s.maxTurns ? { maxTurns: s.maxTurns } : {}),
+          // Enforce the preset's declared tool allow-list (parsed in discoverAgents) on the child registry.
+          ...(preset?.tools && preset.tools.length > 0 ? { allowedTools: preset.tools } : {}),
+        };
+      });
+      const runCtx = (signal: AbortSignal) => ({
+        scope: ctx.scope as NonNullable<ToolContext["scope"]>,
+        toolCallId: ctx.toolCallId as string,
+        emit: ctx.emit,
+        signal,
+        cwd: ctx.cwd,
+        ...(ctx.resultChars !== undefined ? { resultChars: ctx.resultChars } : {}),
+        workspaceRoot: ctx.workspaceRoot,
+      });
+      const runDeps: SubagentDeps = {
+        client: deps.client,
+        workspace: deps.workspace,
+        approve: deps.approve,
+        parentMode: deps.parentMode,
+        ...(deps.capabilities ? { capabilities: deps.capabilities } : {}),
+        ...(deps.effort ? { effort: deps.effort } : {}),
+        ...(deps.goal ? { goal: deps.goal } : {}),
+        ...(deps.verify ? { verify: deps.verify } : {}),
+        ...(deps.hooks ? { hooks: deps.hooks } : {}),
+        ...(deps.permissionRules ? { permissionRules: deps.permissionRules } : {}),
+        ...(deps.hurry ? { hurry: deps.hurry } : {}),
+        ...(deps.ask ? { ask: deps.ask } : {}),
+        buildChildRegistry: (role, allowed) =>
+          childRegistry(role, allowed, deps.mcpTools?.() ?? []),
+        childSink: childSink(now),
+        artifactStore: childArtifactStore,
+        now,
+      };
+      if (input.background && ctx.backgroundTasks) {
+        const label = specs.map((s) => s.label).join(", ");
+        const { id } = ctx.backgroundTasks.start(label, async (taskSignal) => {
+          const out = await runSubagents(
+            specs,
+            runCtx(AbortSignal.any([ctx.signal, taskSignal])),
+            runDeps,
+          );
+          const files = out.files?.length
+            ? `\nFiles changed: ${out.files.map((f) => `${f.path} (${f.operation})`).join(", ")}`
+            : "";
+          return `${out.summary}${files}`;
+        });
+        return {
+          summary: `Started ${plural(specs.length, "subagent")} in the background as ${id}. Keep working; their report arrives as a message when they finish, and you'll get it before your final answer.`,
+          results: [],
+        };
+      }
+      const out = await runSubagents(specs, runCtx(ctx.signal), runDeps);
       return {
         summary: out.summary,
         results: out.results.map((r) => ({

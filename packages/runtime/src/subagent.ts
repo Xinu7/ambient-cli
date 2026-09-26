@@ -6,6 +6,7 @@ import { capToolResult } from "./agent-support.js";
 import { Agent } from "./agent.js";
 import type {
   Approver,
+  AskPort,
   CapabilityPort,
   ChatClient,
   EffortSetting,
@@ -81,6 +82,8 @@ export interface SubagentDeps {
   hurry?: () => boolean;
   /** The session's permission rules — a child obeys the same denials. */
   permissionRules?: PermissionRules;
+  /** Asking the user (backs a child's `ask_user`); questions from parallel children are asked one at a time. */
+  ask?: AskPort;
   /** Build a child's registry for a role — MUST NOT include the `subagent` tool (structural depth cap).
    *  `allowedTools` (from a resolved preset) further restricts the registry to that intersection. */
   buildChildRegistry: (role: SubagentRole, allowedTools?: string[]) => ToolRegistry;
@@ -171,7 +174,21 @@ export async function runSubagents(
     approveChain = run.catch(() => undefined);
     return run;
   };
-  const childDeps: SubagentDeps = { ...deps, approve: gatedApprove };
+  // Questions queue the same way: the user answers one at a time.
+  let askChain: Promise<unknown> = Promise.resolve();
+  const gatedAsk: AskPort | undefined = deps.ask
+    ? (req) => {
+        const ask = deps.ask as AskPort;
+        const run = askChain.then(() => ask(req));
+        askChain = run.catch(() => undefined);
+        return run;
+      }
+    : undefined;
+  const childDeps: SubagentDeps = {
+    ...deps,
+    approve: gatedApprove,
+    ...(gatedAsk ? { ask: gatedAsk } : {}),
+  };
 
   // Announce the wave up front (one-shot) so the UI knows the EXACT size immediately — the header reads N from
   // frame one and the "wave finished" line fires exactly once even for waves larger than the concurrency limit.
@@ -311,6 +328,13 @@ function runOneChild(
     wrapUp: () => pastDeadline || deps.hurry?.() === true,
     emit: childEmit,
     approve: deps.approve,
+    // The question says which subagent is asking.
+    ...(deps.ask
+      ? {
+          ask: (req) =>
+            (deps.ask as AskPort)({ ...req, question: `${spec.label} asks: ${req.question}` }),
+        }
+      : {}),
     workspace: childWorkspace(deps.workspace),
     ...(deps.capabilities ? { capabilities: deps.capabilities } : {}),
     ...(deps.effort ? { effort: deps.effort } : {}),

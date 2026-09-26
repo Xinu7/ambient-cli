@@ -159,6 +159,7 @@ export class Agent {
       return withImages(await this.runWithState(userInput, opts, state));
     } finally {
       state.jobs.stopAll();
+      state.tasks.stopAll();
     }
   }
 
@@ -696,6 +697,13 @@ export class Agent {
       // adapts THIS turn instead of finishing wrong work first. Injected before compaction/budgeting so a
       // steer is treated like any other recent message; each is durably logged so a resume rebuilds it. ──
       // A background command finished since the model last looked: say so, so it can read the result.
+      // Background subagents that reported since the last turn: their findings, as data.
+      for (const task of runState.tasks.takeFinished()) {
+        messages.push({
+          role: "user",
+          content: `[Background task ${task.id} (${task.label}) finished. Its report:]\n${guardUntrustedResult(task.report).text}`,
+        });
+      }
       for (const job of runState.jobs.takeFinished()) {
         messages.push({
           role: "user",
@@ -1216,6 +1224,35 @@ export class Agent {
         if (opts.signal.aborted) {
           stopReason = "cancelled";
           break;
+        }
+        // Work handed to background subagents belongs in this answer: wait for it, then carry on with
+        // their reports (injected at the top of the next turn).
+        if (!finalWrapUp && runState.tasks.running() > 0) {
+          if (displayText.trim().length > 0)
+            messages.push({ role: "assistant", content: displayText });
+          emit({
+            schemaVersion: 1,
+            kind: "notice",
+            sessionId,
+            level: "info",
+            text: `Waiting for ${runState.tasks.running()} background task(s) to report`,
+          });
+          await runState.tasks.settled(opts.signal);
+          if (opts.signal.aborted) {
+            stopReason = "cancelled";
+            break;
+          }
+          const reports = runState.tasks
+            .takeFinished()
+            .map(
+              (t) =>
+                `[Background task ${t.id} (${t.label}) report:]\n${guardUntrustedResult(t.report).text}`,
+            );
+          messages.push({
+            role: "user",
+            content: `${reports.join("\n\n")}\n\nYour background tasks have reported. Use their findings and finish.`,
+          });
+          continue;
         }
         // VERIFY GATE (Karpathy gen→verify): the model says it's done and it changed files — run
         // the project's verification. On failure, feed the diagnostics back and re-ask (bounded). This is

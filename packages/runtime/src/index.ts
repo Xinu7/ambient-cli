@@ -10,3 +10,4 @@ export * from "./attachments.js";
 export * from "./ask-vision.js";
 export * from "./tool-loading.js";
 export { compact as compactConversation } from "./compaction-runner.js";
+export * from "./background-tasks.js";

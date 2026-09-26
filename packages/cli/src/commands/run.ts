@@ -325,6 +325,8 @@ export async function runAgent(args: string[]): Promise<void> {
         ...(opts.verify ? { verify: opts.verify } : {}),
         ...(hooks ? { hooks } : {}),
         ...(permissionRules ? { permissionRules } : {}),
+        mcpTools: () => mcp.tools,
+        ...(opts.ask ? { ask: opts.ask } : {}),
       }),
     });
     machine?.init({

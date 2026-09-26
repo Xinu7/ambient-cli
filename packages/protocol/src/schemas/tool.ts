@@ -91,6 +91,13 @@ export interface ToolContext {
   readDenied?(absPath: string): boolean;
   /** The session's background shell commands (`bash` with `background: true`). Optional — absent ⇒ none. */
   backgroundJobs?: BackgroundJobsPort;
+  /** Work that runs beside the agent and reports back at a turn boundary. Absent ⇒ not available. */
+  backgroundTasks?: BackgroundTasksPort;
+}
+
+/** Hand work off to run in the background; its report reaches the agent when it's done. */
+export interface BackgroundTasksPort {
+  start(label: string, work: (signal: AbortSignal) => Promise<string>): { id: string };
 }
 
 /** Background shell commands for a session: start one, read its new output, stop it, list them. */

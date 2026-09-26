@@ -949,6 +949,8 @@ export function App(deps: AppDeps): ReactNode {
             ...(permissionRules ? { permissionRules } : {}),
             hurry: () => hurryRef.current,
             effort: effortRef.current,
+            mcpTools: () => mcpTools ?? [],
+            ...(opts.ask ? { ask: opts.ask } : {}),
           }),
         });
 
