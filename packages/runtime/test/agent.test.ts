@@ -1396,6 +1396,42 @@ describe("Agent loop", () => {
     expect(prompts).toBe(1); // second write covered by the session grant
   });
 
+  it("ASSISTED lane: several actions in one reply all run; the prose streams, the envelope never shows", async () => {
+    const capabilities = { laneFor: () => "assisted" as const, learn: () => {} };
+    const replies = [
+      'Writing both files.\n```amb-action\n{"tool":"write","args":{"path":"a.txt","content":"a"}}\n```\n```amb-action\n{"tool":"write","args":{"path":"b.txt","content":"b"}}\n```',
+      "Both written.",
+    ];
+    const calls: ChatParams[] = [];
+    const client: ChatClient = {
+      fetchCatalog: async () => catalog,
+      chat: async (params) => {
+        calls.push(params);
+        const content = replies.shift() ?? "";
+        for (let i = 0; i < content.length; i += 7) params.onContent?.(content.slice(i, i + 7));
+        return { content, toolCalls: [] };
+      },
+    };
+    collected.length = 0;
+    const res = await new Agent(client).run("make a and b", baseOpts({ capabilities }));
+    expect(res.stopReason).toBe("complete");
+    expect(await readFile(join(ws, "a.txt"), "utf8")).toBe("a");
+    expect(await readFile(join(ws, "b.txt"), "utf8")).toBe("b");
+    const streamed = collected
+      .filter((e) => e.kind === "assistant.delta")
+      .map((e) => (e as { text: string }).text)
+      .join("");
+    expect(streamed).toContain("Writing both files.");
+    expect(streamed).toContain("Both written.");
+    expect(streamed).not.toContain("amb-action");
+    // Both results went back in ONE user message.
+    const results = (calls[1]?.messages ?? []).filter(
+      (m) => m.role === "user" && String(m.content).startsWith("Result of write"),
+    );
+    expect(results).toHaveLength(1);
+    expect(String(results[0]?.content).match(/Result of write/g)).toHaveLength(2);
+  });
+
   it("ASSISTED lane: drives tools via the text-action protocol (no native tool_calls)", async () => {
     const capabilities = { laneFor: () => "assisted" as const, learn: () => {} };
     // The model replies with a fenced action block (text), then a final plain answer.

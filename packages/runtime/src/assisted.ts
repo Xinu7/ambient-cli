@@ -41,14 +41,14 @@ export function renderToolsAsText(tools: ToolDefinition[]): string {
 /** The protocol instructions appended to the system prompt in assisted mode. */
 export function assistedProtocol(tools: ToolDefinition[]): string {
   return [
-    "You do not have native tool-calling. To use a tool, reply with EXACTLY ONE fenced block:",
+    "You do not have native tool-calling. To use a tool, reply with a fenced block:",
     "",
     `\`\`\`${ACTION_FENCE}`,
     '{"tool": "<tool-name>", "args": { ... }}',
     "```",
     "",
     "Rules:",
-    "- Emit at most ONE action block per reply, and put NOTHING after it.",
+    `- You may emit up to ${MAX_ACTIONS} action blocks in one reply when the calls don't depend on each other (reading several files, say); they run in order. Put NOTHING after the last block.`,
     "- `args` must be a JSON object matching that tool's parameters.",
     "- When the task is finished, reply with a plain-text final answer and NO action block.",
     "",
@@ -74,8 +74,17 @@ function looksLikeBareAction(text: string): boolean {
   }
 }
 
+/** Most action blocks acted on from one reply. */
+export const MAX_ACTIONS = 8;
+
+export interface AssistedAction {
+  tool: string;
+  args: unknown;
+  rawArgs: string;
+}
+
 export type AssistedParse =
-  | { kind: "action"; tool: string; args: unknown; rawArgs: string }
+  | { kind: "action"; actions: AssistedAction[] }
   | { kind: "final"; text: string }
   | { kind: "error"; message: string; text: string };
 
@@ -128,33 +137,30 @@ export function parseAssistedResponse(text: string): AssistedParse {
     }
     return { kind: "final", text: text.trim() };
   }
-  // Protocol says exactly one block — if there are several, act on the FIRST (safe) and ignore the rest.
-  const raw = (matches[0]?.[1] ?? "").trim();
+  const actions: AssistedAction[] = [];
+  for (const m of matches.slice(0, MAX_ACTIONS)) {
+    const one = parseEnvelope((m[1] ?? "").trim());
+    if (typeof one === "string") return { kind: "error", message: one, text };
+    actions.push(one);
+  }
+  return { kind: "action", actions };
+}
+
+/** One envelope's JSON → an action, or the repair message for the model. */
+function parseEnvelope(raw: string): AssistedAction | string {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return {
-      kind: "error",
-      message: `Your ${ACTION_FENCE} block was not valid JSON. Re-emit it as a single valid JSON object.`,
-      text,
-    };
+    return `Your ${ACTION_FENCE} block was not valid JSON. Re-emit it as a single valid JSON object.`;
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return {
-      kind: "error",
-      message: `Your ${ACTION_FENCE} block must be a JSON OBJECT with "tool" and "args".`,
-      text,
-    };
+    return `Your ${ACTION_FENCE} block must be a JSON OBJECT with "tool" and "args".`;
   }
   const obj = parsed as Record<string, unknown>;
   const tool = obj.tool;
   if (typeof tool !== "string" || tool.length === 0) {
-    return {
-      kind: "error",
-      message: `Your ${ACTION_FENCE} block is missing a string "tool" field.`,
-      text,
-    };
+    return `Your ${ACTION_FENCE} block is missing a string "tool" field.`;
   }
   // `args`, if present, must be a plain object (not a string/array/number) — else nudge to repair.
   const rawArgsVal = obj.args;
@@ -162,14 +168,10 @@ export function parseAssistedResponse(text: string): AssistedParse {
     rawArgsVal !== undefined &&
     (typeof rawArgsVal !== "object" || rawArgsVal === null || Array.isArray(rawArgsVal))
   ) {
-    return {
-      kind: "error",
-      message: `"args" in your ${ACTION_FENCE} block must be a JSON object.`,
-      text,
-    };
+    return `"args" in your ${ACTION_FENCE} block must be a JSON object.`;
   }
   const args = rawArgsVal ?? {};
-  return { kind: "action", tool, args, rawArgs: JSON.stringify(args) };
+  return { tool, args, rawArgs: JSON.stringify(args) };
 }
 
 /** Strip the action envelope(s) from the reply so the user sees only the model's reasoning text. */
@@ -182,4 +184,58 @@ export function stripActionBlock(text: string): string {
   // (parseAssistedResponse nudges the model to re-emit with the fence); we only refuse to DISPLAY it.
   if (looksLikeBareAction(stripped)) return "";
   return stripped;
+}
+
+/**
+ * Streams an assisted-lane reply's prose as it arrives while holding back the action envelope: text is let
+ * through up to a fence that is (or may still become) `amb-action`, and nothing after it; a reply that
+ * begins like a bare JSON object is never streamed (it's a malformed call, not prose). The settled answer
+ * still arrives as assistant.final, stripped the same way.
+ */
+export class AssistedDeltaFilter {
+  private pending = "";
+  private stopped = false;
+  private started = false;
+
+  push(text: string): string {
+    if (this.stopped) return "";
+    this.pending += text;
+    if (!this.started) {
+      const lead = this.pending.trimStart();
+      if (lead.length === 0) return "";
+      if (lead.startsWith("{")) {
+        this.stopped = true;
+        return "";
+      }
+      this.started = true;
+    }
+    let out = "";
+    for (;;) {
+      const at = this.pending.indexOf("```");
+      if (at < 0) {
+        // Hold trailing backticks (maybe a fence starting) and whitespace (maybe right before one).
+        const tail = /\s*`{0,2}$/.exec(this.pending)?.[0].length ?? 0;
+        out += this.pending.slice(0, this.pending.length - tail);
+        this.pending = this.pending.slice(this.pending.length - tail);
+        return out;
+      }
+      const after = this.pending.slice(at + 3).toLowerCase();
+      if (after.startsWith(ACTION_FENCE)) {
+        out += this.pending.slice(0, at);
+        this.pending = "";
+        this.stopped = true;
+        return out.trimEnd();
+      }
+      if (after.length < ACTION_FENCE.length && ACTION_FENCE.startsWith(after)) {
+        // Not enough yet to tell whether this fence is an action: hold it and the whitespace before it.
+        const keep = this.pending.slice(0, at).trimEnd().length;
+        out += this.pending.slice(0, keep);
+        this.pending = this.pending.slice(keep);
+        return out;
+      }
+      // An ordinary code fence: let it through and keep looking.
+      out += this.pending.slice(0, at + 3);
+      this.pending = this.pending.slice(at + 3);
+    }
+  }
 }

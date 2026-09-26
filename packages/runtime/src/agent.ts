@@ -948,15 +948,14 @@ export class Agent {
             failed,
             liveCatalog,
             escalation,
-            // Don't stream raw deltas in assisted mode — the reply contains an action envelope we strip;
-            // the clean text is shown via assistant.final instead.
+            // In assisted mode the stream is filtered: prose streams, the action envelope never shows.
             {
               sessionId,
               turnId,
               attemptId,
               emit,
               signal: opts.signal,
-              streamDeltas: !assisted,
+              streamDeltas: true,
               lane: assisted ? "assisted" : "direct",
               // When the wire carries image parts, failover must stay on a vision-capable model (never ship
               // an image to a blind substitute). Computed from what's ACTUALLY on the wire this attempt.
@@ -1119,9 +1118,12 @@ export class Agent {
           toolCalls = [];
           displayText = parsed.text;
         } else {
-          toolCalls = [
-            { id: newToolCallId(), name: parsed.tool, args: parsed.args, rawArgs: parsed.rawArgs },
-          ];
+          toolCalls = parsed.actions.map((a) => ({
+            id: newToolCallId(),
+            name: a.tool,
+            args: a.args,
+            rawArgs: a.rawArgs,
+          }));
           displayText = stripActionBlock(completion.content);
         }
       }
@@ -1434,6 +1436,8 @@ export class Agent {
         600,
         Math.floor(batchCharBudget / Math.max(1, outcomes.length)),
       );
+      // The assisted lane's results go back as ONE user message (several in a row break some chat templates).
+      const assistedResults: string[] = [];
       for (const o of outcomes) {
         const fullText = `${o.ok ? stringifyResult(o.result) : `ERROR: ${o.error}`}${
           o.hookNote ? `\n\n[from a hook] ${o.hookNote}` : ""
@@ -1484,11 +1488,7 @@ export class Agent {
         // Trusted retrieval note appended OUTSIDE the guarded (untrusted) body.
         const body = guarded.text + retrievalNote;
         if (assistedTurn) {
-          messages.push({
-            role: "user",
-            content: `Result of ${o.toolName}:\n${body}`,
-            toolGroupId: attemptGroup,
-          });
+          assistedResults.push(`Result of ${o.toolName}:\n${body}`);
         } else {
           messages.push({
             role: "tool",
@@ -1497,6 +1497,13 @@ export class Agent {
             content: body,
           });
         }
+      }
+      if (assistedResults.length > 0) {
+        messages.push({
+          role: "user",
+          content: assistedResults.join("\n\n"),
+          toolGroupId: attemptGroup,
+        });
       }
       // Images the agent looked at (view_image) go to the model with the next call.
       if (viewed.length > 0) {

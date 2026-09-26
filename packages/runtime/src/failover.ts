@@ -14,6 +14,7 @@ import {
   streamTimeouts,
 } from "@amb/reliability";
 import { fallbackModel, isAbortError } from "./agent-support.js";
+import { AssistedDeltaFilter } from "./assisted.js";
 import { MAX_FAILOVERS, MAX_SAME_MODEL_RETRIES } from "./constants.js";
 import type {
   CapabilityPort,
@@ -157,6 +158,8 @@ export async function runChatWithFailover(
     const attemptStarted = Date.now();
     try {
       const stream = ctx.streamDeltas !== false;
+      // The assisted lane's reply carries action envelopes: stream only the prose around them.
+      const filter = ctx.lane === "assisted" ? new AssistedDeltaFilter() : undefined;
       const result = await deps.client.chat({
         ...params,
         model: current,
@@ -169,15 +172,18 @@ export async function runChatWithFailover(
           flaggedCold: model?.isReady === false,
         }),
         onContent: stream
-          ? (t) =>
+          ? (t) => {
+              const text = filter ? filter.push(t) : t;
+              if (text.length === 0) return;
               ctx.emit({
                 schemaVersion: 1,
                 kind: "assistant.delta",
                 sessionId: ctx.sessionId,
                 turnId: ctx.turnId,
                 attemptId,
-                text: t,
-              })
+                text,
+              });
+            }
           : undefined,
         onReasoning: stream
           ? (t) =>

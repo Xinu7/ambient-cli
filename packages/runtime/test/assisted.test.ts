@@ -1,6 +1,8 @@
 import { createBuiltinRegistry } from "@amb/tools-core";
 import { describe, expect, it } from "vitest";
 import {
+  AssistedDeltaFilter,
+  MAX_ACTIONS,
   assistedProtocol,
   parseAssistedResponse,
   renderToolsAsText,
@@ -29,9 +31,9 @@ describe("parseAssistedResponse", () => {
     );
     expect(r.kind).toBe("action");
     if (r.kind === "action") {
-      expect(r.tool).toBe("read");
-      expect(r.args).toEqual({ path: "a.ts" });
-      expect(r.rawArgs).toBe('{"path":"a.ts"}');
+      expect(r.actions).toEqual([
+        { tool: "read", args: { path: "a.ts" }, rawArgs: '{"path":"a.ts"}' },
+      ]);
     }
   });
 
@@ -43,8 +45,7 @@ describe("parseAssistedResponse", () => {
       const r = parseAssistedResponse(reply);
       expect(r.kind).toBe("action");
       if (r.kind === "action") {
-        expect(r.tool).toBe("read");
-        expect(r.args).toEqual({ path: "a.ts" });
+        expect(r.actions[0]).toMatchObject({ tool: "read", args: { path: "a.ts" } });
       }
     }
     // …and it's STRIPPED from the visible text (no raw protocol JSON leaks to the user)
@@ -101,12 +102,26 @@ describe("parseAssistedResponse", () => {
     expect(parseAssistedResponse('{"tool":"hammer","version":1}').kind).toBe("final");
   });
 
-  it("acts on the FIRST block when several are present (protocol says exactly one)", () => {
+  it("acts on every block in order when several are present", () => {
     const r = parseAssistedResponse(
       '```amb-action\n{"tool":"read","args":{"path":"a"}}\n```\n```amb-action\n{"tool":"list","args":{}}\n```',
     );
     expect(r.kind).toBe("action");
-    if (r.kind === "action") expect(r.tool).toBe("read");
+    if (r.kind === "action") expect(r.actions.map((a) => a.tool)).toEqual(["read", "list"]);
+  });
+
+  it("a broken block among several asks for a repair instead of running a partial set", () => {
+    const r = parseAssistedResponse(
+      '```amb-action\n{"tool":"read","args":{"path":"a"}}\n```\n```amb-action\n{"tool":\n```',
+    );
+    expect(r.kind).toBe("error");
+  });
+
+  it("acts on at most MAX_ACTIONS blocks", () => {
+    const block = '```amb-action\n{"tool":"list","args":{}}\n```\n';
+    const r = parseAssistedResponse(block.repeat(MAX_ACTIONS + 3));
+    if (r.kind === "action") expect(r.actions).toHaveLength(MAX_ACTIONS);
+    else throw new Error("expected actions");
   });
 
   it("returns an error when the tool field is missing", () => {
@@ -117,7 +132,7 @@ describe("parseAssistedResponse", () => {
   it("defaults args to {} when omitted", () => {
     const r = parseAssistedResponse('```amb-action\n{"tool":"list"}\n```');
     expect(r.kind).toBe("action");
-    if (r.kind === "action") expect(r.args).toEqual({});
+    if (r.kind === "action") expect(r.actions[0]?.args).toEqual({});
   });
 });
 
@@ -168,5 +183,28 @@ describe("stripActionBlock", () => {
     // {tool} without an args OBJECT is a real answer, not a call — must survive (not be blanked).
     const t = stripActionBlock('{"tool":"hammer","version":1}');
     expect(t).toBe('{"tool":"hammer","version":1}');
+  });
+});
+
+describe("streaming an assisted reply", () => {
+  const run = (chunks: string[]) => {
+    const f = new AssistedDeltaFilter();
+    return chunks.map((c) => f.push(c)).join("");
+  };
+  it("streams prose and holds back the action block, even split across chunks", () => {
+    expect(run(["Let me read ", "the file.\n``", "`amb-", 'action\n{"tool":"read"}\n```'])).toBe(
+      "Let me read the file.",
+    );
+  });
+  it("lets ordinary code fences through", () => {
+    expect(run(["Use this:\n```ts\nconst a = 1;\n```\nDone."])).toBe(
+      "Use this:\n```ts\nconst a = 1;\n```\nDone.",
+    );
+  });
+  it("never streams a reply that starts as bare JSON", () => {
+    expect(run(['  {"tool":"read",', '"args":{}}'])).toBe("");
+  });
+  it("a plain answer streams whole", () => {
+    expect(run(["The answer ", "is 42."])).toBe("The answer is 42.");
   });
 });
