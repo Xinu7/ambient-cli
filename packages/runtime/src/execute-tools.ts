@@ -85,7 +85,8 @@ async function runOne(
   makeToolCtx: (toolCallId: string) => ToolContext,
   autoApproval: { streak: number; cap?: number },
 ): Promise<ToolOutcome> {
-  const started = Date.now();
+  // The tool's own time: the clock restarts once you've answered an approval, so waiting on you isn't counted.
+  let started = Date.now();
   const dur = () => Date.now() - started;
   const emit = (ev: NewEvent) => opts.emit(ev);
   const wireId = call.id;
@@ -210,6 +211,7 @@ async function runOne(
       decision,
     });
     effect = ans === "deny" ? "deny" : "allow";
+    started = Date.now();
     if (ans === "allow-session") {
       grants.push({ scope: "session", toolName: tool.manifest.name });
       scopeGranted = "session";

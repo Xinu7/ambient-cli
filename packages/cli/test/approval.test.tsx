@@ -241,7 +241,8 @@ describe("App: approval interaction end to end", () => {
         initialTask="do it"
       />,
     );
-  const waitFor = async (fn: () => boolean, ms = 3000): Promise<void> => {
+  // Polls, so it returns as soon as the frame appears; the ceiling only matters on a loaded machine.
+  const waitFor = async (fn: () => boolean, ms = 12_000): Promise<void> => {
     const t0 = Date.now();
     while (Date.now() - t0 < ms) {
       if (fn()) return;

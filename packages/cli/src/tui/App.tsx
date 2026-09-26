@@ -2238,7 +2238,8 @@ export function App(deps: AppDeps): ReactNode {
               maxLines={Math.min(6, Math.max(1, rows - 18))}
             />
             <ActivityLine
-              activity={state.status.activity}
+              // While you're being asked something, that's what's happening — not "Thinking" on a running clock.
+              activity={pending || question ? undefined : state.status.activity}
               elapsed={elapsed}
               phaseElapsed={phaseElapsed}
               frame={tick}
