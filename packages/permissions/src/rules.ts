@@ -59,7 +59,7 @@ const TOOL_ALIASES: Record<string, readonly string[]> = {
   glob: ["glob"],
   ls: ["list"],
   list: ["list"],
-  edit: ["edit", "apply_patch", "write"],
+  edit: ["edit", "apply_patch", "write", "notebook_edit"],
   multiedit: ["apply_patch"],
   apply_patch: ["apply_patch"],
   write: ["write"],

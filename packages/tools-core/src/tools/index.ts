@@ -8,6 +8,7 @@ import { editTool } from "./edit.js";
 import { globToRegExp, globTool } from "./glob.js";
 import { grepTool } from "./grep.js";
 import { listTool } from "./list.js";
+import { notebookEditTool } from "./notebook-edit.js";
 import { planTool } from "./plan.js";
 import { proposeGoalUpdateTool } from "./propose-goal-update.js";
 import { readArtifactTool } from "./read-artifact.js";
@@ -28,6 +29,7 @@ export {
   writeTool,
   editTool,
   applyPatchTool,
+  notebookEditTool,
   bashTool,
   bashOutputTool,
   killShellTool,
@@ -53,6 +55,7 @@ export const builtinTools: ToolDefinition[] = [
   writeTool,
   editTool,
   applyPatchTool,
+  notebookEditTool,
   bashTool,
   bashOutputTool,
   killShellTool,
