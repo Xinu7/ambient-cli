@@ -209,3 +209,16 @@ describe("output the server holds back", () => {
     expect(hidden).toBe(6);
   });
 });
+
+describe("drafting a call whose file comes after a long argument", () => {
+  it("still finds the path, searching only new text", () => {
+    const drafts: Array<{ name: string; path?: string }> = [];
+    const acc = new ChatAccumulator({ onToolDraft: (d) => drafts.push(d) });
+    const tc = (o: unknown) => ev({ choices: [{ delta: { tool_calls: [o] } }] });
+    acc.push(tc({ index: 0, id: "a", function: { name: "write", arguments: '{"content":"' } }));
+    for (let i = 0; i < 50; i++)
+      acc.push(tc({ index: 0, function: { arguments: "x".repeat(500) } }));
+    acc.push(tc({ index: 0, function: { arguments: '","path":"src/late.ts"}' } }));
+    expect(drafts.at(-1)).toEqual({ name: "write", path: "src/late.ts" });
+  });
+});

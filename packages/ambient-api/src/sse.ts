@@ -98,8 +98,8 @@ export interface AccumulatorCallbacks {
   onHiddenOutput?: () => void;
 }
 
-/** How far into a streaming tool call's arguments to look for the file it names. */
-const DRAFT_SCAN_CHARS = 4_096;
+/** How much already-searched argument text is searched again (a `"path": "…"` split across chunks). */
+const DRAFT_SCAN_CHARS = 1_024;
 
 /** The file a partly-streamed tool call's arguments name, once the whole value has arrived. */
 function draftPath(args: string): string | undefined {
@@ -126,6 +126,8 @@ export class ChatAccumulator {
   private lastToolKey: string | undefined;
   /** What's been reported for each call so far (name, then path), so each is reported once. */
   private readonly drafted = new Map<string, { name: boolean; path: boolean }>();
+  /** Where the next search for a call's file may start. */
+  private readonly draftScanned = new Map<string, number>();
 
   constructor(private readonly cb: AccumulatorCallbacks = {}) {}
 
@@ -186,9 +188,11 @@ export class ChatAccumulator {
   private reportDraft(key: string, cur: AccumulatedToolCall): void {
     if (!this.cb.onToolDraft || !cur.name) return;
     const seen = this.drafted.get(key) ?? { name: false, path: false };
-    // The path comes first in practice; don't rescan a long argument on every chunk looking for it.
-    const path =
-      seen.path || cur.arguments.length > DRAFT_SCAN_CHARS ? undefined : draftPath(cur.arguments);
+    // Only the new text (plus a little overlap for a value split across chunks) is searched each time, so a
+    // long argument isn't rescanned from the start on every chunk.
+    const from = this.draftScanned.get(key) ?? 0;
+    const path = seen.path ? undefined : draftPath(cur.arguments.slice(from));
+    this.draftScanned.set(key, Math.max(0, cur.arguments.length - DRAFT_SCAN_CHARS));
     if (!seen.name || path) {
       this.cb.onToolDraft({ name: cur.name, ...(path ? { path } : {}) });
       this.drafted.set(key, { name: true, path: seen.path || path !== undefined });
