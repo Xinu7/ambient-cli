@@ -95,13 +95,20 @@ describe("mcpToolToDefinition", () => {
     expect(out).toEqual({ content: "ran:hi" });
   });
 
-  it("maps readOnlyHint→read effects (auto-approvable), else process (gated)", () => {
+  it("maps readOnlyHint + a closed world → read (auto-approvable), open world → read+network, else process", () => {
     const ro = mcpToolToDefinition(
       "x",
       { name: "get", annotations: { readOnlyHint: true } },
       client(),
     );
-    expect(ro?.manifest.effects).toEqual(["read"]);
+    // MCP's default is an open world: a read-only tool that reaches outside still asks (network).
+    expect(ro?.manifest.effects).toEqual(["read", "network"]);
+    const closed = mcpToolToDefinition(
+      "x",
+      { name: "local", annotations: { readOnlyHint: true, openWorldHint: false } },
+      client(),
+    );
+    expect(closed?.manifest.effects).toEqual(["read"]);
     const rw = mcpToolToDefinition("x", { name: "mutate" }, client());
     expect(rw?.manifest.effects).toEqual(["process"]);
   });

@@ -34,8 +34,12 @@ export function mcpToolToDefinition(
   // NOTE: a server name MAY contain `__` (e.g. `prod__db`). In the rare case two servers/tools alias to the
   // same `mcp__…__…` id, the manager's dedupe skips the second with a log — rejecting valid names outright
   // (losing every tool from a legitimately-named server) would be a worse regression than that edge.
+  // Read-only only when the server says it both changes nothing AND reaches nothing outside itself
+  // (`openWorldHint: false`; MCP's default is an open world). A read-only tool that searches the web or an
+  // online service can still carry what you pass it out of the machine, so it asks like web_fetch.
   const readOnly = tool.annotations?.readOnlyHint === true;
-  const effects: Effect[] = readOnly ? ["read"] : ["process"];
+  const closedWorld = tool.annotations?.openWorldHint === false;
+  const effects: Effect[] = readOnly ? (closedWorld ? ["read"] : ["read", "network"]) : ["process"];
   const Input = jsonSchemaToZod(tool.inputSchema);
 
   return {

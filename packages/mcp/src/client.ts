@@ -18,7 +18,11 @@ const McpToolSchema = z.object({
   inputSchema: z.unknown().optional(),
   // MCP tool annotations (advisory hints). `readOnlyHint:true` lets us map the tool to read-only effects.
   annotations: z
-    .object({ readOnlyHint: z.boolean().optional(), destructiveHint: z.boolean().optional() })
+    .object({
+      readOnlyHint: z.boolean().optional(),
+      destructiveHint: z.boolean().optional(),
+      openWorldHint: z.boolean().optional(),
+    })
     .passthrough()
     .optional(),
 });
