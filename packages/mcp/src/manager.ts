@@ -119,10 +119,15 @@ export async function startMcpServers(
     order.push(s.spec.name);
     const server = s.spec.name;
     const client = s.client;
+    // Rapid change notices can race: only the newest listing may land (an older reply arriving late
+    // would otherwise put back a stale tool list).
+    let generation = 0;
     client.onToolsChanged(() => {
+      const mine = ++generation;
       void client
         .listTools()
         .then((next) => {
+          if (mine !== generation) return;
           byServer.set(server, build(server, client, next));
           log(`mcp: ${server} updated its tools`);
         })

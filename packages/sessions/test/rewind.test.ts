@@ -1,9 +1,10 @@
+import { writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Event } from "@amb/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { contentHash, planRewind, readObject, saveObject } from "../src/index.js";
+import { contentHash, objectsDir, planRewind, readObject, saveObject } from "../src/index.js";
 
 let env: Record<string, string | undefined>;
 beforeEach(async () => {
@@ -22,6 +23,14 @@ describe("object store (content-addressed blobs)", () => {
     expect(saveObject(SID, "hello\n", env)).toBe(key); // idempotent
     expect(readObject(SID, key, env)).toBe("hello\n");
     expect(readObject(SID, contentHash("never saved"), env)).toBeUndefined();
+  });
+  it("never returns a blob whose content no longer matches its hash, and a save repairs it", () => {
+    const key = saveObject(SID, "the original file\n", env);
+    const file = join(objectsDir(SID, env), key.slice("sha256:".length));
+    writeFileSync(file, "the orig"); // torn / corrupted on disk
+    expect(readObject(SID, key, env)).toBeUndefined();
+    saveObject(SID, "the original file\n", env);
+    expect(readObject(SID, key, env)).toBe("the original file\n");
   });
   it("rejects a malformed hash key", () => {
     expect(() => readObject(SID, "../etc/passwd", env)).not.toThrow(); // read swallows → undefined

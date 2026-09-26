@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { assertSafeSessionId, sessionsDir } from "./paths.js";
 
@@ -40,22 +40,36 @@ export function saveObject(
   const key = contentHash(content);
   const dir = objectsDir(sessionId, env);
   const file = blobFile(dir, key);
-  if (!existsSync(file)) {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(file, content, "utf8");
+  // An intact copy is already there (dedup). A torn one — a crash mid-write — is replaced.
+  if (readObject(sessionId, key, env) !== undefined) return key;
+  mkdirSync(dir, { recursive: true });
+  // Write aside, then rename into place, so a crash never leaves a half-written blob under its key.
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    writeFileSync(tmp, content, { encoding: "utf8", mode: 0o600 });
+    renameSync(tmp, file);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
   }
   return key;
 }
 
-/** Read a blob by its `sha256:<hex>` key, or undefined if absent (e.g. never checkpointed). */
+/**
+ * Read a blob by its `sha256:<hex>` key, or undefined if it's absent (never checkpointed) or its content no
+ * longer matches the key (damaged on disk) — rewind must never restore bytes that aren't the recorded ones.
+ */
 export function readObject(
   sessionId: string,
   hashKey: string,
   env?: Record<string, string | undefined>,
 ): string | undefined {
+  let content: string;
   try {
-    return readFileSync(blobFile(objectsDir(sessionId, env), hashKey), "utf8");
+    content = readFileSync(blobFile(objectsDir(sessionId, env), hashKey), "utf8");
   } catch {
     return undefined;
   }
+  const key = hashKey.startsWith("sha256:") ? hashKey : `sha256:${hashKey}`;
+  return contentHash(content) === key ? content : undefined;
 }

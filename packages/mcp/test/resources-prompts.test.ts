@@ -5,6 +5,7 @@ import { type StartOptions, type Transport, startMcpServers } from "../src/index
 /** A fake server with resources, prompts, and a tool list it can change (and announce). */
 function fakeServer() {
   let toolNames = ["search"];
+  let slowNextList = 0; // delay (ms) for the next tools/list reply
   let push: (m: unknown) => void = () => {};
   const replies: unknown[] = [];
   const spawn: StartOptions["spawn"] = () => {
@@ -64,7 +65,12 @@ function fakeServer() {
               return {};
           }
         })();
-        push({ jsonrpc: "2.0", id: req.id, result });
+        const reply = { jsonrpc: "2.0", id: req.id, result };
+        if (req.method === "tools/list" && slowNextList > 0) {
+          const ms = slowNextList;
+          slowNextList = 0;
+          setTimeout(() => push(reply), ms);
+        } else push(reply);
       },
       onMessage: (cb) => {
         onMsg = cb;
@@ -79,6 +85,9 @@ function fakeServer() {
     changeTools: (names: string[]) => {
       toolNames = names;
       push({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
+    },
+    slowNextList: (ms: number) => {
+      slowNextList = ms;
     },
     ping: () => push({ jsonrpc: "2.0", id: 99, method: "ping" }),
     replies,
@@ -134,6 +143,21 @@ describe("MCP resources and prompts", () => {
     srv.ping();
     await settle();
     expect(srv.replies).toEqual([{ jsonrpc: "2.0", id: 99, result: {} }]);
+    s.close();
+  });
+
+  it("a late reply to an older change notice can't put back a stale tool list", async () => {
+    const srv = fakeServer();
+    const s = await startMcpServers([{ name: "live", config: { command: "x" } }], {
+      spawn: srv.spawn,
+    });
+    srv.slowNextList(60);
+    srv.changeTools(["old"]);
+    await new Promise((r) => setTimeout(r, 5));
+    srv.changeTools(["new"]);
+    await new Promise((r) => setTimeout(r, 120));
+    expect(s.currentTools().map((t) => t.manifest.name)).toContain("mcp__live__new");
+    expect(s.currentTools().map((t) => t.manifest.name)).not.toContain("mcp__live__old");
     s.close();
   });
 });

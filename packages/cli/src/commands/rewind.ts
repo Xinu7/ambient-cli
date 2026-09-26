@@ -129,7 +129,7 @@ export async function runRewind(argv: string[]): Promise<void> {
       }
       const content = readObject(sid, r.hashKey as string);
       if (content === undefined) {
-        warn(`no checkpoint blob for ${r.path} — left unchanged`);
+        warn(`no intact checkpoint for ${r.path} — left unchanged`);
         continue;
       }
       mkdirSync(parent, { recursive: true });

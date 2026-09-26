@@ -254,4 +254,28 @@ describe("executeTools emission wiring", () => {
     // …but the returned outcomes stay in call-index order for the model-facing transcript.
     expect(outcomes.map((o) => o.toolName)).toEqual(["slow", "fast"]);
   });
+
+  it("runs at most 8 read-only calls from one reply at the same time", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const counting: ToolDefinition = {
+      ...delayed("count", 0),
+      execute: async () => {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await new Promise((r) => setTimeout(r, 10));
+        inFlight--;
+        return { ok: true };
+      },
+    };
+    const reg = new ToolRegistry().register(counting);
+    const calls = Array.from({ length: 20 }, (_, i) => ({
+      ...call("count", { i }),
+      id: `tc_${i}`,
+    }));
+    const outcomes = await executeTools(calls, reg, opts(), scope);
+    expect(outcomes).toHaveLength(20);
+    expect(outcomes.every((o) => o.ok)).toBe(true);
+    expect(peak).toBe(8);
+  });
 });

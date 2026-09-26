@@ -53,6 +53,8 @@ export interface Scope {
 /** Resolve the resource paths a tool touches (best-effort, for the workspace-boundary check). */
 /** Tools that walk a folder; with no `path` they walk the whole workspace. */
 const FOLDER_WALKERS = new Set(["grep", "glob", "list"]);
+/** How many read-only tool calls from one reply run at the same time. */
+const MAX_PARALLEL_TOOLS = 8;
 
 /** The paths a call touches: `path`/`file`, every `edits[].path` (apply_patch), and the workspace itself for
  *  a folder walk with no path — so path rules see everything the call reaches. */
@@ -551,13 +553,17 @@ export async function executeTools(
     if (batch.length > 0) {
       // Emit each result the MOMENT its own call settles — a fast read in the batch must not keep its row
       // 'running' until a slow neighbour finishes. `outcomes[]` stays index-keyed for model-facing order.
-      await Promise.all(
-        batch.map(async (idx) => {
+      // At most MAX_PARALLEL_TOOLS at once: a reply with dozens of reads mustn't open them all together.
+      let next = 0;
+      const lane = async () => {
+        while (next < batch.length) {
+          const idx = batch[next++] as number;
           const o = await run(idx);
           outcomes[idx] = o;
           emitResult(o);
-        }),
-      );
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(MAX_PARALLEL_TOOLS, batch.length) }, lane));
     }
     if (i < calls.length) {
       const o = await run(i);
