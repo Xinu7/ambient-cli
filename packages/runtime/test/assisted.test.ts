@@ -204,6 +204,19 @@ describe("streaming an assisted reply", () => {
   it("never streams a reply that starts as bare JSON", () => {
     expect(run(['  {"tool":"read",', '"args":{}}'])).toBe("");
   });
+  it("a closing code fence at the very end is flushed, not lost", () => {
+    const f = new AssistedDeltaFilter();
+    const text = "First.\n\nSecond:\n\n```js\nconst x = 1;\n```";
+    const out = [text.slice(0, 20), text.slice(20)].map((c) => f.push(c)).join("") + f.flush();
+    expect(out).toBe(text);
+  });
+  it("`amb-actionable` is an ordinary fence; an unfinished action fence is never flushed", () => {
+    const f = new AssistedDeltaFilter();
+    const text = "Sure.\n\n```amb-actionable\nexample\n```\n\nMore text";
+    expect(f.push(text) + f.flush()).toBe(text);
+    const g = new AssistedDeltaFilter();
+    expect(g.push("Done.\n```amb-act") + g.flush()).toBe("Done.");
+  });
   it("a plain answer streams whole", () => {
     expect(run(["The answer ", "is 42."])).toBe("The answer is 42.");
   });

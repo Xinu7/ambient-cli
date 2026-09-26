@@ -230,6 +230,17 @@ export async function runChatWithFailover(
             }
           : undefined,
       });
+      // Whatever the assisted-lane filter was still holding (a closing code fence) belongs to the answer.
+      const tail = filter?.flush() ?? "";
+      if (stream && tail.length > 0)
+        ctx.emit({
+          schemaVersion: 1,
+          kind: "assistant.delta",
+          sessionId: ctx.sessionId,
+          turnId: ctx.turnId,
+          attemptId,
+          text: tail,
+        });
       const empty = result.content.trim().length === 0 && result.toolCalls.length === 0;
       ctx.capabilities?.recordOutcome?.(current, !empty, Date.now() - attemptStarted);
       ctx.emit({

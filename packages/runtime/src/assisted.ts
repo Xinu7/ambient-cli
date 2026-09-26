@@ -197,6 +197,17 @@ export class AssistedDeltaFilter {
   private stopped = false;
   private started = false;
 
+  /** What's still held when the reply ends — unless it's the start of an action block that never finished. */
+  flush(): string {
+    if (this.stopped) return "";
+    const held = this.pending;
+    this.pending = "";
+    const lead = held.trimStart();
+    const after = lead.startsWith("```") ? lead.slice(3).toLowerCase() : undefined;
+    if (after !== undefined && after.length > 0 && ACTION_FENCE.startsWith(after)) return "";
+    return this.started ? held : "";
+  }
+
   push(text: string): string {
     if (this.stopped) return "";
     this.pending += text;
@@ -220,13 +231,15 @@ export class AssistedDeltaFilter {
         return out;
       }
       const after = this.pending.slice(at + 3).toLowerCase();
-      if (after.startsWith(ACTION_FENCE)) {
+      // The info string must be exactly `amb-action` (as the parser reads it) — `amb-actionable` is ordinary.
+      const next = after.startsWith(ACTION_FENCE) ? after[ACTION_FENCE.length] : "";
+      if (after.startsWith(ACTION_FENCE) && next !== undefined && !/[a-z0-9_]/.test(next)) {
         out += this.pending.slice(0, at);
         this.pending = "";
         this.stopped = true;
         return out.trimEnd();
       }
-      if (after.length < ACTION_FENCE.length && ACTION_FENCE.startsWith(after)) {
+      if (after.length <= ACTION_FENCE.length && ACTION_FENCE.startsWith(after)) {
         // Not enough yet to tell whether this fence is an action: hold it and the whitespace before it.
         const keep = this.pending.slice(0, at).trimEnd().length;
         out += this.pending.slice(0, keep);
