@@ -131,6 +131,8 @@ export interface ChatParams {
   timeouts?: { firstByteMs: number; idleMs: number };
   onContent?: (t: string) => void;
   onReasoning?: (t: string) => void;
+  /** A tool call taking shape mid-stream (its name, then the file it targets). */
+  onToolDraft?: (draft: { name: string; path?: string }) => void;
 }
 
 /**

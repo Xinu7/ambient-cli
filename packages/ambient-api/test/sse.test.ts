@@ -162,3 +162,26 @@ describe("tool-call deltas without an index", () => {
     expect(acc.result().toolCalls[0]?.arguments).toBe('{"path":"x"}');
   });
 });
+
+describe("tool-call drafts (say what's coming before the arguments finish)", () => {
+  it("reports the tool's name once, then the file once its path has fully arrived", () => {
+    const drafts: Array<{ name: string; path?: string }> = [];
+    const acc = new ChatAccumulator({ onToolDraft: (d) => drafts.push(d) });
+    const tc = (o: unknown) => ev({ choices: [{ delta: { tool_calls: [o] } }] });
+    acc.push(tc({ index: 0, id: "a", function: { name: "write", arguments: '{"path":"src/' } }));
+    acc.push(tc({ index: 0, function: { arguments: 'app.ts","content":"line 1\\n' } }));
+    acc.push(tc({ index: 0, function: { arguments: 'line 2 \\"path\\": \\"nope\\""}' } }));
+    expect(drafts).toEqual([{ name: "write" }, { name: "write", path: "src/app.ts" }]);
+  });
+  it("tracks parallel calls separately", () => {
+    const drafts: Array<{ name: string; path?: string }> = [];
+    const acc = new ChatAccumulator({ onToolDraft: (d) => drafts.push(d) });
+    const tc = (o: unknown) => ev({ choices: [{ delta: { tool_calls: [o] } }] });
+    acc.push(tc({ index: 0, id: "a", function: { name: "read", arguments: '{"path":"a.ts"}' } }));
+    acc.push(tc({ index: 1, id: "b", function: { name: "read", arguments: '{"path":"b.ts"}' } }));
+    expect(drafts).toEqual([
+      { name: "read", path: "a.ts" },
+      { name: "read", path: "b.ts" },
+    ]);
+  });
+});

@@ -190,6 +190,8 @@ export const EventSchema = z.discriminatedUnion("kind", [
   aev("assistant.delta", { text: z.string() }),
   aev("assistant.final", { text: z.string() }),
   aev("reasoning.delta", { text: z.string() }),
+  // A tool call the model is still writing: its name, then the file it targets once that's readable.
+  aev("tool.drafting", { toolName: z.string(), path: z.string().optional() }),
   aev("tool.proposed", {
     toolCallId: idStr("tc"),
     wireId: z.string(),

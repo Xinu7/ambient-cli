@@ -359,6 +359,20 @@ describe("tui reducer", () => {
     expect(s.transcript.some((t) => t.kind === "assistant" && t.streaming)).toBe(true);
   });
 
+  it("tool.drafting says what the agent is about to do while the call streams in", () => {
+    let s = init();
+    s = reduce(s, { kind: "turn.started", ...base, input: "go" } as NewEvent);
+    s = reduce(s, { kind: "tool.drafting", ...base, toolName: "write" } as NewEvent);
+    expect(s.status.activity).toEqual({ verb: "Writing" });
+    s = reduce(s, {
+      kind: "tool.drafting",
+      ...base,
+      toolName: "write",
+      path: "src/app.ts",
+    } as NewEvent);
+    expect(s.status.activity).toEqual({ verb: "Writing", detail: "src/app.ts" });
+  });
+
   it("tool.proposed carries no diff; the diff attaches from tool.result (its OUTPUT)", () => {
     let s = init();
     s = reduce(s, {

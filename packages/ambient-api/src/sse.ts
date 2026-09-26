@@ -91,6 +91,19 @@ export interface AccumulatedCompletion {
 export interface AccumulatorCallbacks {
   onContent?: (text: string) => void;
   onReasoning?: (text: string) => void;
+  /** A tool call taking shape mid-stream: its name once known, then the file it targets once readable. */
+  onToolDraft?: (draft: { name: string; path?: string }) => void;
+}
+
+/** The file a partly-streamed tool call's arguments name, once the whole value has arrived. */
+function draftPath(args: string): string | undefined {
+  const m = /"(?:path|file_path|file)"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(args);
+  if (!m?.[1]) return undefined;
+  try {
+    return JSON.parse(`"${m[1]}"`) as string;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Incrementally folds SSE chunks into a settled completion, invoking callbacks as text streams in. */
@@ -105,6 +118,8 @@ export class ChatAccumulator {
   private readonly toolMap = new Map<string, AccumulatedToolCall>();
   private readonly idToKey = new Map<string, string>();
   private lastToolKey: string | undefined;
+  /** What's been reported for each call so far (name, then path), so each is reported once. */
+  private readonly drafted = new Map<string, { name: boolean; path: boolean }>();
 
   constructor(private readonly cb: AccumulatorCallbacks = {}) {}
 
@@ -142,6 +157,7 @@ export class ChatAccumulator {
           if (tc.function?.arguments) cur.arguments += tc.function.arguments;
           this.toolMap.set(key, cur);
           this.lastToolKey = key;
+          this.reportDraft(key, cur);
         }
       }
     }
@@ -155,6 +171,16 @@ export class ChatAccumulator {
       };
     }
     return true;
+  }
+
+  private reportDraft(key: string, cur: AccumulatedToolCall): void {
+    if (!this.cb.onToolDraft || !cur.name) return;
+    const seen = this.drafted.get(key) ?? { name: false, path: false };
+    const path = seen.path ? undefined : draftPath(cur.arguments);
+    if (!seen.name || path) {
+      this.cb.onToolDraft({ name: cur.name, ...(path ? { path } : {}) });
+      this.drafted.set(key, { name: true, path: seen.path || path !== undefined });
+    }
   }
 
   /** Stream index when present; else a previously-seen id; else a new id; else continue the latest call. */

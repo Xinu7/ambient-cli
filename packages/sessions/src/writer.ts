@@ -7,7 +7,12 @@ import { sessionPath } from "./paths.js";
 export type { NewEvent };
 
 /** Event kinds that are transient UI signals and must NOT be persisted (bloat + no-hidden-reasoning). */
-const TRANSIENT = new Set<Event["kind"]>(["assistant.delta", "reasoning.delta", "subagent.delta"]);
+const TRANSIENT = new Set<Event["kind"]>([
+  "assistant.delta",
+  "reasoning.delta",
+  "subagent.delta",
+  "tool.drafting",
+]);
 
 /**
  * Append-only session writer. Single writer per session file. Each durable event is validated,

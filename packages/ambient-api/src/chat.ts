@@ -145,7 +145,11 @@ export async function streamChatCompletion(
   req: ChatRequest,
   opts: StreamOptions & AccumulatorCallbacks = {},
 ): Promise<AccumulatedCompletion> {
-  const acc = new ChatAccumulator({ onContent: opts.onContent, onReasoning: opts.onReasoning });
+  const acc = new ChatAccumulator({
+    onContent: opts.onContent,
+    onReasoning: opts.onReasoning,
+    ...(opts.onToolDraft ? { onToolDraft: opts.onToolDraft } : {}),
+  });
   for await (const e of streamChat(config, req, opts)) {
     if (!acc.push(e)) break;
   }

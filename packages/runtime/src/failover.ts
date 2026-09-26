@@ -190,6 +190,19 @@ export async function runChatWithFailover(
                 text: t,
               })
           : undefined,
+        // A tool call taking shape: say what the agent is about to do before the arguments finish streaming.
+        onToolDraft: stream
+          ? (d) =>
+              ctx.emit({
+                schemaVersion: 1,
+                kind: "tool.drafting",
+                sessionId: ctx.sessionId,
+                turnId: ctx.turnId,
+                attemptId,
+                toolName: d.name,
+                ...(d.path ? { path: d.path } : {}),
+              })
+          : undefined,
       });
       const empty = result.content.trim().length === 0 && result.toolCalls.length === 0;
       ctx.capabilities?.recordOutcome?.(current, !empty, Date.now() - attemptStarted);

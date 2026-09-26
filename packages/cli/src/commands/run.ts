@@ -206,7 +206,11 @@ export async function runAgent(args: string[]): Promise<void> {
     consume: (ev: NewEvent) => {
       if (ev.kind === "error" && ev.errorKind === "auth") keyRejected = true;
       if (reporting === "jsonl") {
-        if (ev.kind !== "assistant.delta" && ev.kind !== "reasoning.delta") {
+        if (
+          ev.kind !== "assistant.delta" &&
+          ev.kind !== "reasoning.delta" &&
+          ev.kind !== "tool.drafting"
+        ) {
           process.stdout.write(`${JSON.stringify(ev)}\n`);
         }
       } else if (live) renderer.handle(ev);

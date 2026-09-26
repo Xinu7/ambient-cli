@@ -764,6 +764,15 @@ export function reduce(state: ViewState, ev: NewEvent, now = 0): ViewState {
       }));
     }
 
+    case "tool.drafting": {
+      // A tool call is still streaming in: say what the agent is about to do ("Writing src/app.ts") instead
+      // of a bare "Thinking" while a long file's arguments arrive. Running tools keep the line.
+      if (Object.keys(state.active).length > 0) return state;
+      const acted = settleThought(state, now);
+      const activity = toolActivity(ev.toolName, ev.path ? { path: ev.path } : {});
+      return { ...acted, status: { ...acted.status, activity } };
+    }
+
     case "tool.proposed": {
       // Record what THIS call will do, keyed by id — the activity line reads it on `tool.started` (all
       // proposals for a turn are emitted up front, so proposal order is NOT execution order).
