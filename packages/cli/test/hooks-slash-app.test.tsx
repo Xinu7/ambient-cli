@@ -90,7 +90,7 @@ describe("/hooks", () => {
     await type("first");
     expect(JSON.stringify(requests.at(-1)?.messages)).not.toContain("HOOK-CONTEXT");
 
-    expect(ui.lastFrame()).toContain("Project hooks, rules and MCP servers");
+    expect(ui.lastFrame()).toContain("Project hooks, rules, MCP servers and verify script");
     await type("/trust");
     expect(ui.lastFrame()).toContain("/trust yes turns on exactly this");
     expect(trusted).toBe(false);
