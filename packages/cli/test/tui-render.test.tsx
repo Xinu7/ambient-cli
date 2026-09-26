@@ -332,6 +332,24 @@ describe("tui render", () => {
     expect(frame).toContain("2 scouts finished");
     expect(frame).toContain("1 failed"); // the closing tally
     unmount();
+    const one = render(
+      <Transcript
+        items={[
+          {
+            kind: "subagent-line",
+            id: "l3",
+            variant: "done",
+            roleWord: "scouts",
+            count: 1,
+            okCount: 1,
+            failCount: 0,
+          },
+        ]}
+        width={80}
+      />,
+    );
+    expect(one.lastFrame()).toContain("1 scout finished");
+    one.unmount();
   });
 
   it("flightline: mode, the served model (with ← when substituted), lane, a context gauge, and state", () => {

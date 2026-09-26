@@ -256,7 +256,7 @@ export function TranscriptRow({
         return (
           <Box>
             <Text color={AmbientTheme.dim} wrap="truncate">
-              {`◆ ${item.count ?? 0} ${item.roleWord} finished${
+              {`◆ ${item.count ?? 0} ${item.count === 1 ? item.roleWord.replace(/s$/, "") : item.roleWord} finished${
                 partial > 0 || fail > 0 ? ` (${parts.join(" · ")})` : ""
               }`}
             </Text>
