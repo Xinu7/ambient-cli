@@ -1120,6 +1120,7 @@ describe("Agent loop", () => {
       { ...(catalog[0] as CatalogModel), id: "m/coder", contextLength: win, isReady: true },
     ];
     const allSystem: string[] = [];
+    let lateSystem = false;
     const bigContent = "y ".repeat(20_000);
     const bigWrite = (i: number): TurnCompletion => ({
       content: "",
@@ -1136,8 +1137,12 @@ describe("Agent loop", () => {
     const client: ChatClient = {
       fetchCatalog: async () => fleet,
       chat: async (p) => {
+        // The summary arrives as a note (a system message only ever leads the conversation on the wire).
         for (const msg of p.messages)
-          if (typeof msg.content === "string" && msg.role === "system") allSystem.push(msg.content);
+          if (typeof msg.content === "string") allSystem.push(msg.content);
+        const firstOther = p.messages.findIndex((m) => m.role !== "system");
+        if (firstOther >= 0 && p.messages.slice(firstOther).some((m) => m.role === "system"))
+          lateSystem = true;
         const isSummary =
           typeof p.messages[0]?.content === "string" &&
           p.messages[0].content.includes("Summarize the conversation");
@@ -1152,6 +1157,7 @@ describe("Agent loop", () => {
       },
     };
     await new Agent(client).run("start", baseOpts({ requestedModel: "m/coder", maxTurns: 8 }));
+    expect(lateSystem).toBe(false); // Qwen rejects a system message mid-conversation
     expect(collected.some((e) => e.kind === "context.compacted")).toBe(true);
     // A post-compaction system message carries the model narrative AND the authoritative ground-truth block.
     const summaryMsg = allSystem.find((s) => s.includes("Ground truth"));

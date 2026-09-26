@@ -24,6 +24,7 @@ import type {
   RunOptions,
   TurnCompletion,
 } from "./ports.js";
+import { wireMessages } from "./wire-messages.js";
 
 /** How often (in tokens) held-back output is reported while a tool call is being written. */
 const HIDDEN_REPORT_EVERY = 16;
@@ -166,6 +167,8 @@ export async function runChatWithFailover(
       let hidden = 0;
       const result = await deps.client.chat({
         ...params,
+        // System messages only at the start — some models reject one mid-conversation (wire-messages.ts).
+        messages: wireMessages(params.messages),
         model: current,
         maxTokens: sentOutput,
         reasoningEffort: reqEffort,

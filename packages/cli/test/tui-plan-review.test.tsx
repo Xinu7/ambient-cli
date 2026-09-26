@@ -33,10 +33,18 @@ async function waitFor(lastFrame: () => string | undefined, needle: string): Pro
 }
 /** Everything the model is given as system context for this request (the prompt plus trailing notes such as
  *  the current plan). */
+// What the agent is told besides the user's words: the system prompt, and notes from ambient (a note after
+// the conversation starts travels in a user turn — some models reject a late system message).
 const systemText = (p: ChatParams): string =>
   p.messages
-    .filter((m) => m.role === "system" && typeof m.content === "string")
-    .map((m) => m.content as string)
+    .filter((m) => typeof m.content === "string")
+    .flatMap((m) =>
+      m.role === "system"
+        ? [m.content as string]
+        : [...(m.content as string).matchAll(/<ambient-note>([\s\S]*?)<\/ambient-note>/g)].map(
+            (x) => x[1] ?? "",
+          ),
+    )
     .join("\n");
 const lastUserText = (p: ChatParams): string => {
   const users = p.messages.filter((m) => m.role === "user");

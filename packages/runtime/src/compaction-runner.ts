@@ -18,6 +18,7 @@ import { SPILL_NOTE, SUMMARY_MARKER, deterministicSummary, planSpill } from "./a
 import { MAX_COMPACTIONS } from "./constants.js";
 import { summaryEffort } from "./effort.js";
 import type { ChatClient, Msg, RunOptions } from "./ports.js";
+import { wireMessages } from "./wire-messages.js";
 
 /**
  * Context-management for the agent loop — split out of `agent.ts` so the state machine stays focused. These
@@ -209,7 +210,7 @@ async function rollingSummary(
     try {
       const out = await client.chat({
         model: compactor,
-        messages: req,
+        messages: wireMessages(req),
         tools: [],
         maxTokens,
         // Utility task — cheap by design; never spends the run's high-effort tokens summarizing.
