@@ -657,6 +657,9 @@ export function App(deps: AppDeps): ReactNode {
   // all ask at once, and the overlay holds a single answer slot. Prompts wait their turn; one still waiting
   // when its run is cancelled settles without being shown.
   const promptsRef = useRef(new PromptQueue());
+  // Tools you allowed "for this session" during the current run: prompts for them that were already waiting
+  // their turn take that answer instead of asking again (the grant covers the tool the same way).
+  const sessionAllowedRef = useRef(new Set<string>());
   const approve = useCallback<RunOptions["approve"]>((req) => {
     // "Bypass session" (chosen from an earlier approval, or /bypass) auto-allows the rest of THIS run without
     // a prompt — the current run's mode was snapshotted at start, so decide() still asks; we short-circuit here.
@@ -666,11 +669,19 @@ export function App(deps: AppDeps): ReactNode {
   const showApproval = (
     req: Parameters<RunOptions["approve"]>[0],
   ): Promise<"allow-once" | "allow-session" | "deny"> => {
-    return new Promise((resolve) => {
+    return new Promise((settle) => {
       if (permissionRef.current === "bypass") {
-        resolve("allow-once");
+        settle("allow-once");
         return;
       }
+      if (sessionAllowedRef.current.has(req.toolName)) {
+        settle("allow-session");
+        return;
+      }
+      const resolve = (d: "allow-once" | "allow-session" | "deny") => {
+        if (d === "allow-session") sessionAllowedRef.current.add(req.toolName);
+        settle(d);
+      };
       approvalResolver.current = resolve;
       ring(); // the agent is waiting on you
       void fireAndForget(
@@ -772,6 +783,7 @@ export function App(deps: AppDeps): ReactNode {
       pendingSwitchRef.current = undefined; // a switch picked during an earlier run already set modelRef
       runStartRef.current = Date.now();
       hurryRef.current = false;
+      sessionAllowedRef.current.clear();
       setTick(0);
       setRunActive(true);
       setPlanReview(false); // a run is starting — the previous plan (if any) is no longer awaiting review
