@@ -58,3 +58,49 @@ describe("readTextCappedSafe", () => {
     expect(readTextCappedSafe(p, { root: parse(p).root })).toBe("ok");
   });
 });
+
+describe("memory writes never follow a link out of the project", () => {
+  it.skipIf(process.platform === "win32")(
+    "a committed .ambient/MEMORY.md symlink is not written through (summary, note or forget)",
+    async () => {
+      const { readFileSync } = await import("node:fs");
+      const { forgetNote, rememberNote, writeMemory } = await import("../src/memory.js");
+      const ws = join(dir, "ws");
+      mkdirSync(join(ws, ".ambient"), { recursive: true });
+      const outside = join(dir, "outside.txt");
+      writeFileSync(
+        outside,
+        "ORIGINAL\n## Notes (curated by the agent — durable across sessions)\n- x\n",
+      );
+      symlinkSync(outside, join(ws, ".ambient", "MEMORY.md"));
+      writeMemory(ws, "a summary");
+      expect(rememberNote(ws, "a note")).toBe(false);
+      expect(forgetNote(join(ws, ".ambient", "MEMORY.md"), 1, ws)).toBeUndefined();
+      expect(readFileSync(outside, "utf8")).toContain("ORIGINAL");
+      expect(readFileSync(outside, "utf8")).not.toContain("a summary");
+    },
+  );
+  it.skipIf(process.platform === "win32")(
+    "a symlinked .ambient folder pointing outside is refused too",
+    async () => {
+      const { existsSync } = await import("node:fs");
+      const { rememberNote } = await import("../src/memory.js");
+      const ws = join(dir, "ws2");
+      const elsewhere = join(dir, "elsewhere");
+      mkdirSync(ws, { recursive: true });
+      mkdirSync(elsewhere, { recursive: true });
+      symlinkSync(elsewhere, join(ws, ".ambient"));
+      expect(rememberNote(ws, "a note")).toBe(false);
+      expect(existsSync(join(elsewhere, "MEMORY.md"))).toBe(false);
+    },
+  );
+  it("still writes and reads normal memory", async () => {
+    const { listNotes, readMemory, rememberNote, writeMemory } = await import("../src/memory.js");
+    const ws = join(dir, "ws3");
+    mkdirSync(ws, { recursive: true });
+    expect(rememberNote(ws, "keep this")).toBe(true);
+    writeMemory(ws, "the summary");
+    expect(readMemory(ws)).toContain("the summary");
+    expect(listNotes(join(ws, ".ambient", "MEMORY.md"), ws)).toEqual(["keep this"]);
+  });
+});

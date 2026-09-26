@@ -1,12 +1,15 @@
 import {
   type Stats,
   closeSync,
+  existsSync,
   constants as fsConstants,
   fstatSync,
   lstatSync,
+  mkdirSync,
   openSync,
   readSync,
   realpathSync,
+  writeSync,
 } from "node:fs";
 import { dirname, sep } from "node:path";
 
@@ -131,4 +134,72 @@ export function readUserMarkdown(path: string, opts: { maxBytes?: number } = {})
     ...(opts.maxBytes ? { maxBytes: opts.maxBytes } : {}),
     root: dirname(target),
   });
+}
+
+/** The nearest folder on `dir`'s path that exists (so containment can be checked before creating the rest). */
+function nearestExisting(dir: string): string {
+  let d = dir;
+  while (!existsSync(d)) {
+    const up = dirname(d);
+    if (up === d) break;
+    d = up;
+  }
+  return d;
+}
+
+/**
+ * Write a text file IFF it stays inside `root`: a symlinked leaf is never followed (O_NOFOLLOW, or an lstat
+ * check where that's unavailable), and a symlinked ancestor that leads out of `root` is refused — checked
+ * before any missing folder is created, and again after. The write mirror of `readTextCappedSafe`: a
+ * repository can commit `.ambient/MEMORY.md -> ~/.zshrc`, and ambient must not write through it. Returns
+ * whether the file was written; never throws.
+ */
+export function writeTextSafe(path: string, data: string, opts: { root: string }): boolean {
+  const dir = dirname(path);
+  const existing = nearestExisting(dir);
+  // A root that doesn't exist yet (a first note in a new home folder) is created along with the file; then
+  // the nearest existing folder above both must be the same one.
+  let safeStart: boolean;
+  try {
+    safeStart = existsSync(opts.root)
+      ? withinRoot(opts.root, existing)
+      : realpathSync(existing) === realpathSync(nearestExisting(opts.root));
+  } catch {
+    return false;
+  }
+  if (!safeStart) return false;
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    return false;
+  }
+  if (!withinRoot(opts.root, dir)) return false;
+  if (O_NOFOLLOW === 0) {
+    try {
+      if (lstatSync(path).isSymbolicLink()) return false;
+    } catch {
+      // doesn't exist yet — created below
+    }
+  }
+  let fd: number;
+  try {
+    fd = openSync(
+      path,
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | O_NOFOLLOW,
+      0o644,
+    );
+  } catch {
+    return false; // a symlinked leaf (ELOOP), a directory, or no permission
+  }
+  try {
+    if (!fstatSync(fd).isFile()) return false;
+    const buf = Buffer.from(data, "utf8");
+    let written = 0;
+    while (written < buf.length) written += writeSync(fd, buf, written, buf.length - written);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    closeSync(fd);
+  }
 }

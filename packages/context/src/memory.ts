@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { readTextCappedSafe } from "./fs-safe.js";
+import { readTextCappedSafe, writeTextSafe } from "./fs-safe.js";
 
 /**
  * Project memory — a Claude-Code-style `.ambient/MEMORY.md` at the workspace root that COMPOUNDS across
@@ -18,9 +18,7 @@ export function memoryPath(workspaceRoot: string): string {
  *  into the SYSTEM prompt, so a `.ambient/MEMORY.md` symlinked at a secret must not be followed, and a giant
  *  file must be bounded before it's read whole (fs-safe — parity with every other loader). */
 export function readMemory(workspaceRoot: string): string | undefined {
-  const text = readTextCappedSafe(memoryPath(workspaceRoot), {
-    root: join(workspaceRoot, ".ambient"),
-  })?.trim();
+  const text = readTextCappedSafe(memoryPath(workspaceRoot), { root: workspaceRoot })?.trim();
   return text && text.length > 0 ? text : undefined;
 }
 
@@ -44,6 +42,19 @@ export function extractNotes(content: string): string {
   return i >= 0 ? content.slice(i).trimEnd() : "";
 }
 
+/** A memory file's text, read without following a symlink out of `root` ("" when absent). Null when it
+ *  exists but can't be read safely — then it must not be rewritten either. */
+function readFor(p: string, root: string): string | null {
+  const text = readTextCappedSafe(p, { root });
+  if (text !== null) return text;
+  try {
+    lstatSync(p);
+    return null; // there, but a symlink / too big / unreadable
+  } catch {
+    return ""; // not written yet
+  }
+}
+
 /**
  * Rewrite the auto-summary portion of project memory from the latest structured summary, PRESERVING the
  * curated Notes section (writeMemory used to blank-overwrite, erasing deliberate notes). Best-effort.
@@ -51,14 +62,13 @@ export function extractNotes(content: string): string {
 export function writeMemory(workspaceRoot: string, summary: string): void {
   const body = summary.trim();
   if (body.length === 0) return;
-  try {
-    const p = memoryPath(workspaceRoot);
-    const notes = existsSync(p) ? extractNotes(readFileSync(p, "utf8")) : "";
-    mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, `${MEMORY_HEADER}${body}\n${notes ? `\n${notes}\n` : ""}`, "utf8");
-  } catch {
-    // best-effort — memory is never load-bearing
-  }
+  const p = memoryPath(workspaceRoot);
+  const existing = readFor(p, workspaceRoot);
+  if (existing === null) return; // best-effort — memory is never load-bearing
+  const notes = extractNotes(existing);
+  writeTextSafe(p, `${MEMORY_HEADER}${body}\n${notes ? `\n${notes}\n` : ""}`, {
+    root: workspaceRoot,
+  });
 }
 
 /**
@@ -67,14 +77,15 @@ export function writeMemory(workspaceRoot: string, summary: string): void {
  * be wiped by the next compaction's writeMemory. Bounded + best-effort. Returns whether it recorded anything.
  */
 export function rememberNote(workspaceRoot: string, note: string): boolean {
-  return appendNote(memoryPath(workspaceRoot), note, MEMORY_HEADER);
+  return appendNote(memoryPath(workspaceRoot), note, MEMORY_HEADER, workspaceRoot);
 }
 
-function appendNote(p: string, note: string, header: string): boolean {
+function appendNote(p: string, note: string, header: string, root: string): boolean {
   const clean = note.replace(/\s+/g, " ").trim().slice(0, 500);
   if (clean.length === 0) return false;
   try {
-    const existing = existsSync(p) ? readFileSync(p, "utf8") : "";
+    const existing = readFor(p, root);
+    if (existing === null) return false;
     const idx = existing.indexOf(NOTES_HEADER);
     const above = (idx >= 0 ? existing.slice(0, idx) : existing).trimEnd();
     const priorBullets = (idx >= 0 ? existing.slice(idx) : "")
@@ -82,18 +93,17 @@ function appendNote(p: string, note: string, header: string): boolean {
       .filter((l) => l.startsWith("- "));
     const bullets = [...priorBullets, `- ${clean}`].slice(-MAX_NOTES);
     const head = above.length > 0 ? above : header.trimEnd();
-    mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, `${head}\n\n${NOTES_HEADER}\n${bullets.join("\n")}\n`, "utf8");
-    return true;
+    return writeTextSafe(p, `${head}\n\n${NOTES_HEADER}\n${bullets.join("\n")}\n`, { root });
   } catch {
     return false; // best-effort — memory is never load-bearing
   }
 }
 
-/** The notes (bullets) in a memory file's curated Notes section, in order. */
-export function listNotes(file: string): string[] {
+/** The notes (bullets) in a memory file's curated Notes section, in order (`root`: the folder the file must
+ *  stay inside — the workspace for a project's memory). */
+export function listNotes(file: string, root = dirname(file)): string[] {
   try {
-    const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+    const text = readFor(file, root) ?? "";
     const idx = text.indexOf(NOTES_HEADER);
     if (idx < 0) return [];
     return text
@@ -107,10 +117,10 @@ export function listNotes(file: string): string[] {
 }
 
 /** Remove note `n` (1-based) from a memory file's Notes section; returns the removed note, if any. */
-export function forgetNote(file: string, n: number): string | undefined {
+export function forgetNote(file: string, n: number, root = dirname(file)): string | undefined {
   try {
-    if (!existsSync(file)) return undefined;
-    const text = readFileSync(file, "utf8");
+    const text = readFor(file, root);
+    if (!text) return undefined;
     const idx = text.indexOf(NOTES_HEADER);
     if (idx < 0) return undefined;
     const above = text.slice(0, idx).trimEnd();
@@ -122,8 +132,9 @@ export function forgetNote(file: string, n: number): string | undefined {
     if (gone === undefined) return undefined;
     const rest = bullets.filter((_, i) => i !== n - 1);
     const notes = rest.length > 0 ? `${NOTES_HEADER}\n${rest.join("\n")}\n` : "";
-    writeFileSync(file, `${above}\n${notes ? `\n${notes}` : ""}`, "utf8");
-    return gone.slice(2);
+    return writeTextSafe(file, `${above}\n${notes ? `\n${notes}` : ""}`, { root })
+      ? gone.slice(2)
+      : undefined;
   } catch {
     return undefined;
   }
@@ -136,7 +147,7 @@ export function userMemoryPath(ambientHome: string): string {
 
 /** Add a note that applies to every project. */
 export function rememberUserNote(file: string, note: string): boolean {
-  return appendNote(file, note, USER_MEMORY_HEADER);
+  return appendNote(file, note, USER_MEMORY_HEADER, dirname(file));
 }
 
 /** The notes that apply to every project, as prompt text (undefined when there are none). */

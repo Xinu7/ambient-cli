@@ -50,7 +50,7 @@ export function makeMemoryPort(workspaceRoot: string, ambientHome: string): Memo
         : "Couldn't save that note.";
     },
     report() {
-      const project = listNotes(projectFile);
+      const project = listNotes(projectFile, workspaceRoot);
       const user = listNotes(userFile);
       const lines = [
         "This project (.ambient/MEMORY.md):",
@@ -70,7 +70,9 @@ export function makeMemoryPort(workspaceRoot: string, ambientHome: string): Memo
     forget(which) {
       const m = /^(u)?(\d+)$/i.exec(which.trim());
       if (!m?.[2]) return "usage: /memory forget <n>  (u<n> for every-project notes)";
-      const gone = forgetNote(m[1] ? userFile : projectFile, Number(m[2]));
+      const gone = m[1]
+        ? forgetNote(userFile, Number(m[2]))
+        : forgetNote(projectFile, Number(m[2]), workspaceRoot);
       return gone ? `Forgot: ${gone}` : `There's no note ${which.trim()}.`;
     },
   };
