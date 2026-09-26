@@ -62,3 +62,23 @@ describe("network failures", () => {
     expect((err as Error).message).toContain("the connection was refused");
   });
 });
+
+describe("a rejected request says why", () => {
+  it("shows the server's reason", async () => {
+    const { classifyHttpError } = await import("../src/errors.js");
+    const e = classifyHttpError(
+      400,
+      JSON.stringify({
+        error: {
+          message:
+            "messages[3].role='system' is only supported before conversation messages for this model.",
+        },
+      }),
+    );
+    expect(e.kind).toBe("bad_request");
+    expect(e.message).toBe(
+      "Ambient rejected the request: messages[3].role='system' is only supported before conversation messages for this model.",
+    );
+    expect(classifyHttpError(400, "").message).toBe("Bad request to Ambient.");
+  });
+});

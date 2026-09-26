@@ -45,9 +45,10 @@ export function classifyHttpError(
     });
   }
   if (status === 400) {
+    const reason = serverReason(body);
     return new AmbError({
       kind: "bad_request",
-      message: "Bad request to Ambient.",
+      message: reason ? `Ambient rejected the request: ${reason}` : "Bad request to Ambient.",
       retryable: false,
       model,
       detail: body,
@@ -84,4 +85,22 @@ export function classifyHttpError(
     model,
     detail: body,
   });
+}
+
+/** The server's own explanation from an error body (`{"error":{"message":…}}` or plain text), one line. */
+export function serverReason(body: string): string | undefined {
+  let text = body;
+  try {
+    const parsed = JSON.parse(body) as {
+      error?: { message?: unknown } | string;
+      message?: unknown;
+    };
+    const m =
+      typeof parsed.error === "object" ? parsed.error?.message : (parsed.error ?? parsed.message);
+    if (typeof m === "string") text = m;
+  } catch {
+    // not JSON: use the text as it is
+  }
+  const line = text.replace(/\s+/g, " ").trim();
+  return line ? (line.length > 300 ? `${line.slice(0, 299)}…` : line) : undefined;
 }
