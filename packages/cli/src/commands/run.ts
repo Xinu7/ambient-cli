@@ -48,6 +48,9 @@ function reportingFor(a: RunArgs): Reporting {
   return a.print || a.outputFormat !== "text" ? "quiet" : "live";
 }
 
+/** How long a signalled run gets to wind down before ambient exits anyway. */
+const FORCE_EXIT_MS = 5_000;
+
 /**
  * A task that starts with `/name` runs that custom command or skill, the same as typing it in the TUI.
  * Returns the task unchanged when it isn't a command, or an error for an unknown one.
@@ -197,6 +200,17 @@ export async function runAgent(args: string[]): Promise<void> {
     process.once("SIGINT", () => process.exit(130));
   };
   process.once("SIGINT", onSigint);
+  // A terminal closing or a `kill` cancels the run the same way, so its cleanup (background commands and
+  // subagents it started) happens before ambient exits; a run that won't wind down is forced after a moment.
+  const onTerminate = (code: number) => () => {
+    controller.abort();
+    process.exitCode = code;
+    setTimeout(() => process.exit(code), FORCE_EXIT_MS).unref();
+  };
+  const onSigterm = onTerminate(143);
+  const onSighup = onTerminate(129);
+  process.once("SIGTERM", onSigterm);
+  process.once("SIGHUP", onSighup);
 
   // A persistence failure ABORTS the run: if we can't durably record intent, we must not keep executing
   // mutations. Ambient rejecting the key gets one clear, actionable line at the end of the run.
@@ -366,5 +380,7 @@ export async function runAgent(args: string[]): Promise<void> {
     await fireAndForget(hooks, "SessionEnd", { reason: "exit" });
     mcp.close();
     process.removeListener("SIGINT", onSigint);
+    process.removeListener("SIGTERM", onSigterm);
+    process.removeListener("SIGHUP", onSighup);
   }
 }

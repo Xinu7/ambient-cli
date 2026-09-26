@@ -203,6 +203,9 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     process.once(sig, () => {
       mcp.close();
       restore();
+      // Everything else that cleans up on `exit` (background commands and subagents, the glyph fallback)
+      // must run too — a signal exit never fires it.
+      process.emit("exit", 128 + (os.constants.signals[sig] ?? 1));
       // Re-raise so the shell sees the real signal; Windows can't signal a process this way (it throws), so
       // exit with the conventional 128 + signal number instead.
       if (process.platform === "win32") process.exit(128 + (os.constants.signals[sig] ?? 1));
