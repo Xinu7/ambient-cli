@@ -360,3 +360,24 @@ describe("a bare Bash rule covers every tool that runs a program", () => {
     ).toBe(false);
   });
 });
+
+describe("path rules cover view_image like read", () => {
+  it("an ask rule for a folder asks before looking at an image in it", () => {
+    const rule = parseRule("Read(./private/**)") as PermissionRule;
+    const call = {
+      toolName: "view_image",
+      args: { path: "private/a.png" },
+      resources: ["/w/private/a.png"],
+      workspaceRoot: "/w",
+      home: "/h",
+    };
+    expect(ruleCovers(rule, call, "any")).toBe(true);
+    expect(
+      ruleCovers(
+        rule,
+        { ...call, args: { path: "pub/a.png" }, resources: ["/w/pub/a.png"] },
+        "any",
+      ),
+    ).toBe(false);
+  });
+});

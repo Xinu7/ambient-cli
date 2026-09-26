@@ -93,6 +93,7 @@ const FILE_TOOLS = new Set([
   "write",
   "apply_patch",
   "notebook_edit",
+  "view_image",
 ]);
 
 const isResourceTool = (name: string) =>
