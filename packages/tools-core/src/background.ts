@@ -11,6 +11,8 @@ import { cleanTerminalOutput } from "./tools/bash.js";
 /** Output kept per job; older output is dropped from the front. */
 const MAX_JOB_OUTPUT_CHARS = 1_000_000;
 const MAX_JOBS = 16;
+/** Finished jobs kept for reading (older ones already read are let go, with their output). */
+const MAX_FINISHED_KEPT = 16;
 
 export interface BackgroundJob {
   id: string;
@@ -63,6 +65,7 @@ export class BackgroundJobs {
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    this.prune();
     const id = `bg${this.next++}`;
     const job: JobState = {
       id,
@@ -107,6 +110,13 @@ export class BackgroundJobs {
       ...(job.exitCode !== undefined ? { exitCode: job.exitCode } : {}),
       ...(job.finishedAt !== undefined ? { finishedAt: job.finishedAt } : {}),
     };
+  }
+
+  /** Let go of the oldest finished jobs whose end the agent has already seen. */
+  private prune(): void {
+    const done = [...this.jobs.values()].filter((j) => j.exitCode !== undefined && j.reported);
+    for (const j of done.slice(0, Math.max(0, done.length - MAX_FINISHED_KEPT)))
+      this.jobs.delete(j.id);
   }
 
   /** New output since the last read (the model reads a job incrementally). */

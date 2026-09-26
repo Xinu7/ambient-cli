@@ -60,6 +60,16 @@ describe("background commands", () => {
     expect(jobs.takeFinished()).toEqual([]); // the model already read it
   });
 
+  it("lets go of old finished commands the agent has already read", async () => {
+    for (let i = 0; i < 20; i++) {
+      const { id } = jobs.start("echo hi", dir);
+      await waitFor(() => jobs.list().find((j) => j.id === id)?.exitCode !== undefined);
+      jobs.read(id);
+    }
+    expect(jobs.list().length).toBeLessThanOrEqual(17);
+    expect(jobs.list().at(-1)?.id).toBe("bg20");
+  }, 30_000);
+
   it("kill_shell stops a running command; stopAll stops the rest", async () => {
     jobs.start(`node -e "setInterval(() => console.log('tick'), 100)"`, dir);
     jobs.start(`node -e "setInterval(() => {}, 1000)"`, dir);

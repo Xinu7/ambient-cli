@@ -98,6 +98,9 @@ export interface AccumulatorCallbacks {
   onHiddenOutput?: () => void;
 }
 
+/** How far into a streaming tool call's arguments to look for the file it names. */
+const DRAFT_SCAN_CHARS = 4_096;
+
 /** The file a partly-streamed tool call's arguments name, once the whole value has arrived. */
 function draftPath(args: string): string | undefined {
   const m = /"(?:path|file_path|file)"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(args);
@@ -183,7 +186,9 @@ export class ChatAccumulator {
   private reportDraft(key: string, cur: AccumulatedToolCall): void {
     if (!this.cb.onToolDraft || !cur.name) return;
     const seen = this.drafted.get(key) ?? { name: false, path: false };
-    const path = seen.path ? undefined : draftPath(cur.arguments);
+    // The path comes first in practice; don't rescan a long argument on every chunk looking for it.
+    const path =
+      seen.path || cur.arguments.length > DRAFT_SCAN_CHARS ? undefined : draftPath(cur.arguments);
     if (!seen.name || path) {
       this.cb.onToolDraft({ name: cur.name, ...(path ? { path } : {}) });
       this.drafted.set(key, { name: true, path: seen.path || path !== undefined });
