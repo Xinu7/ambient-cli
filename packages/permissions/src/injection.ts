@@ -84,7 +84,7 @@ export function neutralizeInjection(text: string): string {
 /**
  * Whether a tool's output can carry someone else's bytes and must go through the injection guard: anything
  * from the network, MCP servers (their tools, resources and errors), the shell, a saved copy of any of those
- * (read_artifact), and what a vision model or a tool list says (ask_vision, load_tools). A plain local read
+ * (read_artifact), and what a vision model or a tool list says (view_image, ask_vision, load_tools). A plain local read
  * is the user's own workspace and isn't wrapped.
  */
 export function needsInjectionGuard(
@@ -99,6 +99,7 @@ export function needsInjectionGuard(
     toolName === "bash" ||
     toolName === "read_artifact" ||
     toolName === "ask_vision" ||
+    toolName === "view_image" ||
     toolName === "load_tools"
   );
 }

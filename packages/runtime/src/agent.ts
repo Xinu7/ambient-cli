@@ -102,6 +102,7 @@ import type {
 } from "./ports.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { LOAD_TOOLS, ToolLoader, isDeferrable, makeLoadToolsTool } from "./tool-loading.js";
+import { makeViewImageTool } from "./view-image.js";
 import { injectDescription, relayImageToText } from "./vision-relay.js";
 
 export interface AgentResult {
@@ -115,6 +116,8 @@ export interface AgentResult {
    * when the run ended before the conversation was constructed (e.g. an empty fleet).
    */
   messages?: Msg[];
+  /** Every image in the session after this run (attachments plus any the agent looked at). */
+  sessionImages?: readonly ImageAttachment[];
 }
 
 export interface AgentOptions {
@@ -146,10 +149,14 @@ export class Agent {
   async run(userInput: string, opts: RunOptions): Promise<AgentResult> {
     // A run that isn't part of a longer session owns its tool state — background commands it started stop
     // when it ends. An interactive session passes its own state, and they keep running between messages.
-    if (opts.runState) return this.runWithState(userInput, opts, opts.runState);
+    const withImages = (r: AgentResult): AgentResult => ({
+      ...r,
+      sessionImages: this.sessionImages,
+    });
+    if (opts.runState) return withImages(await this.runWithState(userInput, opts, opts.runState));
     const state = newRunState();
     try {
-      return await this.runWithState(userInput, opts, state);
+      return withImages(await this.runWithState(userInput, opts, state));
     } finally {
       state.jobs.stopAll();
     }
@@ -326,6 +333,28 @@ export class Agent {
       return true;
     };
     ensureAskVision(target);
+    // `view_image`: the agent looks at an image file. A model that can see gets it with the next message.
+    const viewed: Array<{ img: ImageAttachment; label: string }> = [];
+    if (opts.loadImage && !this.registry.has("view_image")) {
+      this.registry.register(
+        makeViewImageTool({
+          client: this.client,
+          catalog: () => liveCatalog,
+          load: opts.loadImage,
+          canSee: () => {
+            const served = liveCatalog.find((m) => m.id === target);
+            return served !== undefined && supportsVision(served);
+          },
+          addToSession: (img) => {
+            this.sessionImages = [...this.sessionImages, img];
+            ensureAskVision(target);
+            return this.sessionImages.length;
+          },
+          attach: (img, label) => viewed.push({ img, label }),
+          targetWindow: () => profileOf(target).window,
+        }),
+      );
+    }
     // MCP tools beyond the served model's tool budget are loaded on demand (`load_tools`), so hundreds of
     // connected tools never crowd out the conversation — and a small model can still run at all.
     const toolLoader = new ToolLoader(
@@ -1468,6 +1497,18 @@ export class Agent {
             content: body,
           });
         }
+      }
+      // Images the agent looked at (view_image) go to the model with the next call.
+      if (viewed.length > 0) {
+        const batch = viewed.splice(0);
+        messages.push({
+          role: "user",
+          content: buildUserContent(
+            batch.map((v) => `[${v.label}]`).join("\n"),
+            batch.map((v) => v.img),
+            true,
+          ),
+        });
       }
       // A tool hook said stop the whole run (`"continue": false`): the results above are recorded, then stop.
       const halted = outcomes.find((o) => o.halt)?.halt;

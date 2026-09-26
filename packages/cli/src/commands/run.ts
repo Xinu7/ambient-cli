@@ -20,6 +20,7 @@ import { expandSlashCommand } from "../agent/command-expand.js";
 import { createDurableEventSink } from "../agent/event-sink.js";
 import { HeadlessOutput } from "../agent/headless-output.js";
 import { fireAndForget } from "../agent/hooks.js";
+import { makeImageLoader } from "../agent/load-image.js";
 import { type McpConnection, connectMcp } from "../agent/mcp-connect.js";
 import { buildRegistry } from "../agent/registry.js";
 import { EventRenderer } from "../agent/render-events.js";
@@ -279,6 +280,7 @@ export async function runAgent(args: string[]): Promise<void> {
     checkpoint: (content) => saveObject(sessionId, content),
     artifact: (content) => saveObject(sessionId, content), // offload large tool outputs
     readArtifact: (handle) => readObject(sessionId, handle),
+    loadImage: makeImageLoader(sessionId),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(goal ? { goal } : {}),
     ...(resumed ? { resumeContext: resumed.context } : {}),

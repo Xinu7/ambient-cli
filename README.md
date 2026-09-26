@@ -85,7 +85,8 @@ rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
   are driven through a controller-assisted text protocol — not just the tool-capable ones.
 - **Images for every model.** Attach a screenshot (paste a path, drag a file, or Ctrl+V). A model that can't
   see images gets it described by a vision model from the same fleet — you see it happen — and can ask
-  follow-up questions about any image in the session.
+  follow-up questions about any image in the session. The agent can look at image files itself too (a
+  screenshot it just took, a mockup) with `view_image`.
 - **Honest reliability.** Substitution and failover are always visible and bounded; stalled streams are
   detected and retried; network errors say what happened; the transcript is crash-safe and resumable.
 - **You hold the dial.** A two-axis control — **Plan ⇄ Build** (Tab) × **ask / accept-edits / bypass**

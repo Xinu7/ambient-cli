@@ -212,6 +212,8 @@ export interface RunOptions {
   /** Every image attached in this session so far (numbered from 1, in order) — lets a model that can't see
    *  images ask a vision model about any of them with `ask_vision`. Absent ⇒ just this run's attachments. */
   sessionImages?: readonly ImageAttachment[];
+  /** Load (and size) an image file for the conversation — backs the `view_image` tool. Absent ⇒ no tool. */
+  loadImage?: (absPath: string) => Promise<ImageAttachment>;
   /** Polled at each turn boundary: a model id the user switched to mid-run (e.g. /model), consumed once. The
    *  switch applies from the next turn and re-fits the conversation to the new model. */
   nextModel?: () => string | undefined;

@@ -43,6 +43,7 @@ import { expandSlashCommand } from "../agent/command-expand.js";
 import { compactNow } from "../agent/compact-now.js";
 import { createDurableEventSink } from "../agent/event-sink.js";
 import { fireAndForget } from "../agent/hooks.js";
+import { makeImageLoader } from "../agent/load-image.js";
 import { type McpControl, mcpReport, splitArgs } from "../agent/mcp-control.js";
 import { type MemoryPort, quickNote } from "../agent/memory-port.js";
 import { buildRegistry } from "../agent/registry.js";
@@ -916,6 +917,7 @@ export function App(deps: AppDeps): ReactNode {
           checkpoint: (content) => saveObject(sessionId, content),
           artifact: (content) => saveObject(sessionId, content), // offload large tool outputs
           readArtifact: (handle) => readObject(sessionId, handle),
+          loadImage: makeImageLoader(sessionId),
           effort: effortRef.current,
           ...(lastEffortRef.current ? { priorEffort: lastEffortRef.current } : {}),
           ...(hooks ? { hooks } : {}),
@@ -957,7 +959,8 @@ export function App(deps: AppDeps): ReactNode {
         if (result.messages && result.messages.length > 1) {
           conversationRef.current = result.messages.slice(1);
           skipLogReplayRef.current = false;
-          sessionImagesRef.current = sessionImages;
+          // Includes images the agent looked at itself (view_image), so numbering stays the same next time.
+          sessionImagesRef.current = [...(result.sessionImages ?? sessionImages)];
         }
         dispatch({ t: "stop", stopReason: result.stopReason });
         // A long run finishing is worth a heads-up if you've switched to another window.
