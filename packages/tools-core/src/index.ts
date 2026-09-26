@@ -8,3 +8,4 @@ export * from "./openai-schema.js";
 export * from "./tools/index.js";
 export * from "./shell.js";
 export * from "./background.js";
+export * from "./ripgrep.js";

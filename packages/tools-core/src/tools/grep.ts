@@ -3,7 +3,9 @@ import { join, sep } from "node:path";
 import type { ToolContext, ToolDefinition } from "@amb/protocol";
 import { z } from "zod";
 import { resolveInWorkspace } from "../paths.js";
+import { findRipgrep, isGlob, ripgrepSearch } from "../ripgrep.js";
 import { walkFiles } from "../walk-files.js";
+import { globToRegExp } from "./glob.js";
 
 const Input = z.object({
   pattern: z.string().describe("Regular expression to search for"),
@@ -11,7 +13,9 @@ const Input = z.object({
   glob: z
     .string()
     .optional()
-    .describe("Only search files whose name matches this suffix, e.g. .ts"),
+    .describe(
+      'Only search matching files: a glob like "*.ts" or "src/**/*.tsx", or a name ending like .ts',
+    ),
   limit: z.number().int().positive().default(100),
 });
 const Match = z.object({ file: z.string(), line: z.number(), text: z.string() });
@@ -53,8 +57,31 @@ export const grepTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
       .slice(root.length + 1)
       .split(sep)
       .join("/");
+    // ripgrep when it's installed (fast, and it honours .gitignore); the JS search otherwise, or when
+    // ripgrep can't run this pattern.
+    const rg = findRipgrep(root);
+    if (rg) {
+      const found = await ripgrepSearch({
+        rg,
+        root,
+        start: rootPrefix,
+        pattern: input.pattern,
+        ...(input.glob ? { glob: input.glob } : {}),
+        limit: input.limit,
+        maxLineChars: MAX_LINE_CHARS,
+        ...(ctx.readDenied ? { denied: ctx.readDenied } : {}),
+        signal: ctx.signal,
+      });
+      if (found) return { pattern: input.pattern, ...found };
+    }
+    const globRe = input.glob && isGlob(input.glob) ? globToRegExp(input.glob) : undefined;
+    const globMatches = (rel: string) =>
+      !input.glob ||
+      (globRe
+        ? globRe.test(input.glob.includes("/") ? rel : (rel.split("/").at(-1) ?? rel))
+        : rel.endsWith(input.glob));
     for await (const rel of walkFiles(root, { start: rootPrefix, signal: ctx.signal })) {
-      if (input.glob && !rel.endsWith(input.glob)) continue;
+      if (!globMatches(rel)) continue;
       if (ctx.readDenied?.(join(root, rel))) continue;
       ctx.signal.throwIfAborted();
       let content: string;
