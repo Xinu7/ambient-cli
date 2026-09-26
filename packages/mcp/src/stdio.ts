@@ -15,6 +15,16 @@ export interface StdioServerConfig {
  * Spawn an MCP server as a child process and wire its stdin/stdout as a newline-delimited JSON transport.
  * stderr is captured (bounded) for diagnostics but never parsed as protocol. The child is killed on close.
  */
+/** Ambient's own secrets, which a server never gets unless its config passes them on purpose. */
+const OWN_SECRETS = ["AMBIENT_API_KEY"];
+
+/** The server's environment: ours (its PATH, HOME, tool settings) minus ambient's key, plus its own env. */
+export function serverEnv(own: Record<string, string> | undefined): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const k of OWN_SECRETS) delete env[k];
+  return { ...env, ...own };
+}
+
 export function spawnStdioTransport(cfg: StdioServerConfig): {
   transport: Transport;
   child: ChildProcess;
@@ -26,7 +36,7 @@ export function spawnStdioTransport(cfg: StdioServerConfig): {
   // orphaned server keeps our stdout pipe open, so `ambient run` HANGS after printing [complete].
   const child = crossSpawn(cfg.command, cfg.args ?? [], {
     cwd: cfg.cwd,
-    env: { ...process.env, ...cfg.env },
+    env: serverEnv(cfg.env),
     stdio: ["pipe", "pipe", "pipe"],
     detached: process.platform !== "win32",
     windowsHide: true,

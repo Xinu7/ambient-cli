@@ -41,3 +41,17 @@ it("close() kills the whole process group — no orphaned grandchild, pipes rele
   for (let i = 0; i < 200 && alive(gcPid); i++) await settle(25);
   expect(alive(gcPid)).toBe(false); // …and dies with the group (not orphaned)
 }, 30_000);
+
+it("a server doesn't inherit ambient's own API key unless its config passes it", async () => {
+  const { serverEnv } = await import("../src/stdio.js");
+  const before = process.env.AMBIENT_API_KEY;
+  process.env.AMBIENT_API_KEY = "amb-test-key";
+  try {
+    expect(serverEnv(undefined).AMBIENT_API_KEY).toBeUndefined();
+    expect(serverEnv(undefined).PATH).toBe(process.env.PATH);
+    expect(serverEnv({ AMBIENT_API_KEY: "on purpose" }).AMBIENT_API_KEY).toBe("on purpose");
+  } finally {
+    if (before === undefined) Reflect.deleteProperty(process.env, "AMBIENT_API_KEY");
+    else process.env.AMBIENT_API_KEY = before;
+  }
+});
