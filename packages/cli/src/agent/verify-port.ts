@@ -4,11 +4,12 @@ import {
   accessSync,
   closeSync,
   existsSync,
+  lstatSync,
   openSync,
-  readFileSync,
   readSync,
 } from "node:fs";
 import { join } from "node:path";
+import { readTextCappedSafe } from "@amb/context";
 import type { VerifyOutcome, VerifyPort } from "@amb/runtime";
 import {
   type ShellInfo,
@@ -120,18 +121,37 @@ function executable(p: string): boolean {
   }
 }
 
-/** The project's verify scripts that exist, with their contents — what trusting the project covers. */
+/** The project's verify scripts that exist, with their contents — what trusting the project covers. Read
+ *  size-capped and never through a link (a repository could point one at a device or a huge file). */
 export function verifyScripts(workspaceRoot: string): Array<{ file: string; content: string }> {
   const out: Array<{ file: string; content: string }> = [];
-  for (const ext of ["", ".ps1", ".cmd", ".bat"]) {
+  for (const ext of VERIFY_EXTS) {
     const file = `${VERIFY_SCRIPT}${ext}`;
-    try {
-      out.push({ file, content: readFileSync(join(workspaceRoot, file), "utf8") });
-    } catch {
-      // not there (or unreadable, and then it can't run either)
-    }
+    const path = join(workspaceRoot, file);
+    if (!existsLink(path)) continue;
+    const content = isRegularFile(path) ? readTextCappedSafe(path, { root: workspaceRoot }) : null;
+    out.push({ file, content: content ?? "(not a readable regular file — it won't run)" });
   }
   return out;
+}
+
+const VERIFY_EXTS = ["", ".ps1", ".cmd", ".bat"];
+
+function existsLink(p: string): boolean {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isRegularFile(p: string): boolean {
+  try {
+    return lstatSync(p).isFile();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -145,6 +165,9 @@ export function makeVerifyPort(
 ): VerifyPort | undefined {
   const runner = verifyRunner(workspaceRoot);
   if (!runner || !trusted()) return undefined;
+  // Only a real file runs — never a link or a device a repository put in its place.
+  const scripts = VERIFY_EXTS.map((e) => join(workspaceRoot, `${VERIFY_SCRIPT}${e}`));
+  if (scripts.some((p) => existsLink(p) && !isRegularFile(p))) return undefined;
   return async (signal) => (trusted() ? runVerifyScript(runner, workspaceRoot, signal) : null);
 }
 

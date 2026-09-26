@@ -201,3 +201,24 @@ describe("a project's verify script waits for trust", () => {
     },
   );
 });
+
+describe("a verify script that isn't a plain file", () => {
+  it.skipIf(process.platform === "win32")(
+    "a link to a pipe is never read or run (no hang)",
+    async () => {
+      const { execFileSync } = await import("node:child_process");
+      const { symlinkSync } = await import("node:fs");
+      const { makeVerifyPort, verifyScripts } = await import("../src/agent/verify-port.js");
+      mkdirSync(join(ws, ".ambient"), { recursive: true });
+      const fifo = join(dir, "pipe");
+      execFileSync("mkfifo", [fifo]);
+      symlinkSync(fifo, join(ws, ".ambient", "verify"));
+      const started = Date.now();
+      expect(verifyScripts(ws)[0]?.content).toMatch(/won't run/);
+      const s = makeWorkspaceSettings({ workspaceRoot: ws, home, trustFile, config: {} });
+      s.trust();
+      expect(makeVerifyPort(ws, () => s.projectTrusted())).toBeUndefined();
+      expect(Date.now() - started).toBeLessThan(2_000);
+    },
+  );
+});
