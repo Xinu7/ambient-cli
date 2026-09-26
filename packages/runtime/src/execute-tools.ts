@@ -21,7 +21,13 @@ import {
   isReadOnly,
   newToolCallId,
 } from "@amb/protocol";
-import { type ToolRegistry, isPosixShell, machineShell, sha256 } from "@amb/tools-core";
+import {
+  BackgroundJobs,
+  type ToolRegistry,
+  isPosixShell,
+  machineShell,
+  sha256,
+} from "@amb/tools-core";
 import type { Approver, RunOptions, ToolCall } from "./ports.js";
 import { linkedTargetRisk, readOnlyBashHolds } from "./read-only-bash.js";
 import { previewResult } from "./tool-result-preview.js";
@@ -437,6 +443,7 @@ export async function executeTools(
       ? { readRoots: { list: () => [...readRoots], add: (dir: string) => void readRoots.add(dir) } }
       : {}),
     ...(readDenied ? { readDenied } : {}),
+    ...(runState ? { backgroundJobs: runState.jobs } : {}),
   });
 
   const ids = calls.map((c) => (c.id.startsWith("tc_") ? c.id : newToolCallId()));
@@ -616,6 +623,8 @@ const NOT_OURS = new Set([
 
 /** What a run remembers across tool batches. */
 export interface RunState {
+  /** Background shell commands (`bash` with `background: true`). */
+  jobs: BackgroundJobs;
   /** Folders outside the workspace tools may read (a loaded skill's own files). */
   readRoots: Set<string>;
   /** Folders whose own instruction files were already offered this run. */
@@ -623,7 +632,7 @@ export interface RunState {
 }
 
 export function newRunState(): RunState {
-  return { readRoots: new Set(), instructionDirs: new Set() };
+  return { jobs: new BackgroundJobs(), readRoots: new Set(), instructionDirs: new Set() };
 }
 
 /**

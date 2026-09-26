@@ -2,6 +2,7 @@ import type { ToolDefinition } from "@amb/protocol";
 import { ToolRegistry } from "../registry.js";
 import { applyPatchTool } from "./apply-patch.js";
 import { askUserTool } from "./ask-user.js";
+import { bashOutputTool, killShellTool } from "./background-tools.js";
 import { bashTool } from "./bash.js";
 import { editTool } from "./edit.js";
 import { globToRegExp, globTool } from "./glob.js";
@@ -28,6 +29,8 @@ export {
   editTool,
   applyPatchTool,
   bashTool,
+  bashOutputTool,
+  killShellTool,
   planTool,
   skillTool,
   searchSkillsTool,
@@ -51,6 +54,8 @@ export const builtinTools: ToolDefinition[] = [
   editTool,
   applyPatchTool,
   bashTool,
+  bashOutputTool,
+  killShellTool,
   planTool,
   skillTool,
   searchSkillsTool,

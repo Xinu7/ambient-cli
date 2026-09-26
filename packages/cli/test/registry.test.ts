@@ -21,7 +21,7 @@ const fakeTool = (name: string): ToolDefinition =>
   }) as unknown as ToolDefinition;
 
 describe("buildRegistry", () => {
-  it("registers the 17 builtins plus injected mcp + subagent tools", () => {
+  it("registers the 19 builtins plus injected mcp + subagent tools", () => {
     const reg = buildRegistry({
       mcpTools: [fakeTool("mcp__docs__search")],
       subagent: fakeTool("subagent"),
@@ -33,7 +33,7 @@ describe("buildRegistry", () => {
     expect(names).toContain("search_skills");
     expect(names).toContain("ask_user");
     expect(names).toContain("propose_goal_update");
-    expect(reg.list().length).toBe(17 + 2);
+    expect(reg.list().length).toBe(19 + 2);
   });
 
   it("throws on a duplicate tool name (catches a namespace collision)", () => {

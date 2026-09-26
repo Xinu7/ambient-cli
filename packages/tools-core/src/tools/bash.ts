@@ -10,6 +10,12 @@ const SHELL = machineShell();
 const Input = z.object({
   command: z.string().describe("Shell command to run in the workspace"),
   timeoutMs: z.number().int().positive().max(600_000).default(120_000),
+  background: z
+    .boolean()
+    .optional()
+    .describe(
+      "Run it in the background (a dev server, a watcher, a long build) and return right away; read its output with bash_output and stop it with kill_shell",
+    ),
 });
 const Output = z.object({
   command: z.string(),
@@ -18,6 +24,8 @@ const Output = z.object({
   stderr: z.string(),
   truncated: z.boolean(),
   timedOut: z.boolean(),
+  /** Set when the command was started in the background. */
+  backgroundId: z.string().optional(),
 });
 
 const MAX_OUTPUT = 100_000; // chars per stream before truncation
@@ -46,6 +54,27 @@ export const bashTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeof Outp
     // A missing working directory makes spawn fail with a misleading "<shell> ENOENT"; say what's wrong.
     if (!existsSync(ctx.cwd)) {
       return Promise.reject(new Error(`the working directory doesn't exist: ${ctx.cwd}`));
+    }
+    if (input.background) {
+      if (!ctx.backgroundJobs) {
+        return Promise.reject(
+          new Error("background commands aren't available here — run it normally"),
+        );
+      }
+      try {
+        const { id } = ctx.backgroundJobs.start(input.command, ctx.cwd);
+        return Promise.resolve({
+          command: input.command,
+          exitCode: null,
+          stdout: `Started in the background as ${id}. Read its output with bash_output({"id":"${id}"}); stop it with kill_shell({"id":"${id}"}).`,
+          stderr: "",
+          truncated: false,
+          timedOut: false,
+          backgroundId: id,
+        });
+      } catch (err) {
+        return Promise.reject(err);
+      }
     }
     return new Promise((resolve, reject) => {
       // On POSIX `detached: true` makes the shell its OWN process-group leader so a timeout/abort can kill the

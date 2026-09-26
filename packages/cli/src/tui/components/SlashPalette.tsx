@@ -49,6 +49,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     args: "[login <server>]",
     desc: "Your MCP servers; sign in to one that needs it",
   },
+  { name: "/jobs", args: "[kill <id>]", desc: "Background commands the agent started" },
   {
     name: "/memory",
     args: "[all|forget]",

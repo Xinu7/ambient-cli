@@ -120,6 +120,9 @@ rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
   any change needs trusting again. Your `~/.claude` hooks, allow rules and global instructions
   (`~/.claude/CLAUDE.md`, `~/.claude/rules`, `~/.codex/AGENTS.md`) and your enabled Claude Code plugins' hooks
   and MCP servers apply when you set `"claudeSettings": true`.
+- **Background commands.** The agent can start a dev server, a watcher or a long build in the background,
+  keep working, read its output as it goes, and stop it; it's told when one finishes. `/jobs` lists them,
+  and they all stop when the session ends.
 - **Runs everywhere.** macOS, Linux and Windows (Git Bash or PowerShell), tested on all three.
 
 ## In the interactive TUI
@@ -137,6 +140,7 @@ The activity line narrates what the agent is actually doing — `Reading src/app
 /memory          notes ambient keeps (# adds one)  /hooks            the hooks that run here
 /permissions     your allow / ask / deny rules     /trust [yes]      review this project's own settings
 /mcp             your MCP servers (/mcp login <name> signs in to one)
+/jobs            background commands the agent started (/jobs kill <id>)
 /help            every command and key             /quit
 ```
 

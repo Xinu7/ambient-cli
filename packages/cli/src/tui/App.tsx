@@ -617,6 +617,27 @@ export function App(deps: AppDeps): ReactNode {
   // What a session's runs share: folders a loaded skill made readable, and folders whose instructions the
   // agent has already been given (so a subfolder's AGENTS.md comes once per conversation, not per message).
   const runStateRef = useRef(newRunState());
+  // Background commands: say when one finishes, and stop them all when the session ends — even an abrupt
+  // exit, since they run in their own process groups and would otherwise outlive ambient.
+  const [jobsEpoch, setJobsEpoch] = useState(0);
+  useEffect(() => {
+    void jobsEpoch;
+    const jobs = runStateRef.current.jobs;
+    const off = jobs.onFinish((job) => {
+      dispatch({
+        t: "notice",
+        level: job.exitCode === 0 ? "info" : "warn",
+        text: `Background ${job.id} finished${job.exitCode === null ? " (stopped)" : ` (exit ${job.exitCode})`}: ${job.command.slice(0, 80)}`,
+      });
+    });
+    const stop = () => jobs.stopAll();
+    process.once("exit", stop);
+    return () => {
+      off();
+      process.removeListener("exit", stop);
+      stop();
+    };
+  }, [jobsEpoch]);
   // A project whose own settings (hooks, allow rules, MCP servers) wait for the user's OK says so up front.
   useEffect(() => {
     if ((settingsRef.current?.untrustedCount() ?? 0) > 0) {
@@ -1366,6 +1387,36 @@ export function App(deps: AppDeps): ReactNode {
         dispatch({ t: "notice", level: "info", text });
         break;
       }
+      case "/jobs": {
+        const jobs = runStateRef.current.jobs;
+        const [sub, id] = arg.trim().split(/\s+/);
+        if (sub === "kill") {
+          dispatch({
+            t: "notice",
+            level: "info",
+            text:
+              id && jobs.kill(id) ? `Stopped ${id}.` : `No running background command ${id ?? ""}.`,
+          });
+          break;
+        }
+        const list = jobs.list();
+        dispatch({
+          t: "notice",
+          level: "info",
+          text:
+            list.length === 0
+              ? "No background commands. The agent starts one with bash's background option (a dev server, a watcher)."
+              : [
+                  "Background commands:",
+                  ...list.map(
+                    (j) =>
+                      `  ${j.id}  ${j.exitCode === undefined ? "running " : j.exitCode === null ? "stopped " : `exit ${j.exitCode}`.padEnd(8)}  ${j.command.slice(0, 70)}`,
+                  ),
+                  "/jobs kill <id> stops one.",
+                ].join("\n"),
+        });
+        break;
+      }
       case "/mcp": {
         const [sub, name] = arg.trim().split(/\s+/);
         if (!deps.mcp) {
@@ -1472,6 +1523,7 @@ export function App(deps: AppDeps): ReactNode {
           conversationRef.current = [];
           sessionImagesRef.current = [];
           runStateRef.current = newRunState();
+          setJobsEpoch((n) => n + 1); // the old session's background commands stop with it
         }
         // The kept plan is now from a cleared session — retire the review prompt/gesture so an empty Enter can't
         // silently execute a stale plan in the fresh session.

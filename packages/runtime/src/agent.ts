@@ -90,7 +90,7 @@ import {
   SKILLS_MIN_TOKENS,
 } from "./constants.js";
 import { autoEffortForTask, resolveEffort } from "./effort.js";
-import { executeTools, newRunState } from "./execute-tools.js";
+import { type RunState, executeTools, newRunState } from "./execute-tools.js";
 import { runChatWithFailover } from "./failover.js";
 import type {
   CapabilityPort,
@@ -144,14 +144,27 @@ export class Agent {
   }
 
   async run(userInput: string, opts: RunOptions): Promise<AgentResult> {
+    // A run that isn't part of a longer session owns its tool state — background commands it started stop
+    // when it ends. An interactive session passes its own state, and they keep running between messages.
+    if (opts.runState) return this.runWithState(userInput, opts, opts.runState);
+    const state = newRunState();
+    try {
+      return await this.runWithState(userInput, opts, state);
+    } finally {
+      state.jobs.stopAll();
+    }
+  }
+
+  private async runWithState(
+    userInput: string,
+    opts: RunOptions,
+    runState: RunState,
+  ): Promise<AgentResult> {
     const sessionId = opts.sessionId;
     const emit = opts.emit;
     // Use the caller's grants array when provided (the TUI passes ONE per session) so an "allow for this
     // session" grant persists across turns; else a fresh per-run array (line/one-shot runs).
     const grants: Grant[] = opts.grants ?? [];
-    // Per-run tool state: folders outside the workspace tools may read (a loaded skill's own files) and
-    // folders whose own instructions were already offered.
-    const runState = opts.runState ?? newRunState();
     // Run-scoped autonomy brake: consecutive auto-approved mutations, reset whenever a human is asked. `cap`
     // is the EARNED per-model cap (set from the served model's verify track record before each tool batch).
     const autoApproval: { streak: number; cap?: number } = { streak: 0 };
@@ -653,6 +666,13 @@ export class Agent {
       // ── mid-run STEER: inject any user messages the human sent while this run was in flight, so the model
       // adapts THIS turn instead of finishing wrong work first. Injected before compaction/budgeting so a
       // steer is treated like any other recent message; each is durably logged so a resume rebuilds it. ──
+      // A background command finished since the model last looked: say so, so it can read the result.
+      for (const job of runState.jobs.takeFinished()) {
+        messages.push({
+          role: "user",
+          content: `[Background command ${job.id} (\`${job.command.slice(0, 200)}\`) finished with exit code ${job.exitCode ?? "none (stopped)"} — read its output with bash_output({"id":"${job.id}"}).]`,
+        });
+      }
       for (const steerText of opts.steer?.() ?? []) {
         const text = steerText.trim();
         if (!text) continue;

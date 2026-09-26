@@ -89,6 +89,23 @@ export interface ToolContext {
   /** Whether your deny rules keep this absolute path from being read — tools that walk folders skip such
    *  files, and `read` refuses them. Optional — absent ⇒ no read rules. */
   readDenied?(absPath: string): boolean;
+  /** The session's background shell commands (`bash` with `background: true`). Optional — absent ⇒ none. */
+  backgroundJobs?: BackgroundJobsPort;
+}
+
+/** Background shell commands for a session: start one, read its new output, stop it, list them. */
+export interface BackgroundJobsPort {
+  start(command: string, cwd: string): { id: string };
+  read(id: string): {
+    id: string;
+    command: string;
+    running: boolean;
+    exitCode?: number | null;
+    output: string;
+    truncated: boolean;
+  };
+  kill(id: string): boolean;
+  list(): Array<{ id: string; command: string; exitCode?: number | null }>;
 }
 
 /** A tool = serializable manifest + Zod I/O schemas + an execute fn. Not fully serializable (has execute). */
