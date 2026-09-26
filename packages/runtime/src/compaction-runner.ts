@@ -121,7 +121,7 @@ export async function compact(
   // Cancelled: change nothing — no rewritten memory, no summary swapped in.
   if (signal.aborted) return null;
 
-  const anchor = plan.anchor; // system + the pinned current task (never summarized)
+  const anchor = plan.anchor; // the system prompt (the pinned current task stays in place in `recent`)
   const recent = plan.kept.slice(anchor.length);
   const summaryMsg: Msg = {
     role: "system",

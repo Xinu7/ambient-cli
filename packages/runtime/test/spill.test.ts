@@ -28,14 +28,14 @@ describe("planSpill (last-resort context spill)", () => {
     const out = planSpill([...anchor, ...groupA, ...groupB]);
     expect(out).not.toBeNull();
     if (!out) return;
-    // The anchor is exactly the first two messages (system + goal), untouched.
-    expect(out.anchor).toEqual(anchor);
+    // The system prompt leads; the pinned task is never evicted and keeps its place, before the newest turn.
+    expect(out.anchor).toEqual([anchor[0]]);
     // The middle group (A) is evicted WHOLE — both the call and its result, never one without the other.
     expect(out.evictedCount).toBe(2);
     expect(out.evictedText).toContain("contents of a.ts");
     expect(out.evictedText).toContain("calling read on a.ts");
     // The newest turn (group B) is retained WHOLE as `recent`.
-    expect(out.recent).toEqual(groupB);
+    expect(out.recent).toEqual([anchor[1], ...groupB]);
     // …and the newest turn is NOT in the evicted blob.
     expect(out.evictedText).not.toContain("contents of b.ts");
   });
@@ -79,7 +79,7 @@ describe("planSpill (last-resort context spill)", () => {
     expect(out).not.toBeNull();
     if (!out) return;
     expect(out.evictedCount).toBe(4); // groups A + B
-    expect(out.recent).toEqual(groupC); // only the newest group is kept
+    expect(out.recent).toEqual([anchor[1], ...groupC]); // the task, then only the newest group
     expect(out.evictedText).toContain("contents of a.ts");
     expect(out.evictedText).toContain("contents of b.ts");
     expect(out.evictedText).not.toContain("the freshest turn output");

@@ -93,12 +93,8 @@ export function planCompaction<T extends CompactableMessage>(
   cfg: CompactionConfig = DEFAULT_COMPACTION,
   bytesPerToken?: number,
 ): CompactionPlan<T> {
-  const anchor: T[] = [];
-  const rest: T[] = [];
-  messages.forEach((m, i) => {
-    if (i < cfg.anchorCount || m.pinned === true) anchor.push(m);
-    else rest.push(m);
-  });
+  const anchor = messages.slice(0, cfg.anchorCount);
+  const rest = messages.slice(cfg.anchorCount);
   const opts = bytesPerToken ? { bytesPerToken } : {};
 
   // Walk backward accumulating recent messages until we hit keepRecentTokens. Always keep AT LEAST the
@@ -119,8 +115,11 @@ export function planCompaction<T extends CompactableMessage>(
     while (cut > 0 && rest[cut - 1]?.toolGroupId === boundaryGroup) cut -= 1;
   }
 
-  const toSummarize = rest.slice(0, cut);
-  const recent = rest.slice(cut);
+  // A pinned message (the current task) is never summarized, and it keeps its place in the order: moving it
+  // up to the anchor would leave the previous answer as the last message, and the model would answer that
+  // instead of the request.
+  const toSummarize = rest.slice(0, cut).filter((m) => m.pinned !== true);
+  const recent = [...rest.slice(0, cut).filter((m) => m.pinned === true), ...rest.slice(cut)];
   return {
     toSummarize,
     kept: [...anchor, ...recent],

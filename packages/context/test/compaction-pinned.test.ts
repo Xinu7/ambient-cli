@@ -22,8 +22,25 @@ describe("planCompaction with a pinned task message", () => {
     const summarized = plan.toSummarize.map((m) => String(m.content).slice(0, 12));
     expect(summarized).toContain("OLD-TASK xxx");
     expect(summarized.some((s) => s.startsWith("CURRENT-TASK"))).toBe(false);
-    expect(plan.anchor.map((m) => String(m.content).slice(0, 12))).toEqual(["sys", "CURRENT-TASK"]);
+    expect(plan.anchor.map((m) => String(m.content).slice(0, 12))).toEqual(["sys"]);
     expect(plan.kept[0]).toBe(msgs[0]);
     expect(plan.kept[1]).toBe(msgs[3]);
+    // Everything kept stays in the order it happened.
+    const idx = plan.kept.map((m) => msgs.indexOf(m));
+    expect(idx).toEqual([...idx].sort((a, b) => a - b));
+  });
+
+  it("a new request in a long chat stays the LAST message, so the model answers it (not the previous one)", () => {
+    const msgs = [
+      { role: "system", content: "sys" },
+      big("user", "essay 1 please"),
+      big("assistant", "ESSAY ONE"),
+      big("user", "essay 2 please"),
+      big("assistant", "ESSAY TWO"),
+      { role: "user", content: "NEW-REQUEST: essay 3", pinned: true },
+    ];
+    const plan = planCompaction(msgs, { anchorCount: 1, keepRecentTokens: 1500, reserveTokens: 0 });
+    expect(plan.kept.at(-1)).toBe(msgs[5]);
+    expect(plan.toSummarize).not.toContain(msgs[5]);
   });
 });
