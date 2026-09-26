@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { delimiter, isAbsolute, join, relative } from "node:path";
 import type { ToolContext, ToolDefinition } from "@amb/protocol";
 import { z } from "zod";
@@ -68,6 +68,8 @@ interface Plan {
   command: string;
   args: string[];
   parse: (out: string) => Diag[];
+  /** Said alongside the results (what this check can't see). */
+  note?: string;
 }
 
 /** tsc --pretty false: `src/a.ts(3,7): error TS2322: message` */
@@ -153,11 +155,24 @@ export function detectCheckers(root: string): Plan[] {
   const has = (p: string) => existsSync(join(root, p));
   const tscJs = join(root, "node_modules", "typescript", "bin", "tsc");
   if (has("tsconfig.json") && existsSync(tscJs)) {
+    // A "solution" tsconfig lists no files of its own, only other projects — checking it checks nothing.
+    let solution = false;
+    try {
+      const text = readFileSync(join(root, "tsconfig.json"), "utf8");
+      solution = /"references"\s*:/.test(text) && /"files"\s*:\s*\[\s*\]/.test(text);
+    } catch {
+      // unreadable: tsc will say so itself
+    }
     plans.push({
       checker: "tsc",
       command: process.execPath,
       args: [tscJs, "--noEmit", "--pretty", "false", "-p", "."],
       parse: parseTsc,
+      ...(solution
+        ? {
+            note: "tsc: tsconfig.json only references other projects, so this checked none of their files — run tsc -b, or check each package's own tsconfig",
+          }
+        : {}),
     });
   }
   const eslintJs = join(root, "node_modules", "eslint", "bin", "eslint.js");
@@ -212,7 +227,7 @@ function run(
   plan: Plan,
   cwd: string,
   signal: AbortSignal,
-): Promise<{ out: string; code: number | null }> {
+): Promise<{ out: string; code: number | null; overflow: boolean }> {
   return new Promise((resolve) => {
     const child = spawn(plan.command, plan.args, {
       cwd,
@@ -221,8 +236,10 @@ function run(
       stdio: ["ignore", "pipe", "pipe"],
     });
     let out = "";
+    let overflow = false;
     const take = (d: Buffer) => {
       if (out.length < MAX_OUTPUT_CHARS) out += d.toString("utf8");
+      else overflow = true;
     };
     child.stdout?.on("data", take);
     child.stderr?.on("data", take);
@@ -234,7 +251,7 @@ function run(
     const done = (code: number | null) => {
       clearTimeout(timer);
       signal.removeEventListener("abort", stop);
-      resolve({ out, code });
+      resolve({ out, code, overflow });
     };
     child.on("error", (err) => {
       out += `\n${err.message}`;
@@ -271,21 +288,29 @@ export const diagnosticsTool: ToolDefinition<z.infer<typeof Input>, z.infer<type
     const only = input.path?.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
     const diagnostics: Diag[] = [];
     const notes: string[] = [];
+    let cutShort = false;
     for (const plan of plans) {
       ctx.signal.throwIfAborted();
-      const { out, code } = await run(plan, root, ctx.signal);
+      const { out, code, overflow } = await run(plan, root, ctx.signal);
       const found = plan
         .parse(out)
         .filter((d) => !only || d.file === only || d.file.startsWith(`${only}/`));
       diagnostics.push(...found);
-      // A checker that failed without anything we could read: show the end of what it printed.
-      if (found.length === 0 && code !== 0 && code !== 1)
+      if (plan.note) notes.push(plan.note);
+      // Never report "clean" for output we couldn't read: too much of it, or a failure with nothing parseable.
+      if (overflow) {
+        cutShort = true;
+        notes.push(
+          `${plan.checker}: printed more than we read — run it on a smaller path to see every problem`,
+        );
+      } else if (found.length === 0 && code !== 0) {
         notes.push(`${plan.checker}: ${out.trim().slice(-800)}`);
+      }
     }
     return {
       checkers: plans.map((p) => p.checker),
       diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS),
-      truncated: diagnostics.length > MAX_DIAGNOSTICS,
+      truncated: cutShort || diagnostics.length > MAX_DIAGNOSTICS,
       notes,
     };
   },

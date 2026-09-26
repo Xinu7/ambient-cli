@@ -60,4 +60,37 @@ describe("diagnostics", () => {
       /doesn't use cargo/,
     );
   });
+
+  it("never reports clean when the checker's output was too big or couldn't be read", async () => {
+    mkdirSync(join(ws, "node_modules", "eslint", "bin"), { recursive: true });
+    writeFileSync(join(ws, "eslint.config.js"), "export default [];\n");
+    // A fake ESLint that prints ~6 MB of results and exits 1 (problems found).
+    writeFileSync(
+      join(ws, "node_modules", "eslint", "bin", "eslint.js"),
+      `const m = Array.from({ length: 3000 }, () => ({ line: 1, column: 1, severity: 2, message: "x".repeat(2000), ruleId: "r" }));
+process.stdout.write(JSON.stringify([{ filePath: ${JSON.stringify(join(ws, "a.js"))}, messages: m }]), () => process.exit(1));\n`,
+    );
+    const big = await diagnosticsTool.execute({ checker: "eslint" }, ctx());
+    expect(big.truncated).toBe(true);
+    expect(big.notes.join()).toMatch(/more than we read/);
+
+    // Exit 1 with nothing parseable (a crash, a config error) shows what it printed.
+    writeFileSync(
+      join(ws, "node_modules", "eslint", "bin", "eslint.js"),
+      `process.stderr.write("Oops! Something went wrong: bad config"); process.exitCode = 1;\n`,
+    );
+    const broken = await diagnosticsTool.execute({ checker: "eslint" }, ctx());
+    expect(broken.diagnostics).toEqual([]);
+    expect(broken.notes.join()).toMatch(/bad config/);
+  }, 60_000);
+
+  it("says when a solution-style tsconfig checks none of the projects it references", () => {
+    mkdirSync(join(ws, "node_modules"));
+    symlinkSync(typescriptDir, join(ws, "node_modules", "typescript"), "junction");
+    writeFileSync(
+      join(ws, "tsconfig.json"),
+      JSON.stringify({ files: [], references: [{ path: "./packages/a" }] }),
+    );
+    expect(detectCheckers(ws)[0]?.note).toMatch(/only references other projects/);
+  });
 });
