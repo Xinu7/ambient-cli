@@ -11,6 +11,7 @@ import {
   UNKNOWN_OUTPUT,
   UNKNOWN_WINDOW,
   pickForRole,
+  sameModel,
   streamTimeouts,
 } from "@amb/reliability";
 import { SPILL_NOTE, SUMMARY_MARKER, deterministicSummary, planSpill } from "./agent-support.js";
@@ -76,7 +77,9 @@ export async function compact(
     // model from the live fleet instead of burning the run's (often flagship/coding) `target` — a real
     // per-token cost win on a pay-per-token network. Falls back to `target` if nothing cheaper is warm, and
     // the whole call falls back to the deterministic summary on any failure, so a cold cheap model is safe.
-    const compactor = pickForRole("compactor", catalog) ?? target;
+    const picked = pickForRole("compactor", catalog) ?? target;
+    // An alias of the model already serving you is the same model — no handoff to announce.
+    const compactor = sameModel(catalog, picked, target) ? target : picked;
     if (compactor !== target) {
       emit({
         schemaVersion: 1,

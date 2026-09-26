@@ -109,3 +109,37 @@ describe("compactor window when the compactor is the served model", () => {
     expect(client.calls.length).toBeGreaterThan(1);
   });
 });
+
+describe("an alias of the served model is the same model", () => {
+  it("compacts with the served model and announces no handoff when the cheapest pick is its alias", async () => {
+    const served = raw({
+      id: "fixture/glm",
+      hugging_face_id: "org/GLM-FP8",
+      context_length: 202_752,
+    });
+    const alias = raw({
+      id: "fixture/large",
+      hugging_face_id: "org/GLM-FP8",
+      context_length: 202_752,
+      pricing: { input: 0.01, output: 0.01 },
+    });
+    const catalog = catalogOf(served, alias);
+    const client = new FixtureClient(catalog, [{ content: "## Goal\nsummary", toolCalls: [] }]);
+    const events: Array<{ kind: string }> = [];
+    await compact(
+      client,
+      hugeConversation(),
+      served.id,
+      catalog,
+      "ses_s",
+      "trn_s",
+      (e) => events.push(e as { kind: string }),
+      new AbortController().signal,
+      () => {},
+      60_000,
+      "",
+    );
+    expect(events.some((e) => e.kind === "handoff")).toBe(false);
+    expect(client.calls.every((c) => c.model === served.id)).toBe(true);
+  });
+});

@@ -110,6 +110,17 @@ export function pickForRole(
   return scored[0]?.id;
 }
 
+/**
+ * Whether two catalog ids serve the same model — the same id, or aliases of one model (the catalog lists
+ * e.g. `ambient/large` and the model it points at separately, with the same Hugging Face id).
+ */
+export function sameModel(catalog: CatalogModel[], a: string, b: string): boolean {
+  if (a === b) return true;
+  const hf = (id: string) => catalog.find((m) => m.id === id)?.huggingFaceId?.toLowerCase();
+  const ha = hf(a);
+  return ha !== undefined && ha === hf(b);
+}
+
 export interface VisionPick {
   id: string;
   /** true = a READY vision model; false = only a COLD vision model exists (caller must NOT fire it — it 429s). */

@@ -244,23 +244,28 @@ function appReducer(state: ViewState, action: Action): ViewState {
     }
     case "activity":
       return { ...state, status: { ...state.status, activity: action.activity } };
-    case "compacted":
-      // Room again: the fill warnings may fire afresh, and "in use" drops by what the summary saved.
-      return {
-        ...state,
-        contextWarned: undefined,
-        status: {
-          ...state.status,
-          ...(state.status.promptEstimate !== undefined
-            ? {
-                promptEstimate: Math.max(
-                  0,
-                  state.status.promptEstimate - (action.before - action.after),
-                ),
-              }
-            : {}),
+    case "compacted": {
+      // Room again: the fill warnings may fire afresh, and "in use" drops by what the summary saved. The
+      // receipt says how full the context is now (the gauge also counts the system prompt and tools, so its
+      // percentage is a little above the conversation's own tokens).
+      const was = state.status.promptEstimate;
+      const now = was !== undefined ? Math.max(0, was - (action.before - action.after)) : undefined;
+      const window = state.status.contextWindow;
+      const pct = (n: number) => `${Math.round((n / (window ?? 1)) * 100)}%`;
+      const fill =
+        was !== undefined && now !== undefined && window
+          ? ` · context ${pct(was)} → ${pct(now)}`
+          : "";
+      return appendNotice(
+        {
+          ...state,
+          contextWarned: undefined,
+          status: { ...state.status, ...(now !== undefined ? { promptEstimate: now } : {}) },
         },
-      };
+        "info",
+        `compacted the conversation · ${tokens(action.before)} → ${tokens(action.after)} tokens${fill}`,
+      );
+    }
     case "clear":
       // A fresh conversation (idle /clear) also retires the plan; a mid-run clear only wipes the screen.
       return action.fresh
@@ -1149,11 +1154,6 @@ export function App(deps: AppDeps): ReactNode {
       } else if (res.ok) {
         conversationRef.current = res.messages;
         dispatch({ t: "compacted", before: res.before, after: res.after });
-        dispatch({
-          t: "notice",
-          level: "info",
-          text: `compacted the conversation · ${tokens(res.before)} → ${tokens(res.after)} tokens`,
-        });
       } else {
         dispatch({ t: "notice", level: "info", text: res.reason });
       }

@@ -82,6 +82,12 @@ describe("/compact, /context and /usage in the app", () => {
     const before = calls.length;
     await send("/compact the lexer", "compacted the conversation");
     expect(lastFrame()).toContain("compacted the conversation");
+    // The receipt says how full the context gauge is now, so the drop is visible.
+    const fill = /context (\d+)% → (\d+)%/.exec(lastFrame() ?? "");
+    expect(fill).not.toBeNull();
+    expect(Number(fill?.[2])).toBeLessThan(Number(fill?.[1]));
+    // …and the gauge in the status line shows the same number (the receipt plus the gauge).
+    expect((lastFrame() ?? "").split(` ${fill?.[2]}%`).length - 1).toBeGreaterThanOrEqual(2);
     expect(calls.length).toBe(before + 1);
     const instruction = String(calls.at(-1)?.messages[0]?.content);
     expect(instruction).toContain("focus on: the lexer");
