@@ -322,6 +322,11 @@ describe("deny rules see commands other programs run", () => {
     "script -qc 'curl x' /dev/null",
     "chrt 5 curl x",
     "watch curl x",
+    "watch -n 1 curl x",
+    "watch --interval 1 curl x",
+    "flock -w 5 /tmp/l curl x",
+    "find . -exec sh -c 'curl x' +",
+    "script --command='curl x' /dev/null",
   ])("%s is still curl", (cmd) => {
     expect(covers(cmd)).toBe(true);
   });

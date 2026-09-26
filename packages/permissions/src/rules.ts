@@ -369,28 +369,37 @@ const RUNS_C_SCRIPT = new Set(["script", "su", "runuser", "flock"]);
 function runsInside(command: string, depth = 0): string[] {
   if (depth > 4) return [];
   const out: string[] = [];
+  // Everything a word list could run: the words as a command, and a nested `sh -c` script.
   const add = (words: string[]) => {
     const argv = normalizeArgv(words);
-    if (argv.length > 0) out.push(argv.join(" "), ...runsInside(argv.join(" "), depth + 1));
+    if (argv.length === 0) return;
+    out.push(argv.join(" "));
+    const script = shellScript(argv);
+    if (script !== undefined) out.push(...shellSegments(script, depth + 1));
   };
+  const script = (s: string) =>
+    out.push(...shellSegments(s, depth + 1), ...runsInside(s, depth + 1));
   for (const c of parseShellCommands(command)) {
     const argv = normalizeArgv(c.argv);
     const name = argv[0] ?? "";
     const rest = argv.slice(1);
-    const firstPlain = rest.findIndex((w) => !w.startsWith("-"));
     if (name === "find") {
       rest.forEach((w, i) => {
         if (FIND_EXEC.has(w)) add(rest.slice(i + 1));
       });
     }
-    if (RUNS_AFTER_ONE_ARG.has(name) && firstPlain >= 0) add(rest.slice(firstPlain + 1));
-    if (RUNS_REST.has(name) && firstPlain >= 0) add(rest.slice(firstPlain));
+    // Which word starts the command depends on the program's own options (`watch -n 1 x`, `flock -w 5 f x`):
+    // try every tail — for a deny or ask rule, matching too much is the safe side.
+    if (RUNS_AFTER_ONE_ARG.has(name) || RUNS_REST.has(name)) {
+      for (let i = 0; i < rest.length; i++) add(rest.slice(i));
+    }
     if (RUNS_C_SCRIPT.has(name)) {
       rest.forEach((w, i) => {
-        const script = rest[i + 1];
-        if (/^-[A-Za-z]*c$/.test(w) && script !== undefined) {
-          out.push(...shellSegments(script, depth + 1), ...runsInside(script, depth + 1));
-        }
+        const next = rest[i + 1];
+        if (/^-[A-Za-z]*c$/.test(w) && next !== undefined) script(next);
+        const long = /^--command=(.*)$/s.exec(w)?.[1];
+        if (long !== undefined) script(long);
+        if (w === "--command" && next !== undefined) script(next);
       });
     }
   }
