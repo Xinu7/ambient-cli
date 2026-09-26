@@ -116,14 +116,23 @@ rm ~/.local/bin/ambient ~/.local/bin/amb   # from source
   `{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "./check.sh"}]}]},
   "permissions": {"allow": ["Bash(npm test:*)"], "deny": ["Read(./.env)"]}}`
 - **Nothing from a clone runs until you say so.** A project's own hooks and allow rules
-  (`.claude/settings.json`, `settings.local.json`), its MCP servers (`.mcp.json`, `.ambient/mcp.json`) and the
-  shell lines in its slash commands apply once you've reviewed and trusted them (`/trust`, or `ambient trust`);
-  any change needs trusting again. Your `~/.claude` hooks, allow rules and global instructions
+  (`.claude/settings.json`, `settings.local.json`), its MCP servers (`.mcp.json`, `.ambient/mcp.json`), its
+  verify script (`.ambient/verify`) and the shell lines in its slash commands apply once you've reviewed and
+  trusted them (`/trust`, or `ambient trust`); any change needs trusting again. Read-only shell commands run
+  without asking only when they stay inside the project, and git only when the repository can't make it run
+  a program of its own. Your `~/.claude` hooks, allow rules and global instructions
   (`~/.claude/CLAUDE.md`, `~/.claude/rules`, `~/.codex/AGENTS.md`) and your enabled Claude Code plugins' hooks
   and MCP servers apply when you set `"claudeSettings": true`.
 - **Background commands.** The agent can start a dev server, a watcher or a long build in the background,
   keep working, read its output as it goes, and stop it; it's told when one finishes. `/jobs` lists them,
   and they all stop when the session ends.
+- **Subagents.** The agent can hand parts of a task to subagents — read-only scouts, a reviewer, or builders
+  that edit — which run in parallel with their own context and report back. They get your MCP tools (scouts
+  only the read-only ones), can ask you a question, and can run in the background while the agent keeps
+  working; it reads their report before it answers.
+- **Tools that know your files.** `read` returns a PDF's text page by page; `notebook_edit` changes Jupyter
+  cells; `diagnostics` runs the project's own checkers (TypeScript, ESLint, Ruff, Cargo, Go) and returns
+  errors by file and line; search uses ripgrep when it's installed.
 - **Runs everywhere.** macOS, Linux and Windows (Git Bash or PowerShell), tested on all three.
 
 ## In the interactive TUI
