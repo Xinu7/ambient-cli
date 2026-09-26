@@ -243,3 +243,59 @@ describe("reading around a deny", () => {
     }
   });
 });
+
+describe("second round of ways around a rule", () => {
+  const rmDeny = { rules: rules({ deny: ["Bash(rm:*)"] }) };
+  it("a deny still sees rm inside shell grammar, flag clusters and wrapper options", () => {
+    for (const c of [
+      "{ rm x; }",
+      "( rm x )",
+      "(rm x)",
+      "! rm x",
+      "if rm x; then :; fi",
+      "while rm x; do :; done",
+      "bash -lc 'rm x'",
+      "sh -ec 'rm x'",
+      "bash -c -- 'rm x'",
+      "exec -a foo rm x",
+      "timeout 0.5 rm x",
+      "sudo -- rm x",
+    ]) {
+      expect([c, decide(bash(c, "bypass"), rmDeny).effect]).toEqual([c, "deny"]);
+    }
+  });
+
+  it.skipIf(process.platform === "linux")("program names ignore case where the system does", () => {
+    expect(decide(bash("RM -rf build", "bypass"), rmDeny).effect).toBe("deny");
+    expect(decide(bash("/BIN/RM x", "bypass"), rmDeny).effect).toBe("deny");
+  });
+
+  it("doesn't deny commands that only mention rm", () => {
+    expect(decide(bash("command -v rm", "bypass"), rmDeny).effect).toBe("allow");
+    expect(decide(bash("git commit -m 'drop the `rm` call'", "bypass"), rmDeny).effect).toBe(
+      "allow",
+    );
+  });
+
+  it("agent and skill rules name the preset or skill; other rules don't fail closed", () => {
+    const sub = (preset: string) =>
+      input({
+        toolName: "subagent",
+        effects: ["read"],
+        normalizedArgs: { spawn: [{ role: "scout", preset }] },
+      });
+    const r = { rules: rules({ deny: ["Task(reviewer)", "Skill(deploy)", "WebSearch(x)"] }) };
+    expect(decide(sub("reviewer"), r).effect).toBe("deny");
+    expect(decide(sub("explorer"), r).effect).toBe("allow");
+    const skill = (name: string) =>
+      input({ toolName: "skill", effects: ["read"], normalizedArgs: { name } });
+    expect(decide(skill("deploy"), r).effect).toBe("deny");
+    expect(decide(skill("test"), r).effect).toBe("allow");
+    const search = input({
+      toolName: "web_search",
+      effects: ["network"],
+      normalizedArgs: { query: "y" },
+    });
+    expect(decide({ ...search, mode: "bypass" }, r).effect).toBe("allow");
+  });
+});

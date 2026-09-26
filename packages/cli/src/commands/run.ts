@@ -295,7 +295,7 @@ export async function runAgent(args: string[]): Promise<void> {
     : await connectMcp(cwd, {
         // A project's own servers connect once the project's settings are trusted (/trust).
         approveServer: async () => settings.projectTrusted(),
-        projectPlugins: settings.projectTrusted(),
+        projectPlugins: () => settings.projectTrusted(),
         plugins: userConfig.claudeSettings === true,
         auth: makeMcpAuth(),
         extra: extraMcp,

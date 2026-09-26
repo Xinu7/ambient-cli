@@ -399,3 +399,32 @@ describe("messages sent mid-run", () => {
     expect(events).toContain("A hook stopped this message: no secrets");
   });
 });
+
+describe("a hook stopping the run mid-batch", () => {
+  it("leaves the rest of the batch unrun", async () => {
+    const { port } = fakeHooks({
+      PreToolUse: (p) =>
+        (p.tool_input as { path?: string }).path === "a.txt" ? { halt: "stop" } : {},
+    });
+    const two = {
+      content: "",
+      toolCalls: [
+        { id: "tc_a", name: "write", args: { path: "a.txt", content: "a" }, rawArgs: "{}" },
+        { id: "tc_b", name: "write", args: { path: "b.txt", content: "b" }, rawArgs: "{}" },
+      ],
+    };
+    const client = new FixtureClient(catalogOf(TEXT_200K), [two, done]);
+    const r = await new Agent(client).run(
+      "x",
+      runOpts({
+        requestedModel: TEXT_200K.id,
+        mode: "bypass",
+        cwd: ws,
+        workspaceRoot: ws,
+        hooks: port,
+      }),
+    );
+    expect(r.stopReason).toBe("stopped_by_hook");
+    expect(() => readFileSync(join(ws, "b.txt"))).toThrow();
+  });
+});

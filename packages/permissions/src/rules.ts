@@ -82,6 +82,18 @@ function coversTool(rule: PermissionRule, toolName: string): boolean {
   return (TOOL_ALIASES[rule.tool] ?? [rule.tool]).includes(tool);
 }
 
+/** Tools whose rule specifier is a path. */
+const FILE_TOOLS = new Set([
+  "read",
+  "grep",
+  "glob",
+  "list",
+  "edit",
+  "write",
+  "apply_patch",
+  "notebook_edit",
+]);
+
 const isResourceTool = (name: string) =>
   name === "mcp_read_resource" || name === "mcp_list_resources";
 
@@ -122,7 +134,9 @@ function realPath(path: string): string {
   let tail = "";
   for (let i = 0; i < 64; i++) {
     try {
-      return tail ? `${realpathSync(head)}${sepOf(path)}${tail}` : realpathSync(head);
+      // `.native` also expands Windows 8.3 short names (C:\\PROGRA~1), so both spellings meet.
+      const real = realpathSync.native(head);
+      return tail ? `${real}${sepOf(path)}${tail}` : real;
     } catch {
       const cut = Math.max(head.lastIndexOf("/"), head.lastIndexOf("\\"));
       if (cut <= 0) return path;
@@ -169,13 +183,61 @@ export function isReadDenied(
   workspaceRoot: string,
   home: string,
 ): boolean {
-  return (rules?.deny ?? []).some(
-    (r) =>
-      r.specifier !== undefined &&
-      coversTool(r, "read") &&
-      pathMatches(r.specifier, path, workspaceRoot, home),
-  );
+  return readDeniedMatcher(rules, workspaceRoot, home)(path);
 }
+
+/** `isReadDenied` for many paths (a folder walk): the rules are compiled once, not per file. */
+export function readDeniedMatcher(
+  rules: PermissionRules | undefined,
+  workspaceRoot: string,
+  home: string,
+): (path: string) => boolean {
+  const patterns = (rules?.deny ?? [])
+    .filter((r) => r.specifier !== undefined && coversTool(r, "read"))
+    .map((r) => r.specifier as string);
+  if (patterns.length === 0) return () => false;
+  const insensitive = CASE_INSENSITIVE || /^[A-Za-z]:/.test(workspaceRoot);
+  const realRoot = realPath(workspaceRoot);
+  const realHome = realPath(home);
+  const res = patterns.flatMap((p) =>
+    [...new Set([anchorPattern(p, workspaceRoot, home), anchorPattern(p, realRoot, realHome)])].map(
+      (v) => globToRegExp(v, insensitive),
+    ),
+  );
+  return (path) => matchesAny(res, path);
+}
+
+/** Whether a path, or a folder it's inside, matches — as written and as the filesystem resolves it. */
+function matchesAny(res: readonly RegExp[], path: string): boolean {
+  for (const candidate of new Set([path, realPath(path)])) {
+    const norm = toSlash(
+      /^[A-Za-z]:/.test(candidate) ? win32.normalize(candidate) : posix.normalize(candidate),
+    );
+    let p = norm.replace(/\/+$/, "");
+    while (p) {
+      if (res.some((re) => re.test(p))) return true;
+      const cut = p.lastIndexOf("/");
+      if (cut <= 0) break;
+      p = p.slice(0, cut);
+    }
+  }
+  return false;
+}
+
+/** Shell words that come before the command they introduce (`if rm x; then`, `{ rm x; }`, `! rm x`). */
+const LEADING_KEYWORDS = new Set([
+  "{",
+  "(",
+  "!",
+  "if",
+  "then",
+  "elif",
+  "else",
+  "do",
+  "while",
+  "until",
+  "time",
+]);
 
 /** Programs that run the rest of their arguments as a command (`env X=1 rm`, `nice -n 5 rm`, `sudo rm`). */
 const WRAPPERS = new Set([
@@ -194,34 +256,61 @@ const WRAPPERS = new Set([
   "caffeinate",
 ]);
 /** Wrapper options that take a value (`nice -n 5`, `sudo -u root`, `timeout -s KILL`). */
-const WRAPPER_VALUE_OPTS = new Set(["-n", "-u", "-g", "-s", "-k", "-C", "-I", "-L", "-P"]);
+const WRAPPER_VALUE_OPTS = new Set(["-n", "-u", "-g", "-s", "-k", "-C", "-I", "-L", "-P", "-a"]);
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
 
 /** The command a segment really runs: leading `VAR=value`s and wrappers dropped, the program by its name. */
 function normalizeArgv(argv: readonly string[]): string[] {
-  let a = [...argv];
-  for (let guard = 0; guard < 8; guard++) {
+  // Grouping brackets glued to a word (`(rm`, `x)`) belong to the shell, not the command.
+  let a = argv.map((w) => w.replace(/^[({]+/, "").replace(/[)}]+$/, "")).filter((w) => w !== "");
+  for (let guard = 0; guard < 12; guard++) {
     while (a[0] !== undefined && /^[A-Za-z_][A-Za-z0-9_]*=/.test(a[0])) a = a.slice(1);
+    while (a[0] !== undefined && LEADING_KEYWORDS.has(a[0])) a = a.slice(1);
     const head = a[0];
     if (head === undefined) return [];
-    const name = baseName(head);
-    if (!WRAPPERS.has(name)) return [name, ...a.slice(1)];
+    // macOS and Windows find programs ignoring letter case (`RM` runs rm there).
+    const name = CASE_INSENSITIVE ? baseName(head).toLowerCase() : baseName(head);
+    // `command -v rm` only asks where rm is.
+    if (name === "command" && /^-[vV]$/.test(a[1] ?? "")) return [name, ...a.slice(1)];
+    if (!WRAPPERS.has(name) && !LEADING_KEYWORDS.has(name)) return [name, ...a.slice(1)];
     a = a.slice(1);
     // The wrapper's own options (and numeric durations/priorities) come before the command.
-    while (a[0] !== undefined && (a[0].startsWith("-") || /^\d+[smhd]?$/.test(a[0]))) {
+    while (a[0] !== undefined && (a[0].startsWith("-") || /^\d+(\.\d+)?[smhd]?$/.test(a[0]))) {
       const opt = a[0];
       a = a.slice(1);
+      if (opt === "--") break;
       if (WRAPPER_VALUE_OPTS.has(opt) && a[0] !== undefined) a = a.slice(1);
     }
   }
   return a;
 }
 
+/** The script of `sh -c '…'` (also `-lc`, `-ec`, `-c --`), if this runs one. */
+function shellScript(argv: readonly string[]): string | undefined {
+  if (!SHELLS.has(argv[0] ?? "")) return undefined;
+  for (let i = 1; i < argv.length; i++) {
+    const w = argv[i] as string;
+    if (/^-[A-Za-z]*c[A-Za-z]*$/.test(w)) {
+      const next = argv[i + 1] === "--" ? argv[i + 2] : argv[i + 1];
+      return next;
+    }
+    if (!w.startsWith("-")) return undefined;
+  }
+  return undefined;
+}
+
 /** The text inside every `$(…)`, `<(…)`, `>(…)` and backtick substitution (nested ones included). */
 function substitutions(command: string): string[] {
   const out: string[] = [];
+  let single = false;
   for (let i = 0; i < command.length; i++) {
     const c = command[i];
+    // Nothing inside single quotes is substituted (`git commit -m 'drop the `rm` call'`).
+    if (c === "'") {
+      single = !single;
+      continue;
+    }
+    if (single) continue;
     if ((c === "$" || c === "<" || c === ">") && command[i + 1] === "(") {
       let depth = 0;
       for (let j = i + 1; j < command.length; j++) {
@@ -253,9 +342,8 @@ export function shellSegments(command: string, depth = 0): string[] {
     const argv = normalizeArgv(c.argv);
     if (argv.length === 0) continue;
     out.push(argv.join(" ").trim());
-    const script = SHELLS.has(argv[0] as string) ? argv[argv.indexOf("-c") + 1] : undefined;
-    if (script !== undefined && argv.includes("-c") && depth < 4)
-      out.push(...shellSegments(script, depth + 1));
+    const script = shellScript(argv);
+    if (script !== undefined && depth < 4) out.push(...shellSegments(script, depth + 1));
   }
   if (depth < 4)
     for (const inner of substitutions(command)) out.push(...shellSegments(inner, depth + 1));
@@ -297,7 +385,9 @@ export function hasRedirection(command: string): boolean {
 }
 
 /** `npm test:*` = the command or anything starting with it; otherwise `*` wildcards over the whole command. */
-function commandMatches(spec: string, segment: string): boolean {
+function commandMatches(rawSpec: string, rawSegment: string): boolean {
+  const spec = CASE_INSENSITIVE ? rawSpec.toLowerCase() : rawSpec;
+  const segment = CASE_INSENSITIVE ? rawSegment.toLowerCase() : rawSegment;
   if (spec.endsWith(":*")) {
     const prefix = spec.slice(0, -2).trim();
     return segment === prefix || segment.startsWith(`${prefix} `);
@@ -364,6 +454,19 @@ export function ruleCovers(rule: PermissionRule, call: RuleCall, mode: "any" | "
     const domain = m[1].trim().toLowerCase().replace(/^\*\./, "");
     return host === domain || host.endsWith(`.${domain}`);
   }
+  // An agent or skill rule names the preset or skill (`Task(reviewer)`, `Skill(deploy)`).
+  if (tool === "subagent") {
+    const spawn = Array.isArray(call.args.spawn) ? call.args.spawn : [];
+    const names = spawn.flatMap((s) => {
+      const o = s as { preset?: unknown; role?: unknown };
+      return [o.preset, o.role].filter((v): v is string => typeof v === "string");
+    });
+    return mode === "all"
+      ? names.length > 0 && names.every((n) => n === spec)
+      : names.includes(spec);
+  }
+  if (tool === "skill") return call.args.name === spec;
+  if (!FILE_TOOLS.has(tool)) return false;
   // File tools: the specifier is a path pattern checked against every path the call touches. A call whose
   // paths can't be told can't be shown to stay clear of a deny or ask rule, so those count it as matched.
   if (call.resources.length === 0) return mode === "any";

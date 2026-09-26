@@ -50,7 +50,9 @@ function setup(): { home: string; ws: string } {
 describe("installed plugins", () => {
   it("returns enabled plugins at their newest applicable version", () => {
     const { home, ws } = setup();
-    const plugins = installedPlugins(ws, home);
+    // The project's own choice (beta off) counts only once the project is trusted.
+    expect(installedPlugins(ws, home).map((p) => p.id)).toEqual(["alpha@mkt", "beta@mkt"]);
+    const plugins = installedPlugins(ws, home, { projectSettings: true });
     expect(plugins.map((p) => p.id)).toEqual(["alpha@mkt"]);
     expect(plugins[0]?.root).toMatch(/alpha[/\\]2\.0\.0$/);
     expect(plugins[0]?.name).toBe("alpha");

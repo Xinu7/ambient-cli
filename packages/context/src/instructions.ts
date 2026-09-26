@@ -197,7 +197,7 @@ export function loadInstructions(
     if (total >= limits.total) break;
   }
   for (const rule of ruleFiles(join(repoRoot, ".claude", "rules"), projectRead)) {
-    const label = `.claude/rules/${relative(join(repoRoot, ".claude", "rules"), rule.path)}`;
+    const label = `.claude/rules/${relative(join(repoRoot, ".claude", "rules"), rule.path).replace(/\\/g, "/")}`;
     const got = take(label, rule.path, rule.text, repoRoot, projectRead);
     if (got) project.push(got);
   }
@@ -218,7 +218,7 @@ export function loadInstructions(
       if (got) user.push(got);
     }
     for (const rule of ruleFiles(join(home, ".claude", "rules"), userRead)) {
-      const label = `~/.claude/rules/${relative(join(home, ".claude", "rules"), rule.path)}`;
+      const label = `~/.claude/rules/${relative(join(home, ".claude", "rules"), rule.path).replace(/\\/g, "/")}`;
       const got = take(label, rule.path, rule.text, home, userRead);
       if (got) user.push(got);
     }

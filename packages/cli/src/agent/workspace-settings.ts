@@ -60,7 +60,14 @@ export function visible(text: string): string {
   let out = "";
   for (const ch of text) {
     const code = ch.codePointAt(0) ?? 0;
-    const control = code < 0x20 || (code >= 0x7f && code <= 0x9f);
+    // Control characters, and the invisible ones that reorder or hide text (bidi overrides, zero-width).
+    const control =
+      code < 0x20 ||
+      (code >= 0x7f && code <= 0x9f) ||
+      (code >= 0x200b && code <= 0x200f) ||
+      (code >= 0x202a && code <= 0x202e) ||
+      (code >= 0x2066 && code <= 0x2069) ||
+      code === 0xfeff;
     out += control ? `\\x${code.toString(16).padStart(2, "0")}` : ch;
   }
   return out;
@@ -100,9 +107,9 @@ const HOOK_SOURCE: Record<HookCommand["source"], string> = {
 };
 
 function describeHook(h: HookCommand): string {
-  const on = h.matcher && h.matcher !== "*" ? `${h.event}(${h.matcher})` : h.event;
+  const on = h.matcher && h.matcher !== "*" ? `${h.event}(${visible(h.matcher)})` : h.event;
   const cmd = h.command.length > 70 ? `${h.command.slice(0, 69)}…` : h.command;
-  return `  ${on} → ${cmd}`;
+  return `  ${on} → ${visible(cmd)}`;
 }
 
 interface Snapshot {
@@ -279,15 +286,15 @@ export function makeWorkspaceSettings(opts: {
         if (allow.length + deny.length + ask.length === 0) continue;
         gap(lines);
         lines.push(`From ${src.label}:`);
-        if (deny.length > 0) lines.push(`  deny   ${deny.join(" · ")}`);
-        if (ask.length > 0) lines.push(`  ask    ${ask.join(" · ")}`);
+        if (deny.length > 0) lines.push(`  deny   ${visible(deny.join(" · "))}`);
+        if (ask.length > 0) lines.push(`  ask    ${visible(ask.join(" · "))}`);
         if (allow.length > 0) {
           const why = src.allowApplies
             ? ""
             : src.label.startsWith("~")
               ? '  (off: set "claudeSettings")'
               : "  (waits for /trust)";
-          lines.push(`  allow  ${allow.join(" · ")}${why}`);
+          lines.push(`  allow  ${visible(allow.join(" · "))}${why}`);
         }
       }
       if (lines.length === 0) {

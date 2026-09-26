@@ -108,8 +108,11 @@ export function makeMcpControl(opts: {
       current?.close();
     },
     async login(name, onUrl) {
+      const projectPlugins = opts.connect.projectPlugins;
       const spec = loadMcpConfig(opts.workspaceRoot, process.env, undefined, {
         plugins: opts.connect.plugins === true,
+        projectPlugins:
+          typeof projectPlugins === "function" ? projectPlugins() : projectPlugins === true,
       }).find((s) => s.name === name);
       if (!spec) return `No MCP server named "${name}". /mcp lists them.`;
       if (!spec.url) return `${name} runs on this machine and has no sign-in.`;

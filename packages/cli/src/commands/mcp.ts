@@ -15,8 +15,10 @@ const SOURCE_LABEL = { user: "yours", project: "this project", plugin: "a plugin
 export async function runMcp(args: string[]): Promise<void> {
   const config = loadConfig();
   const cwd = process.cwd();
+  const trustedHere = workspaceSettings(cwd, config, configDir()).projectTrusted();
   const specs = loadMcpConfig(cwd, process.env, undefined, {
     plugins: config.claudeSettings === true,
+    projectPlugins: trustedHere,
   });
   const store = makeTokenStore();
   const [sub, name] = args;

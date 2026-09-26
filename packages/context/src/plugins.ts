@@ -34,9 +34,8 @@ function readJson(file: string, root: string): unknown {
 }
 
 export interface PluginOptions {
-  /** Let the project's own settings turn plugins on or off. False where a plugin's hooks or MCP servers
-   *  would run and the project isn't trusted: a clone mustn't switch on a plugin you left off, or switch off a
-   *  guard you rely on. */
+  /** Let the project's own settings turn plugins on or off — only once the project is trusted (a clone
+   *  mustn't switch on a plugin you left off, or switch off a guard you rely on). Off unless asked for. */
   projectSettings?: boolean;
 }
 
@@ -62,7 +61,7 @@ export function enabledPluginIds(
 ): Map<string, boolean> {
   const out = new Map<string, boolean>();
   const project =
-    opts.projectSettings !== false && join(workspaceRoot, ".claude") !== join(home, ".claude");
+    opts.projectSettings === true && join(workspaceRoot, ".claude") !== join(home, ".claude");
   const files: Array<{ file: string; root: string }> = [
     { file: join(home, ".claude", "settings.json"), root: join(home, ".claude") },
     ...(project

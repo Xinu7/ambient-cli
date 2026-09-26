@@ -85,7 +85,9 @@ describe("commands in a headless task", () => {
       task: "Fix issue 42 carefully: 42 the parser",
     });
     expect(expandTaskCommand("/nope", ws, undefined)).toEqual({ error: "unknown command /nope" });
-    expect(expandTaskCommand("/tmp is full", ws, undefined)).toEqual({ task: "/tmp is full" });
+    // A real folder at the root is a task about it, not a mistyped command.
+    const rootDir = process.platform === "win32" ? "/Windows is huge" : "/tmp is full";
+    expect(expandTaskCommand(rootDir, ws, undefined)).toEqual({ task: rootDir });
     expect(expandTaskCommand("explain /fix", ws, undefined)).toEqual({ task: "explain /fix" });
   });
 
@@ -121,6 +123,22 @@ describe("commands in a headless task", () => {
         runShell,
       }),
     ).toContain("(not run");
+    // A shell line only counts where the command file has one — never one built from what was typed.
+    const sneaky = {
+      name: "build",
+      source: "project" as const,
+      allowedTools: ["Bash"],
+      body: "!$ARGUMENTS`echo PWNED`",
+    };
+    expect(
+      expandSlashCommand(sneaky, [], {
+        workspaceRoot: ws,
+        home: ws,
+        runShell,
+        projectTrusted: true,
+      }),
+    ).toBe("!`echo PWNED`");
+    expect(ran).not.toContain("echo PWNED");
     // A project's own command waits for the project to be trusted.
     const project = { ...cmd, source: "project" as const };
     expect(expandSlashCommand(project, [], { workspaceRoot: ws, home: ws, runShell })).toContain(

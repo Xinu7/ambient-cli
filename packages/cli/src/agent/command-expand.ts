@@ -59,7 +59,7 @@ export function expandSlashCommand(
     workspaceRoot: opts.workspaceRoot,
     home: opts.home,
   });
-  let text = expandCommand(command.body, args).replace(/!`([^`\n]+)`/g, (whole, cmd: string) => {
+  const runLine = (whole: string, cmd: string): string => {
     // A project's own command arrives with a clone: its shell lines wait until the project is trusted.
     if (command.source === "project" && opts.projectTrusted !== true) {
       return `${whole} (not run: this project's commands run shell lines once you trust it — /trust)`;
@@ -71,7 +71,21 @@ export function expandSlashCommand(
     }
     const out = run(cmd, opts.workspaceRoot).trim();
     return out.length > MAX_SHELL_OUTPUT ? `${out.slice(0, MAX_SHELL_OUTPUT)}…` : out;
-  });
+  };
+  // Shell lines are found in the command file as written — arguments are filled in around and inside them,
+  // but text that only becomes `!`…`` after filling in (`!$ARGUMENTS`…``) is never run, so what /trust
+  // reviewed is exactly what can run.
+  const parts: string[] = [];
+  let last = 0;
+  for (const m of command.body.matchAll(/!`([^`\n]+)`/g)) {
+    const at = m.index ?? 0;
+    parts.push(expandCommand(command.body.slice(last, at), args));
+    const cmd = expandCommand(m[1] as string, args);
+    parts.push(runLine(`!\`${cmd}\``, cmd));
+    last = at + m[0].length;
+  }
+  parts.push(expandCommand(command.body.slice(last), args));
+  let text = parts.join("");
   const attached: string[] = [];
   for (const ref of importRefs(text).slice(0, MAX_FILES)) {
     const path = join(opts.workspaceRoot, ref.replace(/^\.\//, ""));

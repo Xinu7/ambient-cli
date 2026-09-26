@@ -88,6 +88,12 @@ function exitQuietlyOnClosedPipe(stream: NodeJS.WriteStream): void {
     if (err.code !== "EPIPE") throw err;
     if (closed) return;
     closed = true;
+    // The reader has what it wanted: that's a normal end, not a failure or a cancel.
+    process.once("exit", () => {
+      process.exitCode = 0;
+    });
+    // Nothing is running that needs stopping (a quick command): just finish.
+    if (process.listenerCount("SIGINT") === 0) process.exit(0);
     process.emit("SIGINT");
     // Cleanup is bounded: if something hangs, leave anyway.
     setTimeout(() => process.exit(process.exitCode ?? 0), 5_000).unref();

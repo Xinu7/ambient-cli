@@ -7,7 +7,7 @@ import {
 } from "node:path";
 import {
   decide,
-  isReadDenied,
+  readDeniedMatcher,
   refineBashEffects,
   resolveResource,
   ruleCovers,
@@ -389,8 +389,9 @@ export async function executeTools(
   const readRoots = runState?.readRoots;
   const rules = opts.permissionRules;
   const home = homedir();
+  // Compiled once per batch: folder walks check every file they visit.
   const readDenied = rules?.deny.some((r) => r.specifier !== undefined)
-    ? (p: string) => isReadDenied(rules, p, opts.workspaceRoot, home)
+    ? readDeniedMatcher(rules, opts.workspaceRoot, home)
     : undefined;
   const makeToolCtx = (toolCallId: string): ToolContext => ({
     cwd: opts.cwd,
@@ -487,9 +488,27 @@ export async function executeTools(
   };
 
   const outcomes = new Array<ToolOutcome | undefined>(calls.length);
-  const run = (i: number): Promise<ToolOutcome> => {
+  // Once a hook stops the run, nothing else in the batch runs.
+  let haltedBy: string | undefined;
+  const run = async (i: number): Promise<ToolOutcome> => {
     const call = calls[i] as ToolCall;
     const toolCallId = ids[i] as string;
+    if (haltedBy !== undefined) {
+      return {
+        toolCallId,
+        wireId: call.id,
+        toolName: call.name,
+        ok: false,
+        result: null,
+        error: `not run: a hook stopped the run (${haltedBy})`,
+        durationMs: 0,
+      };
+    }
+    const outcome = await runOneOrUnknown(i, call, toolCallId);
+    if (outcome.halt) haltedBy = outcome.halt;
+    return outcome;
+  };
+  const runOneOrUnknown = (i: number, call: ToolCall, toolCallId: string): Promise<ToolOutcome> => {
     const tool = registry.get(call.name);
     if (!tool) {
       return Promise.resolve({
