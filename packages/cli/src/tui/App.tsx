@@ -657,6 +657,8 @@ export function App(deps: AppDeps): ReactNode {
   // all ask at once, and the overlay holds a single answer slot. Prompts wait their turn; one still waiting
   // when its run is cancelled settles without being shown.
   const promptsRef = useRef(new PromptQueue());
+  /** When the current approval prompt appeared (keys right after it are ignored). */
+  const approvalShownAtRef = useRef(0);
   // Tools you allowed "for this session" during the current run: prompts for them that were already waiting
   // their turn take that answer instead of asking again (the grant covers the tool the same way).
   const sessionAllowedRef = useRef(new Set<string>());
@@ -683,6 +685,7 @@ export function App(deps: AppDeps): ReactNode {
         settle(d);
       };
       approvalResolver.current = resolve;
+      approvalShownAtRef.current = Date.now();
       ring(); // the agent is waiting on you
       void fireAndForget(
         settingsRef.current?.hooksPort(() => sessionIdRef.current ?? ""),
@@ -1692,7 +1695,12 @@ export function App(deps: AppDeps): ReactNode {
     // 1) A pending approval takes precedence. Two equal paths to the SAME four outcomes (resolveApprovalKey):
     //    move the ▸ cursor with ↑/↓ and confirm with Enter/Space, OR press the y/a/b/n hotkey to jump-and-confirm.
     if (approvalResolver.current) {
-      const r = resolveApprovalKey(ch, key, approvalSelRef.current);
+      const r = resolveApprovalKey(
+        ch,
+        key,
+        approvalSelRef.current,
+        Date.now() - approvalShownAtRef.current,
+      );
       if (r.t === "abort")
         abortRun(); // abort the whole run, not merely deny (global cancel contract)
       else if (r.t === "move") setApprovalSel(r.sel);

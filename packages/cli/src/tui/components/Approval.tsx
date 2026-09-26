@@ -36,6 +36,9 @@ export type ApprovalKeyResult =
   | { t: "confirm"; decision: ApprovalDecision }
   | { t: "abort" }
   | { t: "none" };
+/** How long an approval prompt ignores keys after it appears (only Esc and Ctrl+C count meanwhile). */
+export const APPROVAL_SETTLE_MS = 700;
+
 export function resolveApprovalKey(
   ch: string,
   key: {
@@ -47,9 +50,16 @@ export function resolveApprovalKey(
     meta?: boolean;
   },
   sel: number,
+  /** How long the prompt has been on screen (ms). */
+  shownForMs = Number.POSITIVE_INFINITY,
 ): ApprovalKeyResult {
   if (key.ctrl && ch === "c") return { t: "abort" };
   if (key.escape) return { t: "confirm", decision: "deny" }; // safe cancel
+  // Keys that arrive right as the prompt appears were meant for what you were typing (a message to the
+  // agent), not an answer — a letter mid-word must never allow, or switch the session to bypass.
+  if (shownForMs < APPROVAL_SETTLE_MS) return { t: "none" };
+  // A burst of several characters is typing or a paste, never a deliberate answer.
+  if (ch.length > 1) return { t: "none" };
   // A MODIFIED key must never approve: Ink reports Ctrl+A as ch:"a"+ctrl, which would otherwise hit the `a`
   // (allow-session) branch — so Ctrl+A / Ctrl+Y / Meta+letter can't grant anything. Arrows, Enter
   // and the letter hotkeys are all UNMODIFIED, so gating ctrl/meta here is safe.

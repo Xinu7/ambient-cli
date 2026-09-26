@@ -6,6 +6,7 @@ import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
 import { App } from "../src/tui/App.js";
 import {
+  APPROVAL_SETTLE_MS,
   Approval,
   type ApprovalRequest,
   defaultApprovalSel,
@@ -30,6 +31,27 @@ const bashRiskReq: ApprovalRequest = {
 };
 
 // ── the interaction contract: BOTH arrow+Enter AND letter hotkeys reach the same four outcomes ──
+describe("keys typed as a prompt appears don't answer it", () => {
+  const noKey = {};
+  it("ignores letters, Enter and space right after it appears; Esc still denies", () => {
+    for (const ch of ["a", "b", "y", " "]) {
+      expect(resolveApprovalKey(ch, noKey, 0, 50)).toEqual({ t: "none" });
+    }
+    expect(resolveApprovalKey("", { return: true }, 0, 50)).toEqual({ t: "none" });
+    expect(resolveApprovalKey("", { escape: true }, 0, 50)).toEqual({
+      t: "confirm",
+      decision: "deny",
+    });
+    expect(resolveApprovalKey("a", noKey, 0, APPROVAL_SETTLE_MS + 1)).toEqual({
+      t: "confirm",
+      decision: "allow-session",
+    });
+  });
+  it("a burst of characters (typing or a paste) never answers", () => {
+    expect(resolveApprovalKey("a b", noKey, 0, 5_000)).toEqual({ t: "none" });
+  });
+});
+
 describe("resolveApprovalKey (arrow + hotkey parity)", () => {
   const noKey = {};
   it("↑/↓ move the cursor and CLAMP at the ends (never wrap) across all FOUR rows", () => {
@@ -261,6 +283,7 @@ describe("App: approval interaction end to end", () => {
     const { stdin, lastFrame, unmount } = renderApp({ client: c, permission: "ask" });
     await waitFor(() => (lastFrame() ?? "").includes("Permission needed"));
     expect(lastFrame() ?? "").toContain("Run touch hi.txt?"); // the redesigned plain-English header, live
+    await new Promise((r) => setTimeout(r, APPROVAL_SETTLE_MS + 50)); // a person reads it first
     stdin.write("n"); // deny via the hotkey
     // reaching the final answer proves resolve("deny") fired and the agent continued (not merely modal-gone)
     await waitFor(() => (lastFrame() ?? "").includes("ALL-DONE"));
@@ -282,6 +305,7 @@ describe("App: approval interaction end to end", () => {
     });
     const { stdin, lastFrame, unmount } = renderApp({ client: c, permission: "ask" });
     await waitFor(() => (lastFrame() ?? "").includes("Permission needed"));
+    await new Promise((r) => setTimeout(r, APPROVAL_SETTLE_MS + 50));
     stdin.write("b"); // Bypass session — one keystroke, no more input after this
     // If bypass DIDN'T short-circuit the 2nd call, the run would hang on a new modal and this would TIME OUT.
     await waitFor(() => (lastFrame() ?? "").includes("ALL-DONE"));
