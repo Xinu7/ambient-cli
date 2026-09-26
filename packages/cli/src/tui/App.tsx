@@ -6,6 +6,7 @@ import {
   discoverAgents,
   discoverCommands,
 } from "@amb/context";
+import { guardUntrustedResult } from "@amb/permissions";
 import {
   type AskRequest,
   type AskResponse,
@@ -772,7 +773,10 @@ export function App(deps: AppDeps): ReactNode {
       const priorContext =
         carryForward || skipLogReplayRef.current
           ? ""
-          : reconstructTranscript(readSession(sessionId).events);
+          : reconstructTranscript(
+              readSession(sessionId).events,
+              (t) => guardUntrustedResult(t).text,
+            );
       const controller = new AbortController();
       controllerRef.current = controller;
       // Snapshot the axes for THIS run (a mid-run Tab/Shift+Tab must not change what's already flying).

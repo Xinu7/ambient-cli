@@ -222,6 +222,8 @@ describe("reconstructTranscript + turnCount (warm-continue resume)", () => {
     expect(t).toContain("write result: created");
     expect(t).toContain("User (mid-run): also make b.txt"); // a steer survives reconstruction (resume/continuity)
     expect(t).toContain("Assistant: Done.");
+    // Tool results pass through the caller's guard (resume wraps them as untrusted data).
+    expect(reconstructTranscript(events, (r) => `<<${r}>>`)).toContain("write result: <<created>>");
   });
 
   it("groups by turnId so interleaved turns don't cross-associate", async () => {

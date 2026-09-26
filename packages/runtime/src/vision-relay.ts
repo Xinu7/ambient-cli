@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { guardUntrustedResult } from "@amb/permissions";
 import { AmbError, type CatalogModel, supportsVision } from "@amb/protocol";
 import { UNKNOWN_OUTPUT, UNKNOWN_WINDOW, rankVisionModels, streamTimeouts } from "@amb/reliability";
 import type { ChatClient } from "./ports.js";
@@ -229,7 +230,10 @@ function remember(cache: Map<string, string>, key: string, text: string): void {
 export function injectDescription(userText: string, result: RelayResult): string {
   const base = userText.trim();
   if (result.outcome === "described" && result.description) {
-    return `${base}\n\n[The model serving you cannot see images. ${result.visionModel ?? "A vision model"} looked at the attached image(s) and described them below. For anything the description doesn't cover, ask a follow-up with the ask_vision tool.]\n${result.description}`;
+    // Text inside an image (a screenshot of a web page) reaches the description, so it's guarded like
+    // any untrusted output.
+    const description = guardUntrustedResult(result.description).text;
+    return `${base}\n\n[The model serving you cannot see images. ${result.visionModel ?? "A vision model"} looked at the attached image(s) and described them below. For anything the description doesn't cover, ask a follow-up with the ask_vision tool.]\n${description}`;
   }
   const why =
     result.outcome === "no-model"

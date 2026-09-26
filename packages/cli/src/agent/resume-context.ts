@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { readTextCappedSafe } from "@amb/context";
+import { guardUntrustedResult } from "@amb/permissions";
 import {
   contentHash,
   latestGoal,
@@ -78,7 +79,7 @@ export function loadResumeContext(
       ? `## Interrupted work (reconcile before continuing)\n${notes.map((n) => `- ${n}`).join("\n")}`
       : "";
   const context = [
-    reconstructTranscript(events),
+    reconstructTranscript(events, (t) => guardUntrustedResult(t).text),
     renderOutstandingPlan(latestPlan(events)),
     recoveryBlock,
   ]

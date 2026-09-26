@@ -67,9 +67,36 @@ export function scanForInjection(text: string): InjectionScan {
  * marker — the surrounding text is preserved so the model still sees the content, just inert.
  */
 export function neutralizeInjection(text: string): string {
-  return text.replace(
-    /```+\s*(amb-action|action|tool[_\s-]?call|tool[_\s-]?use|function[_\s-]?call)\b/gi,
-    "``​$1 [neutralized fence]",
+  return (
+    text
+      .replace(
+        /```+\s*(amb-action|action|tool[_\s-]?call|tool[_\s-]?use|function[_\s-]?call)\b/gi,
+        "``​$1 [neutralized fence]",
+      )
+      // A forged boundary marker would let the content "close" the untrusted block early.
+      .replace(/-{2,}\s*(BEGIN|END)\s+UNTRUSTED\s+OUTPUT\s*-{2,}/gi, "[neutralized marker: $1]")
+  );
+}
+
+/**
+ * Whether a tool's output can carry someone else's bytes and must go through the injection guard: anything
+ * from the network, MCP servers (their tools, resources and errors), the shell, a saved copy of any of those
+ * (read_artifact), and what a vision model or a tool list says (ask_vision, load_tools). A plain local read
+ * is the user's own workspace and isn't wrapped.
+ */
+export function needsInjectionGuard(
+  toolName: string,
+  effects: readonly string[],
+  ok: boolean,
+): boolean {
+  if (toolName.startsWith("mcp_")) return true; // mcp__server__tool and mcp_read_resource alike
+  if (!ok) return false; // otherwise an error is ambient's own text
+  return (
+    effects.includes("network") ||
+    toolName === "bash" ||
+    toolName === "read_artifact" ||
+    toolName === "ask_vision" ||
+    toolName === "load_tools"
   );
 }
 

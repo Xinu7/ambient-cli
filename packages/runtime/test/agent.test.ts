@@ -243,6 +243,27 @@ describe("Agent loop", () => {
     expect(res.turns).toBeLessThan(20);
   });
 
+  it("the same call re-spelled (spacing, key order) still counts as a repeat", async () => {
+    let n = 0;
+    const spellings = [
+      '{"path":".","depth":1}',
+      '{ "depth": 1, "path": "." }',
+      '{"depth":1,"path":"."}',
+    ];
+    const client: ChatClient = {
+      fetchCatalog: async () => catalog,
+      chat: async () => {
+        const rawArgs = spellings[n++ % spellings.length] as string;
+        return {
+          content: "",
+          toolCalls: [{ id: `tc_${n}`, name: "list", args: JSON.parse(rawArgs), rawArgs }],
+        };
+      },
+    };
+    const res = await new Agent(client).run("go", baseOpts({ maxTurns: 20 }));
+    expect(res.stopReason).toBe("looping");
+  });
+
   it("a whitespace-only answer is 'blocked', not success", async () => {
     const client = new MockClient([{ content: "   \n  ", toolCalls: [], finishReason: "stop" }]);
     const res = await new Agent(client).run("hi", baseOpts());

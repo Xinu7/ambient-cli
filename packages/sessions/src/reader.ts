@@ -79,7 +79,11 @@ export function turnCount(events: Event[]): number {
  * resuming run's SYSTEM prompt (not as chat messages) so it never displaces the compaction goal anchor.
  * Tool results are preview-only in the durable log, so this is a faithful summary, not a byte-exact replay.
  */
-export function reconstructTranscript(events: Event[]): string {
+export function reconstructTranscript(
+  events: Event[],
+  /** Applied to each tool result: they can carry someone else's text (a web page, an MCP server). */
+  guard: (toolResult: string) => string = (t) => t,
+): string {
   // Group events by turn, preserving first-seen turn order.
   const order: string[] = [];
   const byTurn = new Map<string, Event[]>();
@@ -114,7 +118,7 @@ export function reconstructTranscript(events: Event[]): string {
         case "tool.result": {
           const name = toolNames.get(ev.toolCallId) ?? "tool";
           const body = ev.ok ? (ev.preview ?? "(ok)") : `ERROR: ${ev.error ?? "failed"}`;
-          lines.push(`  ← ${name} result: ${body}`);
+          lines.push(`  ← ${name} result: ${guard(body)}`);
           break;
         }
         case "assistant.final":
