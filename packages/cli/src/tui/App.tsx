@@ -509,6 +509,9 @@ export function App(deps: AppDeps): ReactNode {
   // Text messages the user sent WHILE a run is in flight — the running agent pulls these at each turn
   // boundary and injects them (steering). Anything left when the run ends drains as a follow-up turn.
   const steerRef = useRef<string[]>([]);
+  // Set when you press Enter on an empty line while messages wait on a subagent wave: the wave wraps up and
+  // reports now, so the agent reads your message sooner. Cleared when a run starts.
+  const hurryRef = useRef(false);
   const cancellingRef = useRef(false);
   const agentModeRef = useRef<AgentMode>(deps.agentMode);
   const permissionRef = useRef<Permission>(deps.permission);
@@ -721,6 +724,7 @@ export function App(deps: AppDeps): ReactNode {
       busyRef.current = true;
       pendingSwitchRef.current = undefined; // a switch picked during an earlier run already set modelRef
       runStartRef.current = Date.now();
+      hurryRef.current = false;
       setTick(0);
       setRunActive(true);
       setPlanReview(false); // a run is starting — the previous plan (if any) is no longer awaiting review
@@ -858,6 +862,7 @@ export function App(deps: AppDeps): ReactNode {
             if (steerRef.current.length === 0) return [];
             const msgs = steerRef.current;
             steerRef.current = [];
+            hurryRef.current = false; // read — a later wave in this run isn't cut short
             setQueued([...queueRef.current.map((q) => q.text)]);
             return msgs;
           },
@@ -907,6 +912,7 @@ export function App(deps: AppDeps): ReactNode {
             ...(goalRef.current ? { goal: goalRef.current } : {}), // children inherit the north-star
             ...(hooks ? { hooks } : {}),
             ...(permissionRules ? { permissionRules } : {}),
+            hurry: () => hurryRef.current,
             effort: effortRef.current,
           }),
         });
@@ -1993,6 +1999,19 @@ export function App(deps: AppDeps): ReactNode {
         agentModeRef.current === "plan" &&
         planRef.current.some((t) => t.status !== "done");
       const hasAttach = attachmentsRef.current.length > 0;
+      // Enter on an empty line while your messages wait on a subagent wave: ask it to wrap up and report now,
+      // so the agent reads them sooner.
+      if (!task && !hasAttach && busyRef.current && steerRef.current.length > 0 && state.wave) {
+        if (!hurryRef.current) {
+          hurryRef.current = true;
+          dispatch({
+            t: "notice",
+            level: "info",
+            text: "Asking the subagents to wrap up and report, so the agent can read your message.",
+          });
+        }
+        return;
+      }
       // Allow an image-only send (attachment + no text) — a common "look at this" flow.
       if (!task && !canRunPlan && !canApprovePlan && !hasAttach) return;
       const attach = attachmentsRef.current;
@@ -2264,7 +2283,9 @@ export function App(deps: AppDeps): ReactNode {
             {queued.length > 0 ? (
               <Box flexDirection="column" marginTop={1}>
                 <Text color={AmbientTheme.signal}>
-                  {`↳ ${queued.length} queued — the agent picks ${queued.length === 1 ? "it" : "them"} up next`}
+                  {state.wave
+                    ? `↳ ${queued.length} queued — the agent reads ${queued.length === 1 ? "it" : "them"} when the subagents report · enter: ask them to wrap up now`
+                    : `↳ ${queued.length} queued — the agent picks ${queued.length === 1 ? "it" : "them"} up next`}
                 </Text>
                 {queued.slice(0, qMax).map((q, i) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: queue order is stable within a render

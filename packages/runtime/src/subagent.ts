@@ -76,6 +76,9 @@ export interface SubagentDeps {
   verify?: VerifyPort;
   /** The session's hooks: a child's tool calls run the tool hooks, and SubagentStop fires when it finishes. */
   hooks?: HooksPort;
+  /** Checked at each child turn: true when the user wants the wave to report back now (they sent a message
+   *  the parent can only read once the wave returns). */
+  hurry?: () => boolean;
   /** The session's permission rules — a child obeys the same denials. */
   permissionRules?: PermissionRules;
   /** Build a child's registry for a role — MUST NOT include the `subagent` tool (structural depth cap).
@@ -305,7 +308,7 @@ function runOneChild(
     cwd: ctx.cwd,
     workspaceRoot: ctx.workspaceRoot,
     signal: ac.signal,
-    wrapUp: () => pastDeadline,
+    wrapUp: () => pastDeadline || deps.hurry?.() === true,
     emit: childEmit,
     approve: deps.approve,
     workspace: childWorkspace(deps.workspace),

@@ -36,6 +36,8 @@ export interface SubagentToolDeps {
   verify?: VerifyPort;
   /** The session's hooks, applied to children's tool calls (and SubagentStop). */
   hooks?: HooksPort;
+  /** True when the user asked the running wave to report back now. */
+  hurry?: () => boolean;
   /** The session's permission rules, obeyed by children too. */
   permissionRules?: PermissionRules;
   /** Injectable clock (test hook); defaults to real time. */
@@ -221,6 +223,7 @@ export function makeSubagentTool(deps: SubagentToolDeps): ToolDefinition {
           ...(deps.verify ? { verify: deps.verify } : {}),
           ...(deps.hooks ? { hooks: deps.hooks } : {}),
           ...(deps.permissionRules ? { permissionRules: deps.permissionRules } : {}),
+          ...(deps.hurry ? { hurry: deps.hurry } : {}),
           buildChildRegistry: childRegistry,
           childSink: childSink(now),
           artifactStore: childArtifactStore,

@@ -325,6 +325,34 @@ describe("subagent budgets", () => {
     expect(out.results[0]?.stopReason).toBe("max_turns");
   });
 
+  it("wraps up and reports as soon as the user asks for it, long before its deadline", async () => {
+    let calls = 0;
+    let hurry = false;
+    const busy: ChatClient = {
+      fetchCatalog: async () => catalog,
+      chat: async (p: ChatParams): Promise<TurnCompletion> => {
+        calls += 1;
+        if (calls === 2) hurry = true; // the user pressed Enter while the scout was working
+        if (p.tools.length === 0) return { content: "REPORTING EARLY", toolCalls: [] };
+        return {
+          content: "",
+          toolCalls: [
+            { id: `tc_${calls}`, name: "list", args: { path: "." }, rawArgs: `{"n":${calls}}` },
+          ],
+        };
+      },
+    };
+    const started = Date.now();
+    const out = await runSubagents([{ label: "s", role: "scout", prompt: "look" }], ctx(), {
+      ...deps(),
+      client: busy,
+      hurry: () => hurry,
+    });
+    expect(out.results[0]?.summary).toContain("REPORTING EARLY");
+    expect(calls).toBeLessThanOrEqual(4);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
   it("keeps a substantial summary (not cut to a few lines)", async () => {
     const long = `FINDINGS ${"detail ".repeat(700)}END`; // ~4.9 KB
     const out = await runSubagents([{ label: "s", role: "scout", prompt: "look" }], ctx(), {
