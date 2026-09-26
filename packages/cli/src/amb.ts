@@ -77,11 +77,20 @@ Eval flags:
 
 Everything runs on Ambient models only.`;
 
-/** A reader that stops early (`ambient -p … | head -1`) closes our stdout: finish quietly, like any CLI. */
+/**
+ * A reader that stops early (`ambient -p … | head -1`) closes our stdout: finish quietly, like any CLI —
+ * by cancelling the run (so hooks, MCP servers and any running command are cleaned up as on Ctrl-C) rather
+ * than exiting on the spot. Later writes to the closed pipe are ignored.
+ */
 function exitQuietlyOnClosedPipe(stream: NodeJS.WriteStream): void {
+  let closed = false;
   stream.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code === "EPIPE") process.exit(process.exitCode ?? 0);
-    throw err;
+    if (err.code !== "EPIPE") throw err;
+    if (closed) return;
+    closed = true;
+    process.emit("SIGINT");
+    // Cleanup is bounded: if something hangs, leave anyway.
+    setTimeout(() => process.exit(process.exitCode ?? 0), 5_000).unref();
   });
 }
 

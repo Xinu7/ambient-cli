@@ -247,6 +247,9 @@ export interface RunOptions {
   instructions?: string;
   /** User-configured hooks (scripts run on tool calls, prompts and finishing). Absent ⇒ none. */
   hooks?: HooksPort;
+  /** State that outlives one run in an interactive session: folders a loaded skill made readable, and
+   *  folders whose instructions were already offered. Absent ⇒ fresh for this run. */
+  runState?: import("./execute-tools.js").RunState;
   /** Allow / deny / ask rules (Claude Code syntax) layered over the permission mode. */
   permissionRules?: PermissionRules;
   /**
@@ -284,6 +287,8 @@ export interface RunOptions {
 export interface HookOutcome {
   /** Stop this action (the tool call, the prompt, finishing the run) — the reason is shown to the model. */
   block?: string;
+  /** Stop the whole run now (`"continue": false`) — the reason is shown to the user. */
+  halt?: string;
   /** Skip the approval prompt for this tool call. Never overrides a denial. */
   allow?: boolean;
   /** Ask before this tool call even where it would otherwise run without asking. */

@@ -39,6 +39,8 @@ export interface ToolOutcome {
   hookNote?: string;
   /** Instructions for a folder the call reached into for the first time this run (its AGENTS.md etc.). */
   folderInstructions?: string;
+  /** A hook asked to stop the whole run (`"continue": false`), with its reason. */
+  halt?: string;
 }
 
 /** IDs that scope the attempt these tool calls belong to. */
@@ -112,6 +114,18 @@ async function runOne(
     };
   }
 
+  // Cancelled while earlier calls ran: don't start hooks or tools nobody will wait for.
+  if (opts.signal.aborted) {
+    return {
+      toolCallId,
+      wireId,
+      toolName: call.name,
+      ok: false,
+      result: null,
+      error: "cancelled",
+      durationMs: dur(),
+    };
+  }
   // 1b. PreToolUse hooks: may block the call, replace its arguments, or change whether it asks.
   const pre = opts.hooks
     ? await opts.hooks.run(
@@ -120,15 +134,16 @@ async function runOne(
         opts.signal,
       )
     : {};
-  if (pre.block) {
+  if (pre.block || pre.halt) {
     return {
       toolCallId,
       wireId,
       toolName: call.name,
       ok: false,
       result: null,
-      error: `blocked by a hook: ${pre.block}`,
+      error: `blocked by a hook: ${pre.block ?? pre.halt}`,
       durationMs: dur(),
+      ...(pre.halt ? { halt: pre.halt } : {}),
     };
   }
   if (pre.updatedInput) {
@@ -275,7 +290,8 @@ async function runOne(
         opts.signal,
       );
       const note = [r.block, r.context].filter(Boolean).join("\n");
-      return note ? { ...o, hookNote: note } : o;
+      const withNote = note ? { ...o, hookNote: note } : o;
+      return r.halt ? { ...withNote, halt: r.halt } : withNote;
     };
     // Validate the tool's OWN output for shape. A mismatch is OUR bug, not the model's — the side
     // effect ALREADY happened, so we must NOT report ok:false (that would invite a duplicate mutation).
@@ -534,6 +550,20 @@ export async function executeTools(
   return runState ? withFolderInstructions(done, calls, opts, runState) : done;
 }
 
+/** Folders whose own instruction files are someone else's (dependencies, vendored or generated code). */
+const NOT_OURS = new Set([
+  "node_modules",
+  "vendor",
+  "third_party",
+  ".git",
+  "dist",
+  "build",
+  ".venv",
+  "venv",
+  "target",
+  ".claude",
+]);
+
 /** What a run remembers across tool batches. */
 export interface RunState {
   /** Folders outside the workspace tools may read (a loaded skill's own files). */
@@ -571,6 +601,7 @@ function withFolderInstructions(
       const parts = rel.split(/[\\/]/);
       const dirParts = o.toolName === "list" ? parts : parts.slice(0, -1);
       for (let d = 1; d <= dirParts.length; d++) {
+        if (NOT_OURS.has(dirParts[d - 1] as string)) break;
         const dir = joinPath(base, ...dirParts.slice(0, d));
         if (state.instructionDirs.has(dir)) continue;
         state.instructionDirs.add(dir);

@@ -53,11 +53,15 @@ export function makeMcpControl(opts: {
   const connect = opts.connectImpl ?? connectMcp;
   let current: McpConnection | undefined;
   let closed = false;
+  // Each connect gets a number; only the newest may take over, so a slow first connect finishing after a
+  // sign-in's reconnect can't put the old, signed-out connection back.
+  let generation = 0;
 
   const reconnect = async () => {
+    const mine = ++generation;
     const next = await connect(opts.workspaceRoot, { ...opts.connect, auth: makeMcpAuth(store) });
-    if (closed) {
-      next.close(); // the session ended while connecting — don't leak the servers
+    if (closed || mine !== generation) {
+      next.close(); // superseded, or the session ended while connecting — don't leak the servers
       return;
     }
     current?.close();
@@ -109,6 +113,9 @@ export function makeMcpControl(opts: {
       }).find((s) => s.name === name);
       if (!spec) return `No MCP server named "${name}". /mcp lists them.`;
       if (!spec.url) return `${name} runs on this machine and has no sign-in.`;
+      if (spec.source === "project" && !(await opts.connect.approveServer?.(spec))) {
+        return `${name} is this project's server — review and trust the project first (/trust).`;
+      }
       try {
         await (opts.signInImpl ?? signIn)(spec.url, {
           fetch: realFetch,

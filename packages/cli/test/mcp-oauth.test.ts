@@ -261,10 +261,9 @@ describe("the token store on macOS", () => {
 describe("opening the browser", () => {
   it("never goes through a shell, and only opens web links", () => {
     const url = "https://as.example/authorize?a=1&b=2&state=x";
-    expect(browserCommand(url, "win32")).toEqual([
-      "rundll32",
-      ["url.dll,FileProtocolHandler", url],
-    ]);
+    const win = browserCommand(url, "win32");
+    expect(win?.[0]).toMatch(/[\\/]System32[\\/]rundll32\.exe$/i);
+    expect(win?.[1]).toEqual(["url.dll,FileProtocolHandler", url]);
     expect(browserCommand(url, "darwin")).toEqual(["open", [url]]);
     expect(browserCommand("file:///etc/passwd", "linux")).toBeUndefined();
     expect(browserCommand("javascript:alert(1)", "darwin")).toBeUndefined();

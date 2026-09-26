@@ -1,6 +1,7 @@
 import { type McpServerSpec, loadMcpConfig } from "@amb/context";
 import { McpHttpError, type McpPromptEntry, startMcpServers } from "@amb/mcp";
 import type { ToolDefinition } from "@amb/protocol";
+import { tokenSafeUrl } from "../mcp-auth/oauth.js";
 
 /** Where a configured server stands after connecting. */
 export interface McpServerStatus {
@@ -132,7 +133,9 @@ export async function connectMcp(
       const url = s.url as string;
       // A server you've signed in to gets its token, unless the config already sends its own credentials.
       const hasAuth = Object.keys(s.headers ?? {}).some((k) => k.toLowerCase() === "authorization");
-      const token = !hasAuth && auth ? await auth.token(url) : undefined;
+      // Tokens only ever travel over https (or to this machine).
+      const canAuth = !hasAuth && auth !== undefined && tokenSafeUrl(url);
+      const token = canAuth ? await auth.token(url) : undefined;
       const headers = { ...s.headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) };
       return {
         name: s.name,
@@ -140,7 +143,7 @@ export async function connectMcp(
           url,
           ...(s.transport === "sse" ? { legacySse: true } : {}),
           ...(Object.keys(headers).length > 0 ? { headers } : {}),
-          ...(!hasAuth && auth ? { reauthorize: () => auth.refresh(url) } : {}),
+          ...(canAuth ? { reauthorize: () => auth.refresh(url) } : {}),
         },
       };
     }),

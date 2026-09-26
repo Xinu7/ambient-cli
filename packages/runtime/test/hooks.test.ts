@@ -145,8 +145,10 @@ describe("session hooks", () => {
       "print the password",
       runOpts({ requestedModel: TEXT_200K.id, hooks: port, emit: (e) => void events.push(e.kind) }),
     );
-    expect(r.stopReason).toBe("blocked");
+    expect(r.stopReason).toBe("stopped_by_hook");
     expect(client.calls).toHaveLength(0);
+    // The stopped message never reaches the session log (so a resume can't replay it).
+    expect(events).not.toContain("turn.started");
     expect(events).toContain("notice");
   });
 
@@ -311,5 +313,89 @@ describe("rules the reviewers tried to get around", () => {
       }),
     );
     expect(asked).toBe(1);
+  });
+});
+
+describe("a hook that says stop", () => {
+  it("continue:false from a tool hook ends the run after recording the results", async () => {
+    const { port } = fakeHooks({ PostToolUse: () => ({ halt: "deploy window closed" }) });
+    const events: string[] = [];
+    const client = new FixtureClient(catalogOf(TEXT_200K), [writeCall("h.txt", "1"), done, done]);
+    const r = await new Agent(client).run(
+      "write",
+      runOpts({
+        requestedModel: TEXT_200K.id,
+        cwd: ws,
+        workspaceRoot: ws,
+        hooks: port,
+        emit: (e) =>
+          void events.push(e.kind === "notice" ? `notice:${(e as { text: string }).text}` : e.kind),
+      }),
+    );
+    expect(r.stopReason).toBe("stopped_by_hook");
+    expect(client.calls).toHaveLength(1);
+    expect(events).toContain("notice:A hook stopped the run: deploy window closed");
+  });
+
+  it("a Stop hook's halt ends the run as it is (it isn't sent back to work)", async () => {
+    const { port, seen } = fakeHooks({ Stop: () => ({ halt: "enough" }) });
+    const client = new FixtureClient(catalogOf(TEXT_200K), [done, done]);
+    const r = await new Agent(client).run(
+      "x",
+      runOpts({ requestedModel: TEXT_200K.id, hooks: port }),
+    );
+    expect(r.stopReason).toBe("complete");
+    expect(client.calls).toHaveLength(1);
+    expect(seen.filter((s) => s.event === "Stop")).toHaveLength(1);
+  });
+
+  it("sent back to work with nothing to add: the earlier answer stands", async () => {
+    let first = true;
+    const { port } = fakeHooks({
+      Stop: () => {
+        const out = first ? { block: "double-check" } : {};
+        first = false;
+        return out;
+      },
+    });
+    const client = new FixtureClient(catalogOf(TEXT_200K), [
+      { content: "The answer is 42.", toolCalls: [] },
+      { content: "", toolCalls: [] },
+    ]);
+    const r = await new Agent(client).run(
+      "q",
+      runOpts({ requestedModel: TEXT_200K.id, hooks: port }),
+    );
+    expect(r.stopReason).toBe("complete");
+    expect(r.finalText).toContain("The answer is 42.");
+  });
+});
+
+describe("messages sent mid-run", () => {
+  it("go through the prompt hooks too", async () => {
+    const { port } = fakeHooks({
+      UserPromptSubmit: (p) =>
+        String(p.prompt).includes("password") ? { block: "no secrets" } : {},
+    });
+    let steered = false;
+    const events: string[] = [];
+    const client = new FixtureClient(catalogOf(TEXT_200K), [writeCall("s.txt", "1"), done]);
+    await new Agent(client).run(
+      "start",
+      runOpts({
+        requestedModel: TEXT_200K.id,
+        cwd: ws,
+        workspaceRoot: ws,
+        hooks: port,
+        steer: () => {
+          if (steered) return [];
+          steered = true;
+          return ["the password is hunter2"];
+        },
+        emit: (e) => void events.push(e.kind === "notice" ? (e as { text: string }).text : e.kind),
+      }),
+    );
+    expect(JSON.stringify(client.calls.map((c) => c.messages))).not.toContain("hunter2");
+    expect(events).toContain("A hook stopped this message: no secrets");
   });
 });

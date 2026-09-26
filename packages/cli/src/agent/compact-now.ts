@@ -4,6 +4,7 @@ import { profileFor, resolveRequestedModel } from "@amb/reliability";
 import {
   type CapabilityPort,
   type ChatClient,
+  type HooksPort,
   type Msg,
   type WorkspaceContextPort,
   compactConversation,
@@ -33,6 +34,8 @@ export async function compactNow(opts: {
   signal: AbortSignal;
   emit: (ev: NewEvent) => void;
   capabilities?: CapabilityPort;
+  /** PreCompact hooks run first (trigger `manual`). */
+  hooks?: HooksPort;
 }): Promise<CompactNowResult> {
   if (opts.conversation.length < 3) return { ok: false, reason: "nothing to compact yet" };
   const size = estimateMessagesTokens([...opts.conversation]);
@@ -41,6 +44,13 @@ export async function compactNow(opts: {
       ok: false,
       reason: `the conversation is only ${formatTokens(size)} tokens — nothing worth compacting yet`,
     };
+  }
+  if (opts.hooks) {
+    await opts.hooks.run(
+      "PreCompact",
+      { trigger: "manual", custom_instructions: opts.focus ?? "" },
+      opts.signal,
+    );
   }
   let catalog: Awaited<ReturnType<ChatClient["fetchCatalog"]>>;
   try {

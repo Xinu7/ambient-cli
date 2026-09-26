@@ -26,7 +26,9 @@ export function browserCommand(
   }
   if (u.protocol !== "https:" && u.protocol !== "http:") return undefined;
   if (platform === "darwin") return ["open", [u.toString()]];
-  if (platform === "win32") return ["rundll32", ["url.dll,FileProtocolHandler", u.toString()]];
+  // By full path: a bare name would also be looked up in the current folder (a cloned repo's rundll32.exe).
+  if (platform === "win32")
+    return [windowsSystemExe("rundll32.exe"), ["url.dll,FileProtocolHandler", u.toString()]];
   return ["xdg-open", [u.toString()]];
 }
 

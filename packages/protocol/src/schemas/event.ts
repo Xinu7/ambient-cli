@@ -25,6 +25,7 @@ export const StopReasonSchema = z.enum([
   "blocked",
   "verify_failed",
   "looping", // the model repeated the SAME tool calls with no progress — stopped early to save the budget
+  "stopped_by_hook", // a hook stopped the message or the run (its reason is shown as a notice)
   "error",
 ]);
 export type StopReason = z.infer<typeof StopReasonSchema>;

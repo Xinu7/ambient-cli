@@ -23,6 +23,7 @@ import {
   type Msg,
   type ReasoningLevel,
   type RunOptions,
+  newRunState,
   normalizeEffortSetting,
 } from "@amb/runtime";
 import {
@@ -604,6 +605,9 @@ export function App(deps: AppDeps): ReactNode {
   };
 
   const settingsRef = useRef(deps.settings);
+  // What a session's runs share: folders a loaded skill made readable, and folders whose instructions the
+  // agent has already been given (so a subfolder's AGENTS.md comes once per conversation, not per message).
+  const runStateRef = useRef(newRunState());
   // A project whose own settings (hooks, allow rules, MCP servers) wait for the user's OK says so up front.
   useEffect(() => {
     if ((settingsRef.current?.untrustedCount() ?? 0) > 0) {
@@ -878,6 +882,7 @@ export function App(deps: AppDeps): ReactNode {
           ...(lastEffortRef.current ? { priorEffort: lastEffortRef.current } : {}),
           ...(hooks ? { hooks } : {}),
           ...(permissionRules ? { permissionRules } : {}),
+          runState: runStateRef.current,
           nextModel: () => {
             const m = pendingSwitchRef.current;
             pendingSwitchRef.current = undefined;
@@ -1109,6 +1114,7 @@ export function App(deps: AppDeps): ReactNode {
     const controller = new AbortController();
     controllerRef.current = controller;
     try {
+      const compactHooks = deps.settings?.hooksPort(() => sessionId);
       const res = await compactNow({
         client: deps.client,
         conversation: conversationRef.current,
@@ -1127,6 +1133,7 @@ export function App(deps: AppDeps): ReactNode {
           if (ev.kind !== "context.compacted") dispatch({ t: "event", ev, at: Date.now() });
         },
         ...(deps.capabilities ? { capabilities: deps.capabilities } : {}),
+        ...(compactHooks ? { hooks: compactHooks } : {}),
       });
       if (controller.signal.aborted) {
         dispatch({ t: "notice", level: "info", text: "compaction cancelled — nothing changed" });
@@ -1451,6 +1458,7 @@ export function App(deps: AppDeps): ReactNode {
           skipLogReplayRef.current = false;
           conversationRef.current = [];
           sessionImagesRef.current = [];
+          runStateRef.current = newRunState();
         }
         // The kept plan is now from a cleared session — retire the review prompt/gesture so an empty Enter can't
         // silently execute a stale plan in the fresh session.

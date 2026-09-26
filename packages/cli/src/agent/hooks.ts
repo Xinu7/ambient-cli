@@ -27,45 +27,93 @@ const CLAUDE_TOOL_NAME: Record<string, string> = {
   ask_user: "AskUserQuestion",
 };
 
-/** ambient argument names → Claude's (and back), for the tools whose inputs differ. */
-const FIELD_RENAMES: Array<[string, string]> = [
-  ["path", "file_path"],
+/** The tools whose file argument Claude Code calls `file_path` (Grep, Glob and LS keep `path`). */
+const FILE_PATH_TOOLS = new Set(["read", "write", "edit"]);
+
+function renameFields(
+  obj: Record<string, unknown>,
+  pairs: ReadonlyArray<[string, string]>,
+): Record<string, unknown> {
+  const out = { ...obj };
+  for (const [from, to] of pairs) {
+    if (from in out && !(to in out)) {
+      out[to] = out[from];
+      delete out[from];
+    }
+  }
+  return out;
+}
+
+const EDIT_FIELDS: Array<[string, string]> = [
   ["oldString", "old_string"],
   ["newString", "new_string"],
   ["replaceAll", "replace_all"],
 ];
 
+/** A tool's input in the field names Claude Code's hooks expect. */
 export function toClaudeInput(tool: string, input: unknown): unknown {
   if (!CLAUDE_TOOL_NAME[tool] || !input || typeof input !== "object") return input;
-  const out: Record<string, unknown> = { ...(input as Record<string, unknown>) };
-  for (const [ours, theirs] of FIELD_RENAMES) {
-    if (ours in out && !(theirs in out)) {
-      out[theirs] = out[ours];
-      delete out[ours];
-    }
+  const a = input as Record<string, unknown>;
+  if (tool === "apply_patch" && Array.isArray(a.edits)) {
+    return {
+      ...a,
+      edits: a.edits.map((e) =>
+        e && typeof e === "object"
+          ? renameFields(e as Record<string, unknown>, [["path", "file_path"], ...EDIT_FIELDS])
+          : e,
+      ),
+    };
   }
-  return out;
+  return renameFields(a, [
+    ...(FILE_PATH_TOOLS.has(tool) ? [["path", "file_path"] as [string, string]] : []),
+    ...EDIT_FIELDS,
+  ]);
 }
 
+/** A hook's rewritten input back in ambient's field names. */
 export function fromClaudeInput(
   tool: string,
   input: Record<string, unknown>,
 ): Record<string, unknown> {
   if (!CLAUDE_TOOL_NAME[tool]) return input;
-  const out: Record<string, unknown> = { ...input };
-  for (const [ours, theirs] of FIELD_RENAMES) {
-    if (theirs in out && !(ours in out)) {
-      out[ours] = out[theirs];
-      delete out[theirs];
-    }
+  const back = (pairs: ReadonlyArray<[string, string]>) =>
+    pairs.map(([ours, theirs]) => [theirs, ours] as [string, string]);
+  if (tool === "apply_patch" && Array.isArray(input.edits)) {
+    return {
+      ...input,
+      edits: input.edits.map((e) =>
+        e && typeof e === "object"
+          ? renameFields(
+              e as Record<string, unknown>,
+              back([["path", "file_path"], ...EDIT_FIELDS]),
+            )
+          : e,
+      ),
+    };
   }
-  return out;
+  return renameFields(
+    input,
+    back([
+      ...(FILE_PATH_TOOLS.has(tool) ? [["path", "file_path"] as [string, string]] : []),
+      ...EDIT_FIELDS,
+    ]),
+  );
 }
 
-/** Whether a hook's matcher applies to this tool (by its Claude name or ambient's). */
-export function matches(matcher: string, tool: string | undefined): boolean {
-  if (!matcher || matcher === "*" || tool === undefined) return true;
-  const names = [tool, CLAUDE_TOOL_NAME[tool]].filter((n): n is string => Boolean(n));
+/**
+ * Whether a hook's matcher applies. Tool events match the tool by its Claude name or ambient's; SessionStart
+ * matches its source (`startup`, `resume`) and PreCompact its trigger (`manual`, `auto`); other events ignore
+ * the matcher.
+ */
+export function matches(matcher: string, tool: string | undefined, value?: string): boolean {
+  if (!matcher || matcher === "*") return true;
+  const names =
+    tool !== undefined
+      ? [tool, CLAUDE_TOOL_NAME[tool]].filter((n): n is string => Boolean(n))
+      : value !== undefined
+        ? [value]
+        : [];
+  if (names.length === 0) return true;
   try {
     const re = new RegExp(`^(?:${matcher})$`);
     return names.some((n) => re.test(n));
@@ -105,7 +153,7 @@ export function interpret(
   const specific = (json.hookSpecificOutput ?? {}) as Record<string, unknown>;
   const out: HookOutcome = {};
   const reason = (r: unknown) => (typeof r === "string" && r.trim() ? r.trim() : undefined);
-  if (json.continue === false) out.block = reason(json.stopReason) ?? "stopped by a hook";
+  if (json.continue === false) out.halt = reason(json.stopReason) ?? "stopped by a hook";
   if (json.decision === "block") out.block = reason(json.reason) ?? "blocked by a hook";
   if (json.decision === "approve") out.allow = true;
   const permission = specific.permissionDecision;
@@ -126,6 +174,8 @@ export function combine(outcomes: readonly HookOutcome[]): HookOutcome {
   const out: HookOutcome = {};
   const blocks = outcomes.map((o) => o.block).filter(Boolean);
   if (blocks.length > 0) out.block = blocks.join("\n");
+  const halts = outcomes.map((o) => o.halt).filter(Boolean);
+  if (halts.length > 0) out.halt = halts.join("\n");
   if (outcomes.some((o) => o.ask)) out.ask = true;
   else if (outcomes.some((o) => o.allow)) out.allow = true;
   const contexts = outcomes.map((o) => o.context).filter(Boolean);
@@ -142,6 +192,11 @@ function runCommand(
   signal: AbortSignal,
 ): Promise<HookRun> {
   return new Promise((resolve) => {
+    // Cancelled already: don't start a hook that nobody will wait for.
+    if (signal.aborted) {
+      resolve({ code: null, stdout: "", stderr: "" });
+      return;
+    }
     const shell = machineShell();
     const command = hook.pluginRoot
       ? hook.command.replaceAll("${CLAUDE_PLUGIN_ROOT}", hook.pluginRoot)
@@ -202,7 +257,13 @@ export function hooksPort(
   return {
     async run(event, payload, signal) {
       const tool = typeof payload.tool_name === "string" ? payload.tool_name : undefined;
-      const hooks = active.filter((h) => h.event === event && matches(h.matcher, tool));
+      const value =
+        typeof payload.source === "string"
+          ? payload.source
+          : typeof payload.trigger === "string"
+            ? payload.trigger
+            : undefined;
+      const hooks = active.filter((h) => h.event === event && matches(h.matcher, tool, value));
       if (hooks.length === 0) return {};
       const input = JSON.stringify({
         session_id: sessionId(),

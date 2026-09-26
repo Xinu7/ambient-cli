@@ -52,9 +52,20 @@ describe("MCP status and sign-in in a session", () => {
         },
       ],
     });
+    const untrusted = makeMcpControl({
+      workspaceRoot: ws,
+      connect: { approveServer: async () => false },
+      store: makeTokenStore({ platform: "linux", configDir: ws }),
+      connectImpl,
+      signInImpl: async () => {
+        throw new Error("must not sign in to an untrusted project's server");
+      },
+    });
+    expect(await untrusted.login("remote", () => {})).toContain("trust the project first");
+
     const ctl = makeMcpControl({
       workspaceRoot: ws,
-      connect: {},
+      connect: { approveServer: async () => true },
       store: makeTokenStore({ platform: "linux", configDir: ws }),
       connectImpl,
       signInImpl: async () => {

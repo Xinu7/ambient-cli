@@ -34,8 +34,9 @@ describe("reading what a hook asked for", () => {
     expect(interpret("Stop", undefined, run({ decision: "block", reason: "keep going" }))).toEqual({
       block: "keep going",
     });
+    // `continue: false` stops everything — it is not "keep going".
     expect(interpret("Stop", undefined, run({ continue: false, stopReason: "halt" }))).toEqual({
-      block: "halt",
+      halt: "halt",
     });
     expect(
       interpret(
@@ -92,6 +93,28 @@ describe("tool names and inputs", () => {
     expect(matches("*", "read")).toBe(true);
     expect(matches("Bash", undefined)).toBe(true);
     expect(matches("[bad", "[bad")).toBe(true); // an invalid pattern matches only itself
+  });
+
+  it("SessionStart matchers match the source and PreCompact matchers the trigger", () => {
+    expect(matches("resume", undefined, "startup")).toBe(false);
+    expect(matches("resume|compact", undefined, "resume")).toBe(true);
+    expect(matches("manual", undefined, "auto")).toBe(false);
+    expect(matches("", undefined, "auto")).toBe(true);
+  });
+
+  it("Grep, Glob and LS keep `path`; MultiEdit edits use Claude's field names", () => {
+    expect(toClaudeInput("grep", { pattern: "x", path: "src" })).toEqual({
+      pattern: "x",
+      path: "src",
+    });
+    expect(
+      toClaudeInput("apply_patch", { edits: [{ path: "a.ts", oldString: "x", newString: "y" }] }),
+    ).toEqual({ edits: [{ file_path: "a.ts", old_string: "x", new_string: "y" }] });
+    expect(
+      fromClaudeInput("apply_patch", {
+        edits: [{ file_path: "a.ts", old_string: "x", new_string: "z" }],
+      }),
+    ).toEqual({ edits: [{ path: "a.ts", oldString: "x", newString: "z" }] });
   });
 
   it("hooks see Claude-shaped inputs; unknown tools pass through", () => {

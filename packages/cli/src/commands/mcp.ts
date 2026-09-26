@@ -59,6 +59,17 @@ export async function runMcp(args: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
+    if (
+      sub === "login" &&
+      spec.source === "project" &&
+      !workspaceSettings(cwd, config, configDir()).projectTrusted()
+    ) {
+      process.stderr.write(
+        `ambient: ${name} is this project's server — review and trust the project first (ambient trust)\n`,
+      );
+      process.exitCode = 1;
+      return;
+    }
     if (sub === "logout") {
       if (!store.get(spec.url)) {
         process.stdout.write(`You weren't signed in to ${name}.\n`);

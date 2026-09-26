@@ -147,7 +147,7 @@ export class Agent {
     const grants: Grant[] = opts.grants ?? [];
     // Per-run tool state: folders outside the workspace tools may read (a loaded skill's own files) and
     // folders whose own instructions were already offered.
-    const runState = newRunState();
+    const runState = opts.runState ?? newRunState();
     // Run-scoped autonomy brake: consecutive auto-approved mutations, reset whenever a human is asked. `cap`
     // is the EARNED per-model cap (set from the served model's verify track record before each tool batch).
     const autoApproval: { streak: number; cap?: number } = { streak: 0 };
@@ -208,6 +208,23 @@ export class Agent {
       return { stopReason: "error", turns: 0, finalText: "" };
     }
 
+    // UserPromptSubmit hooks can stop the message or add context. They run BEFORE the turn is recorded, so a
+    // message a hook stops (say, one carrying a secret) never reaches the session log — or a later resume.
+    const promptHook = opts.hooks
+      ? await opts.hooks.run("UserPromptSubmit", { prompt: userInput }, opts.signal)
+      : {};
+    const promptStop = promptHook.halt ?? promptHook.block;
+    if (promptStop) {
+      emit({
+        schemaVersion: 1,
+        kind: "notice",
+        sessionId,
+        level: "warn",
+        text: `A hook stopped this message: ${promptStop}`,
+      });
+      return { stopReason: "stopped_by_hook", turns: 0, finalText: "" };
+    }
+
     const turnId = newTurnId();
     emit({
       schemaVersion: 1,
@@ -221,26 +238,32 @@ export class Agent {
         : {}),
     });
 
-    // UserPromptSubmit hooks can stop the message or add context; SessionStart hooks add context to the first
-    // message of a conversation.
-    const promptHook = opts.hooks
-      ? await opts.hooks.run("UserPromptSubmit", { prompt: userInput }, opts.signal)
-      : {};
-    if (promptHook.block) {
+    // SessionStart hooks add context to the first message of a conversation.
+    const sessionHook =
+      opts.hooks && (opts.priorMessages?.length ?? 0) === 0
+        ? await opts.hooks.run(
+            "SessionStart",
+            { source: opts.resumeContext ? "resume" : "startup" },
+            opts.signal,
+          )
+        : {};
+    if (sessionHook.halt) {
       emit({
         schemaVersion: 1,
         kind: "notice",
         sessionId,
         level: "warn",
-        text: `A hook stopped this message: ${promptHook.block}`,
+        text: `A hook stopped the session: ${sessionHook.halt}`,
       });
-      emit({ schemaVersion: 1, kind: "turn.finished", sessionId, turnId, stopReason: "blocked" });
-      return { stopReason: "blocked", turns: 0, finalText: "" };
+      emit({
+        schemaVersion: 1,
+        kind: "turn.finished",
+        sessionId,
+        turnId,
+        stopReason: "stopped_by_hook",
+      });
+      return { stopReason: "stopped_by_hook", turns: 0, finalText: "" };
     }
-    const sessionHook =
-      opts.hooks && (opts.priorMessages?.length ?? 0) === 0
-        ? await opts.hooks.run("SessionStart", { source: "startup" }, opts.signal)
-        : {};
     const hookContext = [sessionHook.context, promptHook.context].filter(Boolean).join("\n\n");
 
     let target = this.resolveModel(
@@ -629,7 +652,25 @@ export class Agent {
       for (const steerText of opts.steer?.() ?? []) {
         const text = steerText.trim();
         if (!text) continue;
-        messages.push({ role: "user", content: text });
+        // A message sent mid-run goes through the same prompt hooks as the first one.
+        const steerHook = opts.hooks
+          ? await opts.hooks.run("UserPromptSubmit", { prompt: text }, opts.signal)
+          : {};
+        const refused = steerHook.halt ?? steerHook.block;
+        if (refused) {
+          emit({
+            schemaVersion: 1,
+            kind: "notice",
+            sessionId,
+            level: "warn",
+            text: `A hook stopped this message: ${refused}`,
+          });
+          continue;
+        }
+        messages.push({
+          role: "user",
+          content: steerHook.context ? `${text}\n\n${steerHook.context}` : text,
+        });
         emit({ schemaVersion: 1, kind: "steer", sessionId, turnId, text });
       }
 
@@ -1105,6 +1146,11 @@ export class Agent {
       // wrap-up turn, where an empty reply just means the model had nothing left to add: the run is ending
       // because it hit its turn budget, so fall through to report `max_turns` (below), not `blocked`.
       if (!finalWrapUp && displayText.trim().length === 0 && toolCalls.length === 0) {
+        // Sent back to work by a Stop hook and had nothing to add: the earlier answer stands.
+        if (stopHookContinues > 0 && finalText.trim().length > 0) {
+          stopReason = "complete";
+          break;
+        }
         emit({ schemaVersion: 1, kind: "turn.finished", sessionId, turnId, stopReason: "blocked" });
         return { stopReason: "blocked", turns, finalText, messages };
       }
@@ -1172,7 +1218,15 @@ export class Agent {
             { last_assistant_message: displayText, stop_hook_active: stopHookContinues > 0 },
             opts.signal,
           );
-          if (stop.block && !opts.signal.aborted) {
+          if (stop.halt) {
+            emit({
+              schemaVersion: 1,
+              kind: "notice",
+              sessionId,
+              level: "info",
+              text: `A hook ended the run: ${stop.halt}`,
+            });
+          } else if (stop.block && !opts.signal.aborted) {
             stopHookContinues++;
             if (displayText.trim().length > 0)
               messages.push({ role: "assistant", content: displayText });
@@ -1391,6 +1445,19 @@ export class Agent {
             content: body,
           });
         }
+      }
+      // A tool hook said stop the whole run (`"continue": false`): the results above are recorded, then stop.
+      const halted = outcomes.find((o) => o.halt)?.halt;
+      if (halted) {
+        emit({
+          schemaVersion: 1,
+          kind: "notice",
+          sessionId,
+          level: "warn",
+          text: `A hook stopped the run: ${halted}`,
+        });
+        stopReason = "stopped_by_hook";
+        break;
       }
       // ── segment boundary: auto-continue (default) or pause, bounded by the hard ceiling ──
       if (turns >= ceiling) {

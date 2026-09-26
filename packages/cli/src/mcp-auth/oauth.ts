@@ -94,10 +94,9 @@ export async function discoverAuthServer(
   wwwAuthenticate: string | null | undefined,
   fetchImpl: OAuthFetch,
 ): Promise<AuthServerInfo> {
+  const named = resourceMetadataUrl(wwwAuthenticate);
   const candidates = [
-    ...(resourceMetadataUrl(wwwAuthenticate)
-      ? [resourceMetadataUrl(wwwAuthenticate) as string]
-      : []),
+    ...(named && tokenSafeUrl(named) ? [named] : []),
     ...wellKnown(serverUrl, "oauth-protected-resource"),
   ];
   let issuer: string | undefined;
@@ -311,8 +310,21 @@ async function challenge(fetchImpl: OAuthFetch, serverUrl: string): Promise<stri
   }
 }
 
+/** Whether sign-in tokens may be sent to this server: https, or a server on this machine. */
+export function tokenSafeUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" || (u.protocol === "http:" && isLoopback(u.hostname));
+  } catch {
+    return false;
+  }
+}
+
 /** The full browser sign-in for one server; stores and returns the record. */
 export async function signIn(serverUrl: string, deps: SignInDeps): Promise<ServerAuthRecord> {
+  if (!tokenSafeUrl(serverUrl)) {
+    throw new McpAuthError("the server isn't on https, so ambient won't sign in to it");
+  }
   const now = deps.now ?? Date.now;
   const info = await discoverAuthServer(
     serverUrl,
