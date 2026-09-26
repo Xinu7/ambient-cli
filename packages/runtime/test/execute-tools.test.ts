@@ -1,3 +1,4 @@
+import { rmSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -278,4 +279,52 @@ describe("executeTools emission wiring", () => {
     expect(outcomes.every((o) => o.ok)).toBe(true);
     expect(peak).toBe(8);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "a read-only shell command reaching outside the workspace isn't waved through, and an edit via a symlink asks",
+    async () => {
+      const { symlinkSync, mkdirSync: mk, writeFileSync: wr } = await import("node:fs");
+      const { bashTool } = await import("@amb/tools-core");
+      const outside = join(ws, "..", `outside-${Date.now()}.txt`);
+      wr(outside, "secret\n");
+      try {
+        wr(join(ws, "README.md"), "hi\n");
+        const reg = new ToolRegistry().register(bashTool).register(editTool);
+        const [out] = await executeTools(
+          [call("bash", { command: `cat ${outside}` })],
+          reg,
+          opts({ mode: "plan" }),
+          scope,
+        );
+        expect(out?.ok).toBe(false); // plan mode refuses it like any non-read call
+        const [inside] = await executeTools(
+          [call("bash", { command: "cat README.md" })],
+          reg,
+          opts({ mode: "plan" }),
+          scope,
+        );
+        expect(inside?.ok).toBe(true);
+
+        mk(join(ws, ".git"));
+        wr(join(ws, ".git", "config"), "[core]\n");
+        symlinkSync(join(ws, ".git", "config"), join(ws, "notes.txt"));
+        let asked = 0;
+        await executeTools(
+          [call("edit", { path: "notes.txt", oldString: "[core]", newString: "[core]\n\tx = 1" })],
+          reg,
+          opts({
+            mode: "accept-edits",
+            approve: async () => {
+              asked++;
+              return "deny";
+            },
+          }),
+          scope,
+        );
+        expect(asked).toBe(1);
+      } finally {
+        rmSync(outside, { force: true });
+      }
+    },
+  );
 });

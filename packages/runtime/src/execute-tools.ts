@@ -23,6 +23,7 @@ import {
 } from "@amb/protocol";
 import { type ToolRegistry, isPosixShell, machineShell, sha256 } from "@amb/tools-core";
 import type { Approver, RunOptions, ToolCall } from "./ports.js";
+import { linkedTargetRisk, readOnlyBashHolds } from "./read-only-bash.js";
 import { previewResult } from "./tool-result-preview.js";
 
 export interface ToolOutcome {
@@ -160,9 +161,19 @@ async function runOne(
   // is deliberately strict — any redirection / substitution / mutating form keeps the full process effects.
   // The classifier parses POSIX shell syntax; with a PowerShell-backed tool (Windows without Git Bash) its
   // quoting rules don't hold, so nothing is downgraded — every command asks as a full process call.
-  const effectiveEffects = isPosixShell(machineShell())
+  const refined = isPosixShell(machineShell())
     ? refineBashEffects(tool.manifest.name, parsed.data, tool.manifest.effects)
     : tool.manifest.effects;
+  // …and only when it also stays inside the workspace, off your denied files and away from git config that
+  // runs programs — checks that need the disk (read-only-bash.ts).
+  const effectiveEffects =
+    refined !== tool.manifest.effects &&
+    !readOnlyBashHolds(String((parsed.data as { command?: unknown }).command ?? ""), {
+      workspaceRoot: opts.workspaceRoot,
+      readDenied: makeToolCtx(toolCallId).readDenied,
+    })
+      ? tool.manifest.effects
+      : refined;
   const readOnlyCall = effectiveEffects.length > 0 && effectiveEffects.every((e) => e === "read");
   const permInput: PermissionInput = {
     principal: "model",
@@ -180,7 +191,16 @@ async function runOne(
     autoApprovalStreak: autoApproval.streak,
     ...(autoApproval.cap !== undefined ? { autoApprovalCap: autoApproval.cap } : {}),
   };
-  const base = decide(permInput, opts.permissionRules ? { rules: opts.permissionRules } : {});
+  const decided = decide(permInput, opts.permissionRules ? { rules: opts.permissionRules } : {});
+  // An automatic edit approval is judged again by where the paths really lead (a symlinked file).
+  const linked =
+    decided.effect === "allow" && decided.reason.startsWith("accept-edits")
+      ? linkedTargetRisk(tool.manifest.name, permInput.normalizedArgs, opts.workspaceRoot)
+      : [];
+  const base: typeof decided =
+    linked.length > 0
+      ? { effect: "ask", reason: `${decided.reason}; elevated risk: ${linked.join("; ")}` }
+      : decided;
   // A hook can turn a prompt into an automatic allow, or an automatic allow into a prompt — never undo a denial,
   // and never answer a question one of YOUR ask rules insists on.
   const askedByYou =
