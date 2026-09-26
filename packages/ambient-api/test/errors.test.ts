@@ -81,4 +81,27 @@ describe("a rejected request says why", () => {
     );
     expect(classifyHttpError(400, "").message).toBe("Bad request to Ambient.");
   });
+
+  it("reads the reason after stream keep-alive lines", async () => {
+    const { classifyHttpError } = await import("../src/errors.js");
+    const e = classifyHttpError(
+      400,
+      ': keep-alive\n\n{"error":{"message":"System message must be at the beginning.","type":"BadRequestError"}}',
+    );
+    expect(e.message).toBe(
+      "Ambient rejected the request: System message must be at the beginning.",
+    );
+  });
+
+  it("digs the model server's reason out of a gateway wrapper", async () => {
+    const { serverReason } = await import("../src/errors.js");
+    const body = JSON.stringify({
+      error: {
+        message: "Upstream request failed",
+        type: "upstream_error",
+        details: JSON.stringify({ error: { message: "System message must be at the beginning." } }),
+      },
+    });
+    expect(serverReason(body)).toBe("System message must be at the beginning.");
+  });
 });

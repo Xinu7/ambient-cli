@@ -88,15 +88,22 @@ export function classifyHttpError(
 }
 
 /** The server's own explanation from an error body (`{"error":{"message":…}}` or plain text), one line. */
-export function serverReason(body: string): string | undefined {
+export function serverReason(body: string, depth = 0): string | undefined {
   let text = body;
+  // A streamed error can follow keep-alive comment lines (`: keep-alive`): read the JSON after them.
+  const json = body.slice(Math.max(0, body.indexOf("{")));
   try {
-    const parsed = JSON.parse(body) as {
-      error?: { message?: unknown } | string;
+    const parsed = JSON.parse(json) as {
+      error?: { message?: unknown; details?: unknown } | string;
       message?: unknown;
     };
-    const m =
-      typeof parsed.error === "object" ? parsed.error?.message : (parsed.error ?? parsed.message);
+    const err = typeof parsed.error === "object" ? parsed.error : undefined;
+    // A gateway may wrap the model server's own error in `details` — that inner one says what went wrong.
+    const inner =
+      depth < 2 && typeof err?.details === "string"
+        ? serverReason(err.details, depth + 1)
+        : undefined;
+    const m = inner ?? (err ? err.message : (parsed.error ?? parsed.message));
     if (typeof m === "string") text = m;
   } catch {
     // not JSON: use the text as it is

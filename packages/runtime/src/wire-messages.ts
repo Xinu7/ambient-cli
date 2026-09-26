@@ -1,7 +1,7 @@
 import type { Msg } from "./ports.js";
 
 /**
- * The conversation as sent: system messages only at the very start. Some models' chat templates (Qwen on
+ * The conversation as sent: one system message, at the very start. Some models' chat templates (Qwen on
  * Ambient) reject a system message once the conversation has begun ("role 'system' is only supported before
  * conversation messages"), and the agent adds notes as it goes — a compaction summary, the current plan,
  * resumed context. Each later note becomes a marked note from ambient in a user turn: joined to the user
@@ -19,7 +19,11 @@ export function wireMessages(messages: readonly Msg[]): Msg[] {
   for (const m of messages) {
     if (m.role === "system") {
       if (!started) {
-        out.push(m);
+        // One system message only: some templates reject even a second one at the start.
+        const first = out[0];
+        if (first?.role === "system")
+          out[0] = { ...first, content: append(first.content, textOf(m.content)) };
+        else out.push(m);
         continue;
       }
       const note = `<ambient-note>\n${textOf(m.content)}\n</ambient-note>`;

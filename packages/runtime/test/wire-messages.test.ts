@@ -62,4 +62,14 @@ describe("system messages only at the start", () => {
       { type: "text", text: "<ambient-note>\nnote\n</ambient-note>" },
     ]);
   });
+
+  it("merges several leading system messages into one (some templates allow only one)", () => {
+    const out = wireMessages([
+      { role: "system", content: "base" },
+      { role: "system", content: "Summary of earlier work" },
+      { role: "user", content: "next" },
+    ]);
+    expect(out.map((m) => m.role)).toEqual(["system", "user"]);
+    expect(out[0]?.content).toBe("base\n\nSummary of earlier work");
+  });
 });
