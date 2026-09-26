@@ -85,9 +85,10 @@ describe("commands in a headless task", () => {
       task: "Fix issue 42 carefully: 42 the parser",
     });
     expect(expandTaskCommand("/nope", ws, undefined)).toEqual({ error: "unknown command /nope" });
-    // A real folder at the root is a task about it, not a mistyped command.
-    const rootDir = process.platform === "win32" ? "/Windows is huge" : "/tmp is full";
-    expect(expandTaskCommand(rootDir, ws, undefined)).toEqual({ task: rootDir });
+    // A real folder at the root is a task about it, not a mistyped command (POSIX: Windows has no single root).
+    if (process.platform !== "win32") {
+      expect(expandTaskCommand("/tmp is full", ws, undefined)).toEqual({ task: "/tmp is full" });
+    }
     expect(expandTaskCommand("explain /fix", ws, undefined)).toEqual({ task: "explain /fix" });
   });
 
