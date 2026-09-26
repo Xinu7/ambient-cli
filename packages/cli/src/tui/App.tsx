@@ -623,7 +623,7 @@ export function App(deps: AppDeps): ReactNode {
   const [jobsEpoch, setJobsEpoch] = useState(0);
   useEffect(() => {
     void jobsEpoch;
-    const jobs = runStateRef.current.jobs;
+    const { jobs, tasks } = runStateRef.current;
     const off = jobs.onFinish((job) => {
       dispatch({
         t: "notice",
@@ -631,7 +631,10 @@ export function App(deps: AppDeps): ReactNode {
         text: `Background ${job.id} finished${job.exitCode === null ? " (stopped)" : ` (exit ${job.exitCode})`}: ${job.command.slice(0, 80)}`,
       });
     });
-    const stop = () => jobs.stopAll();
+    const stop = () => {
+      jobs.stopAll();
+      tasks.stopAll(); // background subagents too
+    };
     process.once("exit", stop);
     return () => {
       off();
