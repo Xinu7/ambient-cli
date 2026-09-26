@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { delimiter, isAbsolute, join, relative } from "node:path";
+import { SENSITIVE_FILE } from "./walk-files.js";
 
 /**
  * Searching with ripgrep when it's installed: far faster than walking files in JS on a big repo, and it
@@ -126,6 +127,8 @@ export function ripgrepSearch(opts: {
       const lineNo = ev.data?.line_number;
       if (!file || typeof text !== "string" || typeof lineNo !== "number") return;
       if (opts.denied?.(join(opts.root, file))) return;
+      // Secret files stay out of search results, as in the JS walk.
+      if (SENSITIVE_FILE.test(file.split("/").pop() ?? "")) return;
       matches.push({ file, line: lineNo, text: text.replace(/\r?\n$/, "").slice(0, 400) });
       if (matches.length >= opts.limit) {
         truncated = true;

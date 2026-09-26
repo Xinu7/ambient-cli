@@ -29,7 +29,8 @@ export const DEFAULT_IGNORE: ReadonlySet<string> = new Set([
 /** Files never yielded — secrets that must not be enumerated into model context via grep/glob (security).
  *  The model can still `read` a specific non-secret file (e.g. `.env.example`) explicitly; this only bounds
  *  bulk ENUMERATION, which is where a secret leaks by accident. */
-const SENSITIVE_FILE =
+/** Secret files a folder search never looks inside (shared with the ripgrep search). */
+export const SENSITIVE_FILE =
   /^(\.env(\..+)?|\.netrc|\.pgpass|\.htpasswd|\.npmrc|id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|.*\.(pem|key|pfx|p12|keystore|jks|asc))$/i;
 
 interface IgnoreCtx {

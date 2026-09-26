@@ -100,6 +100,17 @@ describe.skipIf(process.platform === "win32")("finding ripgrep", () => {
     },
   );
 
+  it.skipIf(!hasRg)("never returns lines from secret files, like the JS search", async () => {
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(join(ws, "src", ".env"), "API_KEY=tokenSECRET\n");
+    await writeFile(join(ws, "src", "server.pem"), "tokenPEM\n");
+    const found = await grepTool.execute(
+      { pattern: "token(SECRET|PEM)", path: "src", limit: 50 },
+      ctx(),
+    );
+    expect(found.matches).toEqual([]);
+  });
+
   it.skipIf(!hasRg)("gives the same answers as the JS search", async () => {
     const withRg = await grepTool.execute({ pattern: "token\\w*", path: "src", limit: 50 }, ctx());
     const saved = process.env.PATH;
