@@ -115,6 +115,7 @@ import { fleetChanges } from "./fleet-diff.js";
 import { fuzzyRank } from "./fuzzy.js";
 import { helpText } from "./help.js";
 import { activeMention, insertMention } from "./mention.js";
+import { PromptQueue } from "./prompt-queue.js";
 import { contextReport, tokens, usageReport } from "./reports.js";
 import {
   type Activity,
@@ -652,10 +653,20 @@ export function App(deps: AppDeps): ReactNode {
       });
     }
   }, []);
+  // One prompt on screen at a time for the whole session: the agent, its subagents and background waves can
+  // all ask at once, and the overlay holds a single answer slot. Prompts wait their turn; one still waiting
+  // when its run is cancelled settles without being shown.
+  const promptsRef = useRef(new PromptQueue());
   const approve = useCallback<RunOptions["approve"]>((req) => {
+    // "Bypass session" (chosen from an earlier approval, or /bypass) auto-allows the rest of THIS run without
+    // a prompt — the current run's mode was snapshotted at start, so decide() still asks; we short-circuit here.
+    if (permissionRef.current === "bypass") return Promise.resolve("allow-once");
+    return promptsRef.current.run(() => showApproval(req), "deny" as const);
+  }, []);
+  const showApproval = (
+    req: Parameters<RunOptions["approve"]>[0],
+  ): Promise<"allow-once" | "allow-session" | "deny"> => {
     return new Promise((resolve) => {
-      // "Bypass session" (chosen from an earlier approval, or /bypass) auto-allows the rest of THIS run without
-      // a prompt — the current run's mode was snapshotted at start, so decide() still asks; we short-circuit here.
       if (permissionRef.current === "bypass") {
         resolve("allow-once");
         return;
@@ -681,7 +692,7 @@ export function App(deps: AppDeps): ReactNode {
         decision: req.decision,
       });
     });
-  }, []);
+  };
 
   // Push a questionnaire (both the ref the key handler reads and the state that renders).
   const setQuestionState = (q: QuestionState | null): void => {
@@ -692,12 +703,16 @@ export function App(deps: AppDeps): ReactNode {
   // Inlines the ref+setState (rather than calling setQuestionState) so this memoized callback depends only on
   // stable refs + the state setter — no per-render function in its closure.
   const ask = useCallback<NonNullable<RunOptions["ask"]>>((req: AskRequest) => {
-    return new Promise<AskResponse>((resolve) => {
-      questionResolver.current = resolve;
-      const q: QuestionState = { req, cursor: 0, selected: new Set<number>(), text: "" };
-      questionRef.current = q;
-      setQuestion(q);
-    });
+    return promptsRef.current.run(
+      () =>
+        new Promise<AskResponse>((resolve) => {
+          questionResolver.current = resolve;
+          const q: QuestionState = { req, cursor: 0, selected: new Set<number>(), text: "" };
+          questionRef.current = q;
+          setQuestion(q);
+        }),
+      { selected: [], cancelled: true },
+    );
   }, []);
   // Settle the open question. `cancelled` (Esc / abort) tells the agent to proceed on its own judgment.
   const finishQuestion = (res: AskResponse): void => {
@@ -733,6 +748,7 @@ export function App(deps: AppDeps): ReactNode {
       });
     }
     controllerRef.current?.abort();
+    promptsRef.current.settleWaiting(); // prompts still waiting their turn settle unseen
     const resolve = approvalResolver.current;
     if (resolve) {
       approvalResolver.current = null;
@@ -999,6 +1015,10 @@ export function App(deps: AppDeps): ReactNode {
         controllerRef.current = null;
         busyRef.current = false;
         setRunActive(false);
+        // The agent waits for its background subagents before answering, so any still running here were cut
+        // off (cancelled, out of turns): stop them, and settle every prompt that was still waiting its turn.
+        runStateRef.current.tasks.stopAll();
+        promptsRef.current.settleWaiting();
         const resolve = approvalResolver.current;
         if (resolve) {
           approvalResolver.current = null;

@@ -227,10 +227,10 @@ export function makeSubagentTool(deps: SubagentToolDeps): ToolDefinition {
           ...(preset?.tools && preset.tools.length > 0 ? { allowedTools: preset.tools } : {}),
         };
       });
-      const runCtx = (signal: AbortSignal) => ({
+      const runCtx = (signal: AbortSignal, emit: ToolContext["emit"] = ctx.emit) => ({
         scope: ctx.scope as NonNullable<ToolContext["scope"]>,
         toolCallId: ctx.toolCallId as string,
-        emit: ctx.emit,
+        emit,
         signal,
         cwd: ctx.cwd,
         ...(ctx.resultChars !== undefined ? { resultChars: ctx.resultChars } : {}),
@@ -257,17 +257,33 @@ export function makeSubagentTool(deps: SubagentToolDeps): ToolDefinition {
       };
       if (input.background && ctx.backgroundTasks) {
         const label = specs.map((s) => s.label).join(", ");
+        const scope = ctx.scope;
+        const say = (text: string) =>
+          ctx.emit({
+            schemaVersion: 1,
+            kind: "notice",
+            sessionId: scope.sessionId,
+            level: "info",
+            text,
+          });
+        // A background wave runs beside the agent's own work (and maybe another wave), so it doesn't take
+        // over the live wave panel: the user sees it start and report, and every child keeps its own log.
+        const quiet: ToolContext["emit"] = (ev) => {
+          if (!ev.kind.startsWith("subagent.")) ctx.emit(ev);
+        };
         const { id } = ctx.backgroundTasks.start(label, async (taskSignal) => {
           const out = await runSubagents(
             specs,
-            runCtx(AbortSignal.any([ctx.signal, taskSignal])),
+            runCtx(AbortSignal.any([ctx.signal, taskSignal]), quiet),
             runDeps,
           );
+          say(`Background ${plural(specs.length, "subagent")} reported (${label})`);
           const files = out.files?.length
             ? `\nFiles changed: ${out.files.map((f) => `${f.path} (${f.operation})`).join(", ")}`
             : "";
           return `${out.summary}${files}`;
         });
+        say(`Started ${plural(specs.length, "subagent")} in the background: ${label}`);
         return {
           summary: `Started ${plural(specs.length, "subagent")} in the background as ${id}. Keep working; their report arrives as a message when they finish, and you'll get it before your final answer.`,
           results: [],
