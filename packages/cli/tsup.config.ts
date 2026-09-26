@@ -32,6 +32,8 @@ export default defineConfig({
     // yaml (frontmatter parsing) is CJS with a dynamic require("process") — external, declared in the
     // published manifest.
     "yaml",
+    // unpdf (PDF text for `read`) is loaded only when a PDF is read, from the published manifest's deps.
+    "unpdf",
   ],
   banner: { js: "#!/usr/bin/env node" },
   // The TUI uses the automatic JSX runtime (no classic `import React`); tell esbuild to match.
