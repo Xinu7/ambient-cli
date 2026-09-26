@@ -69,12 +69,15 @@ export function scanForInjection(text: string): InjectionScan {
 export function neutralizeInjection(text: string): string {
   return (
     text
+      // Width variants and invisible characters could otherwise dress up a forged marker.
+      .normalize("NFKC")
+      .replace(/[\u200B-\u200F\u2060\uFEFF]/g, "")
       .replace(
         /```+\s*(amb-action|action|tool[_\s-]?call|tool[_\s-]?use|function[_\s-]?call)\b/gi,
-        "``​$1 [neutralized fence]",
+        "``\u200b$1 [neutralized fence]",
       )
       // A forged boundary marker would let the content "close" the untrusted block early.
-      .replace(/-{2,}\s*(BEGIN|END)\s+UNTRUSTED\s+OUTPUT\s*-{2,}/gi, "[neutralized marker: $1]")
+      .replace(/\b(BEGIN|END)\W{0,8}UNTRUSTED\W{0,8}OUTPUT\b/gi, "[neutralized marker: $1]")
   );
 }
 
