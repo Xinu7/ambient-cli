@@ -4,6 +4,7 @@ import { applyPatchTool } from "./apply-patch.js";
 import { askUserTool } from "./ask-user.js";
 import { bashOutputTool, killShellTool } from "./background-tools.js";
 import { bashTool } from "./bash.js";
+import { diagnosticsTool } from "./diagnostics.js";
 import { editTool } from "./edit.js";
 import { globToRegExp, globTool } from "./glob.js";
 import { grepTool } from "./grep.js";
@@ -30,6 +31,7 @@ export {
   editTool,
   applyPatchTool,
   notebookEditTool,
+  diagnosticsTool,
   bashTool,
   bashOutputTool,
   killShellTool,
@@ -56,6 +58,7 @@ export const builtinTools: ToolDefinition[] = [
   editTool,
   applyPatchTool,
   notebookEditTool,
+  diagnosticsTool,
   bashTool,
   bashOutputTool,
   killShellTool,
