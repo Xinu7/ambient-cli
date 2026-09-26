@@ -53,8 +53,9 @@ export function parseRules(texts: readonly unknown[] | undefined): PermissionRul
 
 /** Which ambient tools a rule's tool name covers (Claude's names cover every tool of that kind). */
 const TOOL_ALIASES: Record<string, readonly string[]> = {
-  bash: ["bash"],
-  read: ["read", "grep", "glob", "list"],
+  // Everything that runs a program: the shell, its background jobs, and the project's own checkers.
+  bash: ["bash", "bash_output", "kill_shell", "diagnostics"],
+  read: ["read", "grep", "glob", "list", "view_image"],
   grep: ["grep"],
   glob: ["glob"],
   ls: ["list"],

@@ -93,6 +93,7 @@ describe("which outputs are guarded", () => {
     ["view_image", ["read"], true],
     ["load_tools", ["read"], true],
     ["bash", ["process"], true],
+    ["bash_output", ["read"], true],
     ["web_fetch", ["network"], true],
     ["read", ["read"], false],
     ["grep", ["read"], false],

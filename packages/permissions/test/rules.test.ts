@@ -337,3 +337,26 @@ describe("deny rules see commands other programs run", () => {
     },
   );
 });
+
+describe("a bare Bash rule covers every tool that runs a program", () => {
+  it.each(["bash", "bash_output", "kill_shell", "diagnostics"])("Bash covers %s", (toolName) => {
+    const rule = parseRule("Bash") as PermissionRule;
+    expect(
+      ruleCovers(
+        rule,
+        { toolName, args: {}, resources: [], workspaceRoot: "/w", home: "/h" },
+        "any",
+      ),
+    ).toBe(true);
+  });
+  it("a Bash(command) rule still only matches that command", () => {
+    const rule = parseRule("Bash(npm test:*)") as PermissionRule;
+    expect(
+      ruleCovers(
+        rule,
+        { toolName: "diagnostics", args: {}, resources: [], workspaceRoot: "/w", home: "/h" },
+        "all",
+      ),
+    ).toBe(false);
+  });
+});

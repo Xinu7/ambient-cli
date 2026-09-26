@@ -97,6 +97,7 @@ export function needsInjectionGuard(
   return (
     effects.includes("network") ||
     toolName === "bash" ||
+    toolName === "bash_output" ||
     toolName === "read_artifact" ||
     toolName === "ask_vision" ||
     toolName === "view_image" ||
