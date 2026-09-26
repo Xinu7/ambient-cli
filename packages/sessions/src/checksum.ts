@@ -9,6 +9,10 @@ export function canonicalize(event: Omit<Event, "checksum">): string {
   return stableStringify(event);
 }
 
+/**
+ * The hash chain detects a damaged or hand-edited log (a record changed without re-chaining the rest). It is
+ * not a signature: whoever can write the log can recompute it, and nothing is granted from a log's contents.
+ */
 export function eventChecksum(event: Omit<Event, "checksum">): string {
   return `sha256:${createHash("sha256").update(canonicalize(event), "utf8").digest("hex")}`;
 }

@@ -111,6 +111,12 @@ describe("Claude Code instruction files", () => {
     }
   });
 
+  it("an @path inside an HTML comment is not an import", () => {
+    writeFileSync(join(root, "hidden.md"), "HIDDEN-IMPORT");
+    writeFileSync(join(root, "CLAUDE.md"), "Rules.\n<!-- @hidden.md -->\n");
+    expect(loadInstructions(root).text).not.toContain("HIDDEN-IMPORT");
+  });
+
   it("global Claude Code and Codex files load only when asked, after the project in the budget", async () => {
     const home = await mkdtemp(join(tmpdir(), "amb-home-"));
     try {

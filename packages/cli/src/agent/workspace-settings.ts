@@ -55,6 +55,30 @@ function mcpIdentity(s: McpServerSpec): unknown[] {
   return [s.name, s.raw ?? [s.transport, s.command ?? "", s.args ?? [], s.url ?? ""]];
 }
 
+/** The environment variables a remote MCP entry puts into what it sends: `${VAR}` in its URL or headers,
+ *  `bearer_token_env_var`, and `env_http_headers` values. Said plainly on the trust screen. */
+export function sentVariables(m: McpServerSpec): string[] {
+  const raw = (m.raw ?? {}) as Record<string, unknown>;
+  const names = new Set<string>();
+  for (const x of JSON.stringify(raw).matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}/g)) {
+    if (x[1]) names.add(x[1]);
+  }
+  if (typeof raw.bearer_token_env_var === "string") names.add(raw.bearer_token_env_var);
+  const envHeaders = raw.env_http_headers;
+  if (envHeaders && typeof envHeaders === "object") {
+    for (const v of Object.values(envHeaders)) if (typeof v === "string") names.add(v);
+  }
+  return [...names];
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
 /** Text from a project file, shown for review: control characters (which could hide or rewrite what's on
  *  screen) made visible instead of interpreted. */
 export function visible(text: string): string {
@@ -356,8 +380,15 @@ export function makeWorkspaceSettings(opts: {
       }
       if (s.projectMcp.length > 0) {
         lines.push(" MCP servers (as configured):");
-        for (const m of s.projectMcp)
+        for (const m of s.projectMcp) {
           lines.push(`  ${m.name} → ${visible(JSON.stringify(m.raw ?? {}))}`);
+          const sent = sentVariables(m);
+          if (sent.length > 0 && m.url) {
+            lines.push(
+              `    sends the values of ${sent.map((v) => `$${visible(v)}`).join(", ")} to ${visible(hostOf(m.url))}`,
+            );
+          }
+        }
       }
       const pluginChoices = Object.entries(s.projectPlugins);
       if (pluginChoices.length > 0) {

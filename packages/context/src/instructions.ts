@@ -71,10 +71,11 @@ export interface InstructionOptions {
 
 type Reader = (path: string) => string | null;
 
-/** Markdown with code fences and inline code blanked out, so an `@name` inside code is never an import. */
+/** Markdown with code fences, inline code and HTML comments blanked out, so an `@name` inside them is never
+ *  an import. */
 function proseOnly(text: string): string {
   return text
-    .replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, (m) => " ".repeat(m.length))
+    .replace(/```[\s\S]*?```|~~~[\s\S]*?~~~|<!--[\s\S]*?-->/g, (m) => " ".repeat(m.length))
     .replace(/`[^`\n]*`/g, (m) => " ".repeat(m.length));
 }
 
