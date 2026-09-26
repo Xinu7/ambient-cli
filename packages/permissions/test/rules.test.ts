@@ -1,7 +1,13 @@
 import type { PermissionInput } from "@amb/protocol";
 import { describe, expect, it } from "vitest";
 import { decide } from "../src/decide.js";
-import { type PermissionRules, parseRule, parseRules, ruleCovers } from "../src/rules.js";
+import {
+  type PermissionRule,
+  type PermissionRules,
+  parseRule,
+  parseRules,
+  ruleCovers,
+} from "../src/rules.js";
 
 const ROOT = "/work/app";
 const HOME = "/home/me";
@@ -298,4 +304,31 @@ describe("second round of ways around a rule", () => {
     });
     expect(decide({ ...search, mode: "bypass" }, r).effect).toBe("allow");
   });
+});
+
+describe("deny rules see commands other programs run", () => {
+  const deny = parseRule("Bash(curl:*)") as PermissionRule;
+  const covers = (command: string) =>
+    ruleCovers(
+      deny,
+      { toolName: "bash", args: { command }, resources: [], workspaceRoot: "/w", home: "/h" },
+      "any",
+    );
+  it.each([
+    "setsid curl x",
+    "ionice -c3 curl x",
+    "flock /tmp/l curl x",
+    "find . -exec curl x ;",
+    "script -qc 'curl x' /dev/null",
+    "chrt 5 curl x",
+    "watch curl x",
+  ])("%s is still curl", (cmd) => {
+    expect(covers(cmd)).toBe(true);
+  });
+  it.each(["grep curl notes.md", "echo curl", 'git commit -m "use curl here"'])(
+    "%s only mentions curl",
+    (cmd) => {
+      expect(covers(cmd)).toBe(false);
+    },
+  );
 });

@@ -254,6 +254,9 @@ const WRAPPERS = new Set([
   "xargs",
   "stdbuf",
   "caffeinate",
+  "setsid",
+  "ionice",
+  "unbuffer",
 ]);
 /** Wrapper options that take a value (`nice -n 5`, `sudo -u root`, `timeout -s KILL`). */
 const WRAPPER_VALUE_OPTS = new Set(["-n", "-u", "-g", "-s", "-k", "-C", "-I", "-L", "-P", "-a"]);
@@ -350,6 +353,50 @@ export function shellSegments(command: string, depth = 0): string[] {
   return out.filter(Boolean);
 }
 
+/** Programs that run a command given after one argument of their own (`flock <file> cmd`, `chrt <prio>
+ *  cmd`, `taskset <mask> cmd`) or straight after their options (`watch cmd`, `parallel cmd`). */
+const RUNS_AFTER_ONE_ARG = new Set(["flock", "chrt", "taskset"]);
+const RUNS_REST = new Set(["watch", "parallel"]);
+/** `find` options whose following words are a command it runs. */
+const FIND_EXEC = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
+/** Programs whose `-c <script>` is a shell line they run. */
+const RUNS_C_SCRIPT = new Set(["script", "su", "runuser", "flock"]);
+
+/**
+ * For deny and ask rules: commands another program runs that the wrapper list doesn't unwrap —
+ * `find . -exec rm x ;`, `flock /tmp/l rm x`, `chrt 5 rm x`, `watch rm x`, `script -qc 'rm x'`.
+ */
+function runsInside(command: string, depth = 0): string[] {
+  if (depth > 4) return [];
+  const out: string[] = [];
+  const add = (words: string[]) => {
+    const argv = normalizeArgv(words);
+    if (argv.length > 0) out.push(argv.join(" "), ...runsInside(argv.join(" "), depth + 1));
+  };
+  for (const c of parseShellCommands(command)) {
+    const argv = normalizeArgv(c.argv);
+    const name = argv[0] ?? "";
+    const rest = argv.slice(1);
+    const firstPlain = rest.findIndex((w) => !w.startsWith("-"));
+    if (name === "find") {
+      rest.forEach((w, i) => {
+        if (FIND_EXEC.has(w)) add(rest.slice(i + 1));
+      });
+    }
+    if (RUNS_AFTER_ONE_ARG.has(name) && firstPlain >= 0) add(rest.slice(firstPlain + 1));
+    if (RUNS_REST.has(name) && firstPlain >= 0) add(rest.slice(firstPlain));
+    if (RUNS_C_SCRIPT.has(name)) {
+      rest.forEach((w, i) => {
+        const script = rest[i + 1];
+        if (/^-[A-Za-z]*c$/.test(w) && script !== undefined) {
+          out.push(...shellSegments(script, depth + 1), ...runsInside(script, depth + 1));
+        }
+      });
+    }
+  }
+  return out;
+}
+
 /** Whether an allow rule can safely judge this command word by word: nothing the parser could read
  *  differently from bash (escapes, `$'…'`, substitutions, redirections, nested shells), and not so long the
  *  parser stops reading. */
@@ -444,7 +491,8 @@ export function ruleCovers(rule: PermissionRule, call: RuleCall, mode: "any" | "
     if (command.length > MAX_CMD_CHARS) return true;
     return (
       commandMatches(spec, command.trim()) ||
-      shellSegments(command).some((p) => commandMatches(spec, p))
+      shellSegments(command).some((p) => commandMatches(spec, p)) ||
+      runsInside(command).some((p) => commandMatches(spec, p))
     );
   }
   if (tool === "web_fetch") {

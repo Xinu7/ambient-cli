@@ -58,12 +58,14 @@ export const applyPatchTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeo
   inputSchema: Input,
   outputSchema: Output,
   async execute(input, ctx: ToolContext) {
-    // Group edits by file, preserving order.
-    const byFile = new Map<string, z.infer<typeof EditSpec>[]>();
+    // Group edits by the file they really change (`a.txt` and `./a.txt` are one file), preserving order and
+    // the first spelling for display.
+    const byFile = new Map<string, { path: string; edits: z.infer<typeof EditSpec>[] }>();
     for (const e of input.edits) {
-      const list = byFile.get(e.path) ?? [];
-      list.push(e);
-      byFile.set(e.path, list);
+      const abs = resolveInWorkspace(ctx.workspaceRoot, e.path);
+      const group = byFile.get(abs) ?? { path: e.path, edits: [] };
+      group.edits.push(e);
+      byFile.set(abs, group);
     }
 
     // Phase 1 — VALIDATE + build the new content for every file in memory (no writes). Any hunk failure here
@@ -75,8 +77,7 @@ export const applyPatchTool: ToolDefinition<z.infer<typeof Input>, z.infer<typeo
       after: string;
       replacements: number;
     }[] = [];
-    for (const [path, edits] of byFile) {
-      const abs = resolveInWorkspace(ctx.workspaceRoot, path);
+    for (const [abs, { path, edits }] of byFile) {
       const before = await readFile(abs, "utf8");
       let content = before;
       let replacements = 0;

@@ -219,6 +219,21 @@ describe("apply_patch (atomic multi-file)", () => {
     expect(await readFile(join(ws, "b.ts"), "utf8")).toBe("export const x = 42;\n");
   });
 
+  it("two spellings of one file are one file — neither edit is lost", async () => {
+    await writeFile(join(ws, "a.txt"), "1\n3\n");
+    const out = await applyPatchTool.execute(
+      {
+        edits: [
+          { path: "a.txt", oldString: "1", newString: "2", replaceAll: false },
+          { path: "./a.txt", oldString: "3", newString: "4", replaceAll: false },
+        ],
+      },
+      ctx(),
+    );
+    expect(out.files).toHaveLength(1);
+    expect(await readFile(join(ws, "a.txt"), "utf8")).toBe("2\n4\n");
+  });
+
   it("is ATOMIC — if ANY hunk fails to match, NOTHING is written", async () => {
     await writeFile(join(ws, "a.ts"), "keep me\n");
     await expect(
