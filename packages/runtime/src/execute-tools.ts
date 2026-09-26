@@ -193,8 +193,11 @@ async function runOne(
   };
   const decided = decide(permInput, opts.permissionRules ? { rules: opts.permissionRules } : {});
   // An automatic edit approval is judged again by where the paths really lead (a symlinked file).
+  // (Also an allow from one of your rules — a rule for `src/**` shouldn't cover a link out of it.)
   const linked =
-    decided.effect === "allow" && decided.reason.startsWith("accept-edits")
+    decided.effect === "allow" &&
+    opts.mode !== "bypass" &&
+    decided.reason !== "covered by an existing grant"
       ? linkedTargetRisk(tool.manifest.name, permInput.normalizedArgs, opts.workspaceRoot)
       : [];
   const base: typeof decided =

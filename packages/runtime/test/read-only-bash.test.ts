@@ -49,6 +49,80 @@ describe.skipIf(process.platform === "win32")("a read-only shell command, checke
   });
 });
 
+describe.skipIf(process.platform === "win32")("escapes found in review", () => {
+  it("a path is judged where the kernel lands it (link/../x), and a glued option value is a path", () => {
+    mkdirSync(join(dir, "outer", "sub"), { recursive: true });
+    writeFileSync(join(dir, "outer", "secret.txt"), "x");
+    symlinkSync(join(dir, "outer", "sub"), join(ws, "l"));
+    expect(holds("cat l/../secret.txt")).toBe(false);
+    expect(holds(`file -f${join(dir, "secret.txt")}`)).toBe(false);
+    expect(holds(`grep -f${join(dir, "secret.txt")} README.md`)).toBe(false);
+    expect(holds("ls -la")).toBe(true);
+  });
+  it("no folder walk that follows links; with deny rules, no folder walk at all", () => {
+    expect(holds("grep -R TODO .")).toBe(false);
+    expect(holds("rg --follow TODO")).toBe(false);
+    expect(holds("grep -rn TODO .")).toBe(true);
+    const denied = (p: string) => p.endsWith("/.env");
+    expect(holds("grep -r API_KEY .", denied)).toBe(false);
+    expect(holds("rg API_KEY", denied)).toBe(false);
+    expect(holds("cat README.md", denied)).toBe(true);
+  });
+  const repo = () => {
+    execFileSync("git", ["init", "-q"], { cwd: ws });
+    return (...a: string[]) => execFileSync("git", a, { cwd: ws });
+  };
+  it("git in a plain repository (even one with commit hooks) stays automatic", () => {
+    const git = repo();
+    git("config", "remote.origin.url", "https://example.com/x.git");
+    git("config", "branch.feature/v1.2.remote", "origin");
+    writeFileSync(join(ws, ".git", "hooks", "pre-commit"), "#!/bin/sh\n");
+    expect(holds("git status")).toBe(true);
+  });
+  it.each([
+    [
+      "a hook git runs during a read",
+      (g: (...a: string[]) => unknown) => {
+        writeFileSync(join(ws, ".git", "hooks", "post-index-change"), "#!/bin/sh\n");
+        void g;
+      },
+    ],
+    [
+      "worktree config",
+      (g: (...a: string[]) => unknown) => {
+        g("config", "extensions.worktreeConfig", "true");
+        g("config", "--worktree", "core.fsmonitor", "./run-me.sh");
+      },
+    ],
+    [
+      "a submodule",
+      (g: (...a: string[]) => unknown) => {
+        void g;
+        mkdirSync(join(ws, ".git", "modules", "sub"), { recursive: true });
+      },
+    ],
+    [
+      "a gpg program",
+      (g: (...a: string[]) => unknown) => g("config", "gpg.program", "./run-me.sh"),
+    ],
+    [
+      "a partial clone",
+      (g: (...a: string[]) => unknown) => {
+        g("config", "extensions.partialClone", "origin");
+        g("config", "remote.origin.uploadpack", "./run-me.sh");
+      },
+    ],
+    [
+      "an include file",
+      (g: (...a: string[]) => unknown) => g("config", "include.path", "../x.cfg"),
+    ],
+  ])("git asks with %s", (_name, arrange) => {
+    arrange(repo());
+    expect(holds("git status")).toBe(false);
+    expect(holds("git log --oneline")).toBe(false);
+  });
+});
+
 describe.skipIf(process.platform === "win32")("an edit through a symlink", () => {
   it("is judged by the file it really changes", () => {
     mkdirSync(join(ws, ".git"));
@@ -57,5 +131,14 @@ describe.skipIf(process.platform === "win32")("an edit through a symlink", () =>
     expect(linkedTargetRisk("edit", { path: "notes.txt" }, ws).join()).toMatch(/\.git\/config/);
     expect(linkedTargetRisk("edit", { path: "README.md" }, ws)).toEqual([]);
     expect(linkedTargetRisk("write", { path: "new-file.ts" }, ws)).toEqual([]);
+    // A new file under a folder link, and a dangling link, are judged where they'd be created.
+    mkdirSync(join(ws, ".github", "workflows"), { recursive: true });
+    symlinkSync(join(ws, ".github", "workflows"), join(ws, "wf"));
+    expect(linkedTargetRisk("write", { path: "wf/x.yml" }, ws).join()).toMatch(/workflows/);
+    symlinkSync(join(ws, ".git", "hooks-x"), join(ws, "dangling.txt"));
+    mkdirSync(join(ws, ".git", "hooks"), { recursive: true });
+    rmSync(join(ws, "dangling.txt"));
+    symlinkSync(join(ws, ".git", "hooks", "pre-commit"), join(ws, "dangling.txt"));
+    expect(linkedTargetRisk("write", { path: "dangling.txt" }, ws).join()).toMatch(/hooks/);
   });
 });
