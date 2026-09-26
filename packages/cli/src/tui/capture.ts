@@ -179,7 +179,15 @@ export async function attachImageFile(
   rawPath: string,
   source: ImageAttachment["source"] = "file",
 ): Promise<CaptureResult> {
-  const path = normalizeDroppedPath(rawPath);
+  return readImageFile(normalizeDroppedPath(rawPath), source);
+}
+
+/** Read an image from exactly this path (already checked by the caller — no drag-and-drop clean-up, which
+ *  could turn a checked path into a different file). */
+export async function readImageFile(
+  path: string,
+  source: ImageAttachment["source"] = "file",
+): Promise<CaptureResult> {
   try {
     const st = await stat(path);
     if (!st.isFile()) return { ok: false, reason: "not a file" };
