@@ -185,3 +185,27 @@ describe("tool-call drafts (say what's coming before the arguments finish)", () 
     ]);
   });
 });
+
+describe("output the server holds back", () => {
+  it("counts empty chunks while a tool call is being written, not the opening or text chunks", () => {
+    let hidden = 0;
+    const acc = new ChatAccumulator({ onHiddenOutput: () => hidden++ });
+    acc.push(ev({ choices: [{ delta: { role: "assistant", content: "" } }] }));
+    acc.push(ev({ choices: [{ delta: { reasoning_content: "hm" } }] }));
+    for (let i = 0; i < 5; i++) acc.push(ev({ choices: [{ delta: {} }] }));
+    acc.push(ev({ choices: [{ delta: { content: "" } }] }));
+    acc.push(
+      ev({
+        choices: [
+          {
+            delta: {
+              tool_calls: [{ index: 0, id: "a", function: { name: "write", arguments: "{}" } }],
+            },
+          },
+        ],
+      }),
+    );
+    acc.push(ev({ choices: [{ delta: {}, finish_reason: "tool_calls" }] }));
+    expect(hidden).toBe(6);
+  });
+});

@@ -133,6 +133,8 @@ export interface ChatParams {
   onReasoning?: (t: string) => void;
   /** A tool call taking shape mid-stream (its name, then the file it targets). */
   onToolDraft?: (draft: { name: string; path?: string }) => void;
+  /** Output the server holds back until complete (a tool call being written), one call per token. */
+  onHiddenOutput?: () => void;
 }
 
 /**

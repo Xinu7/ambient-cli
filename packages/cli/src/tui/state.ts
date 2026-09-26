@@ -192,7 +192,8 @@ export interface Status {
   tokensUsed?: number;
   /** The model call in flight: characters streamed so far (answer + reasoning), when it started, and the
    *  exact completion tokens once the response reports them. Drives the live "↓ 1.2k tok · 40 tok/s". */
-  stream?: { chars: number; since?: number; tokens?: number };
+  /** `hidden`: tokens the server holds back until complete (a tool call being written). */
+  stream?: { chars: number; since?: number; tokens?: number; hidden?: number };
   /** Token counts for this session (never money): requests, prompt/completion totals, and how much of the
    *  prompt came from the provider's cache — plus the latest request's prompt, for /context. */
   usage?: SessionUsage;
@@ -278,6 +279,9 @@ function patchFiles(a: Record<string, unknown>): string[] {
     .filter((p): p is string => typeof p === "string");
   return [...new Set(paths)];
 }
+
+/** The activity while the model writes a tool call the server only sends once it's complete. */
+export const PREPARING_TOOL = "Preparing a tool call";
 
 /** Map a running tool to a human activity verb + a short detail (for the live activity line). */
 function toolActivity(toolName: string, args: unknown): Activity {
@@ -769,8 +773,27 @@ export function reduce(state: ViewState, ev: NewEvent, now = 0): ViewState {
       // of a bare "Thinking" while a long file's arguments arrive. Running tools keep the line.
       if (Object.keys(state.active).length > 0) return state;
       const acted = settleThought(state, now);
-      const activity = toolActivity(ev.toolName, ev.path ? { path: ev.path } : {});
-      return { ...acted, status: { ...acted.status, activity } };
+      const activity = ev.toolName
+        ? toolActivity(ev.toolName, ev.path ? { path: ev.path } : {})
+        : { verb: PREPARING_TOOL };
+      const stream = acted.status.stream ?? { chars: 0 };
+      return {
+        ...acted,
+        status: {
+          ...acted.status,
+          activity,
+          // Tokens the server is holding back still count toward what's been produced.
+          ...(ev.tokens !== undefined
+            ? {
+                stream: {
+                  ...stream,
+                  hidden: ev.tokens,
+                  ...(stream.since === undefined && now > 0 ? { since: now } : {}),
+                },
+              }
+            : {}),
+        },
+      };
     }
 
     case "tool.proposed": {

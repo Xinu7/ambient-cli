@@ -169,3 +169,18 @@ describe("model names in notes", () => {
     expect(shortName("m")).toBe("m");
   });
 });
+
+describe("a tool call the server holds back until it's complete", () => {
+  it("shows 'Preparing a tool call' with the tokens produced so far, not a frozen 'Thinking'", () => {
+    const drafting = (tokens: number): NewEvent =>
+      ({ ...base, kind: "tool.drafting", tokens }) as NewEvent;
+    const s = run([
+      [request("high"), 1_000],
+      [reasoning("plan the file"), 2_000],
+      [drafting(1), 3_000],
+      [drafting(480), 13_000],
+    ]);
+    expect(s.status.activity?.verb).toBe("Preparing a tool call");
+    expect(streamStats("Preparing a tool call", s.status.stream, 13_000)).toMatch(/^↓ 48\d tok/);
+  });
+});

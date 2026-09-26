@@ -68,6 +68,7 @@ export class AmbientChatClient implements ChatClient {
       onContent: params.onContent,
       onReasoning: params.onReasoning,
       ...(params.onToolDraft ? { onToolDraft: params.onToolDraft } : {}),
+      ...(params.onHiddenOutput ? { onHiddenOutput: params.onHiddenOutput } : {}),
       // Tell the API layer the outbound body carries image parts, so an image-related 400 from a model that
       // can't actually see images is NOT misclassified as a context overflow (which would trigger compaction).
       hasImage: params.hasImage ?? messagesHaveImageParts(params.messages),

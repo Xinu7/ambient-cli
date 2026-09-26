@@ -25,6 +25,9 @@ import type {
   TurnCompletion,
 } from "./ports.js";
 
+/** How often (in tokens) held-back output is reported while a tool call is being written. */
+const HIDDEN_REPORT_EVERY = 16;
+
 /** The seams the failover loop needs from the Agent — the transport, a backoff sleep, and the lane oracle. */
 export interface FailoverDeps {
   client: ChatClient;
@@ -160,6 +163,7 @@ export async function runChatWithFailover(
       const stream = ctx.streamDeltas !== false;
       // The assisted lane's reply carries action envelopes: stream only the prose around them.
       const filter = ctx.lane === "assisted" ? new AssistedDeltaFilter() : undefined;
+      let hidden = 0;
       const result = await deps.client.chat({
         ...params,
         model: current,
@@ -208,6 +212,22 @@ export async function runChatWithFailover(
                 toolName: d.name,
                 ...(d.path ? { path: d.path } : {}),
               })
+          : undefined,
+        // The server holds a tool call back until it's complete: count what's being produced so the user sees
+        // progress rather than a stalled "Thinking" (reported every few tokens, not every one).
+        onHiddenOutput: stream
+          ? () => {
+              hidden += 1;
+              if (hidden === 1 || hidden % HIDDEN_REPORT_EVERY === 0)
+                ctx.emit({
+                  schemaVersion: 1,
+                  kind: "tool.drafting",
+                  sessionId: ctx.sessionId,
+                  turnId: ctx.turnId,
+                  attemptId,
+                  tokens: hidden,
+                });
+            }
           : undefined,
       });
       const empty = result.content.trim().length === 0 && result.toolCalls.length === 0;

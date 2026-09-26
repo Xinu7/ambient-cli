@@ -2,7 +2,7 @@ import { Box, Text } from "ink";
 import type { ReactNode } from "react";
 import { mmss } from "../format.js";
 import { THINKING_GLOBE } from "../globe.js";
-import type { Activity } from "../state.js";
+import { type Activity, PREPARING_TOOL } from "../state.js";
 import { AmbientTheme } from "../theme.js";
 
 /**
@@ -30,7 +30,7 @@ export function ActivityLine({
   /** The reasoning effort actually in use — shown next to "Thinking" so you see how hard it's reasoning. */
   effort?: "none" | "high" | "max";
   /** The model call in flight — how much it has produced so far, and how fast. */
-  stream?: { chars: number; since?: number; tokens?: number };
+  stream?: { chars: number; since?: number; tokens?: number; hidden?: number };
   /** Wall clock (ms), for the rate; defaults to now. */
   now?: number;
 }): ReactNode {
@@ -104,11 +104,12 @@ const CHARS_PER_TOKEN = 3.5;
  */
 export function streamStats(
   verb: string,
-  stream: { chars: number; since?: number; tokens?: number } | undefined,
+  stream: { chars: number; since?: number; tokens?: number; hidden?: number } | undefined,
   now: number,
 ): string | undefined {
-  if (!stream || (verb !== "Thinking" && verb !== "Answering")) return undefined;
-  const tokens = stream.tokens ?? Math.round(stream.chars / CHARS_PER_TOKEN);
+  if (!stream || (verb !== "Thinking" && verb !== "Answering" && verb !== PREPARING_TOOL))
+    return undefined;
+  const tokens = stream.tokens ?? Math.round(stream.chars / CHARS_PER_TOKEN) + (stream.hidden ?? 0);
   if (tokens <= 0) return undefined;
   const count = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
   const secs = stream.since !== undefined ? (now - stream.since) / 1000 : 0;

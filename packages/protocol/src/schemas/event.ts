@@ -191,7 +191,13 @@ export const EventSchema = z.discriminatedUnion("kind", [
   aev("assistant.final", { text: z.string() }),
   aev("reasoning.delta", { text: z.string() }),
   // A tool call the model is still writing: its name, then the file it targets once that's readable.
-  aev("tool.drafting", { toolName: z.string(), path: z.string().optional() }),
+  // A tool call being written: its name and file once known, or (when the server holds the call back until
+  // it's complete) how many tokens of it have been produced so far.
+  aev("tool.drafting", {
+    toolName: z.string().optional(),
+    path: z.string().optional(),
+    tokens: z.number().int().nonnegative().optional(),
+  }),
   aev("tool.proposed", {
     toolCallId: idStr("tc"),
     wireId: z.string(),

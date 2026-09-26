@@ -149,6 +149,7 @@ export async function streamChatCompletion(
     onContent: opts.onContent,
     onReasoning: opts.onReasoning,
     ...(opts.onToolDraft ? { onToolDraft: opts.onToolDraft } : {}),
+    ...(opts.onHiddenOutput ? { onHiddenOutput: opts.onHiddenOutput } : {}),
   });
   for await (const e of streamChat(config, req, opts)) {
     if (!acc.push(e)) break;

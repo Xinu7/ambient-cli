@@ -93,6 +93,9 @@ export interface AccumulatorCallbacks {
   onReasoning?: (text: string) => void;
   /** A tool call taking shape mid-stream: its name once known, then the file it targets once readable. */
   onToolDraft?: (draft: { name: string; path?: string }) => void;
+  /** A chunk that carries no visible text: the model is producing output the server holds back until it's
+   *  complete (a tool call's arguments arrive in one piece at the end). Called once per such chunk. */
+  onHiddenOutput?: () => void;
 }
 
 /** The file a partly-streamed tool call's arguments name, once the whole value has arrived. */
@@ -136,6 +139,10 @@ export class ChatAccumulator {
     const choice = chunk.choices?.[0];
     const delta = choice?.delta;
     if (delta) {
+      const r0 = delta.reasoning_content ?? delta.reasoning ?? delta.reasoning_text;
+      const empty =
+        !delta.content && !r0 && !delta.tool_calls && !(delta as { role?: unknown }).role;
+      if (empty && choice?.finish_reason == null) this.cb.onHiddenOutput?.();
       if (typeof delta.content === "string" && delta.content.length > 0) {
         this.content += delta.content;
         this.cb.onContent?.(delta.content);
