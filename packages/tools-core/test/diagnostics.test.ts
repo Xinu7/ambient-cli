@@ -93,4 +93,16 @@ process.stdout.write(JSON.stringify([{ filePath: ${JSON.stringify(join(ws, "a.js
     );
     expect(detectCheckers(ws)[0]?.note).toMatch(/only references other projects/);
   });
+
+  it("checking one clean file shows no other file's errors as notes", async () => {
+    mkdirSync(join(ws, "node_modules", "typescript", "bin"), { recursive: true });
+    writeFileSync(join(ws, "tsconfig.json"), "{}");
+    writeFileSync(
+      join(ws, "node_modules", "typescript", "bin", "tsc"),
+      `process.stdout.write("src/other.ts(1,1): error TS1005: x\\n"); process.exitCode = 1;\n`,
+    );
+    const r = await diagnosticsTool.execute({ path: "src/a.ts" }, ctx());
+    expect(r.diagnostics).toEqual([]);
+    expect(r.notes.join()).not.toContain("other.ts");
+  });
 });

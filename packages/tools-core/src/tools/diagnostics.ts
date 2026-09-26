@@ -237,9 +237,12 @@ function run(
     });
     let out = "";
     let overflow = false;
+    // Capped per chunk too: one pipe read can carry megabytes at once (Windows).
     const take = (d: Buffer) => {
-      if (out.length < MAX_OUTPUT_CHARS) out += d.toString("utf8");
-      else overflow = true;
+      const text = d.toString("utf8");
+      const room = MAX_OUTPUT_CHARS - out.length;
+      if (text.length > room) overflow = true;
+      if (room > 0) out += text.slice(0, room);
     };
     child.stdout?.on("data", take);
     child.stderr?.on("data", take);
@@ -292,18 +295,17 @@ export const diagnosticsTool: ToolDefinition<z.infer<typeof Input>, z.infer<type
     for (const plan of plans) {
       ctx.signal.throwIfAborted();
       const { out, code, overflow } = await run(plan, root, ctx.signal);
-      const found = plan
-        .parse(out)
-        .filter((d) => !only || d.file === only || d.file.startsWith(`${only}/`));
+      const parsed = plan.parse(out);
+      const found = parsed.filter((d) => !only || d.file === only || d.file.startsWith(`${only}/`));
       diagnostics.push(...found);
       if (plan.note) notes.push(plan.note);
       // Never report "clean" for output we couldn't read: too much of it, or a failure with nothing parseable.
       if (overflow) {
         cutShort = true;
         notes.push(
-          `${plan.checker}: printed more than we read — run it on a smaller path to see every problem`,
+          `${plan.checker}: printed more than we read, so this list is incomplete — fix what's here and run it again`,
         );
-      } else if (found.length === 0 && code !== 0) {
+      } else if (parsed.length === 0 && code !== 0) {
         notes.push(`${plan.checker}: ${out.trim().slice(-800)}`);
       }
     }

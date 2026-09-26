@@ -33,7 +33,8 @@ const hasRg = findRipgrep(join(tmpdir(), "no-such-workspace")) !== undefined;
 
 describe("grep", () => {
   it("filters by a real glob or a name ending, and skips files your rules deny", async () => {
-    const denied = (p: string) => p.includes(`${join(ws, "secret")}`);
+    // Compared by the folder name: on Windows the temp folder has a short and a long spelling.
+    const denied = (p: string) => /[\\/]secret[\\/]/.test(p);
     expect(
       files(
         await grepTool.execute(
