@@ -202,7 +202,9 @@ export async function runAgent(args: string[]): Promise<void> {
   process.once("SIGINT", onSigint);
   // A terminal closing or a `kill` cancels the run the same way, so its cleanup (background commands and
   // subagents it started) happens before ambient exits; a run that won't wind down is forced after a moment.
+  let signalled: number | undefined;
   const onTerminate = (code: number) => () => {
+    signalled = code;
     controller.abort();
     process.exitCode = code;
     setTimeout(() => process.exit(code), FORCE_EXIT_MS).unref();
@@ -362,7 +364,7 @@ export async function runAgent(args: string[]): Promise<void> {
     if (keyRejected && reporting !== "jsonl") process.stderr.write(`\n${KEY_REJECTED}\n`);
     // Non-success stop reasons must set a nonzero exit code for scripts/CI.
     if (result.stopReason !== "complete")
-      process.exitCode = result.stopReason === "cancelled" ? 130 : 1;
+      process.exitCode = signalled ?? (result.stopReason === "cancelled" ? 130 : 1);
     if (updateCheck) {
       const upd = await updateCheck;
       if (upd?.updateAvailable) process.stderr.write(dim(`\n▲ ${updateHint(upd)}\n`));
@@ -375,7 +377,7 @@ export async function runAgent(args: string[]): Promise<void> {
       );
     else if (machine) machine.result({ stopReason: "error", turns: 0, finalText: "" }, message);
     else process.stderr.write(`\namb: ${message}\n`);
-    process.exitCode = 1;
+    process.exitCode = signalled ?? 1;
   } finally {
     await fireAndForget(hooks, "SessionEnd", { reason: "exit" });
     mcp.close();

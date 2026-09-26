@@ -1,3 +1,4 @@
+import { exitQuietlyOnClosedPipe } from "./closed-pipe.js";
 import { runChat } from "./commands/chat.js";
 import { runConfig } from "./commands/config-show.js";
 import { runDoctor } from "./commands/doctor.js";
@@ -77,31 +78,9 @@ Eval flags:
 
 Everything runs on Ambient models only.`;
 
-/**
- * A reader that stops early (`ambient -p … | head -1`) closes our stdout: finish quietly, like any CLI —
- * by cancelling the run (so hooks, MCP servers and any running command are cleaned up as on Ctrl-C) rather
- * than exiting on the spot. Later writes to the closed pipe are ignored.
- */
-function exitQuietlyOnClosedPipe(stream: NodeJS.WriteStream): void {
-  let closed = false;
-  stream.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code !== "EPIPE") throw err;
-    if (closed) return;
-    closed = true;
-    // The reader has what it wanted: that's a normal end, not a failure or a cancel.
-    process.once("exit", () => {
-      process.exitCode = 0;
-    });
-    // Nothing is running that needs stopping (a quick command): just finish.
-    if (process.listenerCount("SIGINT") === 0) process.exit(0);
-    process.emit("SIGINT");
-    // Cleanup is bounded: if something hangs, leave anyway.
-    setTimeout(() => process.exit(process.exitCode ?? 0), 5_000).unref();
-  });
-}
-
 async function main(): Promise<void> {
   exitQuietlyOnClosedPipe(process.stdout);
+  process.stderr.on("error", () => {}); // errors can't be reported anywhere once stderr itself fails
   const argv = process.argv.slice(2);
   const [cmd, ...rest] = argv;
   switch (cmd) {
