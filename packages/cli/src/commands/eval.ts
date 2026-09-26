@@ -303,7 +303,7 @@ export async function runEval(args: string[]): Promise<void> {
         approve: async () => "allow-once",
         capabilities: makeCapabilityPort(),
         workspace: evalWorkspace,
-        verify: makeVerifyPort(ws),
+        verify: makeVerifyPort(ws, () => true), // the suite's own fixture, run on purpose
         checkpoint: (content) => saveObject(sessionId, content),
         artifact: (content) => saveObject(sessionId, content),
         readArtifact: (handle) => readObject(sessionId, handle),

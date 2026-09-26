@@ -47,7 +47,7 @@ describe("permission rules from every source", () => {
     });
     expect(s.untrustedCount()).toBe(1);
     expect(untrustedNote(s)).toBe(
-      "Project hooks, rules and MCP servers are off until trusted: ambient trust",
+      "Project hooks, rules, MCP servers and verify script are off until trusted: ambient trust",
     );
     expect(s.permissionsSummary().join("\n")).toContain("allow  Bash(make:*)  (waits for /trust)");
 
@@ -91,7 +91,7 @@ describe("permission rules from every source", () => {
     expect(s.rules()).toBeUndefined();
     expect(s.permissionsSummary()[0]).toContain('under "permissions"');
     expect(s.trust()).toBe(
-      "This project has no hooks, rules, MCP servers or shell commands to trust.",
+      "This project has no hooks, rules, MCP servers, shell commands or verify script to trust.",
     );
   });
 });
@@ -148,4 +148,37 @@ describe("what trusting a project covers", () => {
     expect(text).toContain("\\x1b[2K\\x0dharmless");
     expect(text).not.toContain("\u001b");
   });
+});
+
+describe("a project's verify script waits for trust", () => {
+  it.skipIf(process.platform === "win32")(
+    "doesn't run until trusted, shows the script for review, and a change needs trusting again",
+    async () => {
+      const { chmodSync, existsSync } = await import("node:fs");
+      const { makeVerifyPort } = await import("../src/agent/verify-port.js");
+      mkdirSync(join(ws, ".ambient"), { recursive: true });
+      const marker = join(dir, "ran");
+      const script = join(ws, ".ambient", "verify");
+      writeFileSync(script, `#!/bin/sh\ntouch '${marker}'\n`);
+      chmodSync(script, 0o755);
+      const s = makeWorkspaceSettings({ workspaceRoot: ws, home, trustFile, config: {} });
+
+      expect(s.untrustedCount()).toBe(1);
+      expect(makeVerifyPort(ws, () => s.projectTrusted())).toBeUndefined();
+      expect(s.trustSummary().join("\n")).toContain(`touch '${marker}'`);
+
+      expect(s.trust()).toContain("verify script");
+      const port = makeVerifyPort(ws, () => s.projectTrusted());
+      expect(port).toBeDefined();
+      await port?.();
+      expect(existsSync(marker)).toBe(true);
+
+      // Edited after trusting: off again, even for a port made while it was trusted.
+      rmSync(marker);
+      writeFileSync(script, `#!/bin/sh\ntouch '${marker}'\necho changed\n`);
+      expect(s.projectTrusted()).toBe(false);
+      expect(await port?.()).toBeNull();
+      expect(existsSync(marker)).toBe(false);
+    },
+  );
 });

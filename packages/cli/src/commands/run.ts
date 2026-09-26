@@ -275,7 +275,7 @@ export async function runAgent(args: string[]): Promise<void> {
     workspace: makeWorkspaceContextPort(undefined, {
       userInstructions: userConfig.claudeSettings === true,
     }),
-    verify: makeVerifyPort(cwd),
+    verify: makeVerifyPort(cwd, () => settings.projectTrusted()),
     checkpoint: (content) => saveObject(sessionId, content),
     artifact: (content) => saveObject(sessionId, content), // offload large tool outputs
     readArtifact: (handle) => readObject(sessionId, handle),

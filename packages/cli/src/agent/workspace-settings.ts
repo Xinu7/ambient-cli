@@ -16,6 +16,7 @@ import {
 import { type PermissionRules, parseRules } from "@amb/permissions";
 import type { HooksPort } from "@amb/runtime";
 import { hooksPort } from "./hooks.js";
+import { verifyScripts } from "./verify-port.js";
 
 /**
  * What a workspace's settings files ask for — hooks and permission rules — and whether each part applies.
@@ -80,13 +81,18 @@ export function projectFingerprint(
   mcp: readonly McpServerSpec[] = [],
   commands: ReadonlyArray<{ name: string; lines: string[]; allowedTools: string[] }> = [],
   plugins: Record<string, unknown> = {},
+  verify: ReadonlyArray<{ file: string; content: string }> = [],
 ): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify([hooksFingerprint(hooks), allow, mcp.map(mcpIdentity), commands, plugins]),
-    )
-    .digest("hex")
-    .slice(0, 32);
+  const parts: unknown[] = [
+    hooksFingerprint(hooks),
+    allow,
+    mcp.map(mcpIdentity),
+    commands,
+    plugins,
+  ];
+  // Only when there is one, so a project trusted before verify scripts counted keeps its trust.
+  if (verify.length > 0) parts.push(verify);
+  return createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 32);
 }
 
 function saveTrust(file: string, workspaceRoot: string, fingerprint: string): void {
@@ -125,8 +131,18 @@ interface Snapshot {
   projectMcp: McpServerSpec[];
   projectCommands: Array<{ name: string; lines: string[]; allowedTools: string[] }>;
   projectPlugins: Record<string, unknown>;
+  projectVerify: Array<{ file: string; content: string }>;
   trusted: boolean;
 }
+
+/** How many things of the project's own trust covers. */
+const projectItems = (s: Snapshot) =>
+  s.projectHooks.length +
+  s.projectAllow.length +
+  s.projectMcp.length +
+  s.projectCommands.length +
+  Object.keys(s.projectPlugins).length +
+  s.projectVerify.length;
 
 /** The workspace's settings, re-read on every use so edits and trust changes apply without a restart. */
 export interface WorkspaceSettings {
@@ -174,12 +190,14 @@ export function makeWorkspaceSettings(opts: {
     );
     const projectCommands = projectShellCommands(opts.workspaceRoot, home);
     const projectPlugins = projectEnabledPlugins(opts.workspaceRoot);
+    const projectVerify = verifyScripts(opts.workspaceRoot);
     const trusted =
       (hooks.project.length > 0 ||
         lists.project.allow.length > 0 ||
         projectMcp.length > 0 ||
         projectCommands.length > 0 ||
-        Object.keys(projectPlugins).length > 0) &&
+        Object.keys(projectPlugins).length > 0 ||
+        projectVerify.length > 0) &&
       readTrust(opts.trustFile)[opts.workspaceRoot] ===
         projectFingerprint(
           hooks.project,
@@ -187,6 +205,7 @@ export function makeWorkspaceSettings(opts: {
           projectMcp,
           projectCommands,
           projectPlugins,
+          projectVerify,
         );
     // Plugin hooks only count the project's own plugin choices once the project is trusted.
     const pluginHooks =
@@ -220,6 +239,7 @@ export function makeWorkspaceSettings(opts: {
       projectMcp,
       projectCommands,
       projectPlugins,
+      projectVerify,
       trusted,
     };
   };
@@ -307,25 +327,15 @@ export function makeWorkspaceSettings(opts: {
     },
     untrustedCount() {
       const s = snapshot();
-      return s.trusted
-        ? 0
-        : s.projectHooks.length +
-            s.projectAllow.length +
-            s.projectMcp.length +
-            s.projectCommands.length +
-            Object.keys(s.projectPlugins).length;
+      return s.trusted ? 0 : projectItems(s);
     },
     projectTrusted: () => snapshot().trusted,
     trustSummary() {
       const s = snapshot();
-      const total =
-        s.projectHooks.length +
-        s.projectAllow.length +
-        s.projectMcp.length +
-        s.projectCommands.length +
-        Object.keys(s.projectPlugins).length;
-      if (total === 0)
-        return ["This project has no hooks, rules, MCP servers or shell commands of its own."];
+      if (projectItems(s) === 0)
+        return [
+          "This project has no hooks, rules, MCP servers, shell commands or verify script of its own.",
+        ];
       const lines: string[] = [
         s.trusted
           ? "This project's settings are trusted:"
@@ -364,6 +374,10 @@ export function makeWorkspaceSettings(opts: {
           for (const l of c.lines) lines.push(`    ${visible(l)}`);
         }
       }
+      for (const v of s.projectVerify) {
+        lines.push(` Verify script ${v.file} (runs after the agent changes files):`);
+        for (const l of v.content.replace(/\n$/, "").split("\n")) lines.push(`    ${visible(l)}`);
+      }
       if (!s.trusted) {
         lines.push(
           "",
@@ -379,8 +393,9 @@ export function makeWorkspaceSettings(opts: {
       const mcp = s.projectMcp.length;
       const cmds = s.projectCommands.length;
       const plugins = Object.keys(s.projectPlugins).length;
-      if (hooks + allow + mcp + cmds + plugins === 0)
-        return "This project has no hooks, rules, MCP servers or shell commands to trust.";
+      const verify = s.projectVerify.length;
+      if (projectItems(s) === 0)
+        return "This project has no hooks, rules, MCP servers, shell commands or verify script to trust.";
       if (s.trusted) return "This project's settings are already trusted.";
       try {
         saveTrust(
@@ -392,6 +407,7 @@ export function makeWorkspaceSettings(opts: {
             s.projectMcp,
             s.projectCommands,
             s.projectPlugins,
+            s.projectVerify,
           ),
         );
       } catch (e) {
@@ -403,11 +419,12 @@ export function makeWorkspaceSettings(opts: {
         ...(mcp > 0 ? [plural(mcp, "MCP server")] : []),
         ...(cmds > 0 ? [plural(cmds, "shell command")] : []),
         ...(plugins > 0 ? [plural(plugins, "plugin setting")] : []),
+        ...(verify > 0 ? ["verify script"] : []),
       ];
       const list =
         parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
       const when =
-        cmds + hooks + allow === 0
+        cmds + hooks + allow + verify === 0
           ? "its MCP servers connect the next time ambient starts"
           : mcp > 0
             ? "on from your next message (MCP servers: next launch)"
@@ -429,6 +446,6 @@ export function workspaceSettings(
 /** A one-line heads-up when the project has settings that won't apply yet (headless runs can't ask). */
 export function untrustedNote(settings: WorkspaceSettings): string | undefined {
   return settings.untrustedCount() > 0
-    ? "Project hooks, rules and MCP servers are off until trusted: ambient trust"
+    ? "Project hooks, rules, MCP servers and verify script are off until trusted: ambient trust"
     : undefined;
 }

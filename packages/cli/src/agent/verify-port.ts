@@ -1,5 +1,13 @@
 import { spawn } from "node:child_process";
-import { constants, accessSync, closeSync, existsSync, openSync, readSync } from "node:fs";
+import {
+  constants,
+  accessSync,
+  closeSync,
+  existsSync,
+  openSync,
+  readFileSync,
+  readSync,
+} from "node:fs";
 import { join } from "node:path";
 import type { VerifyOutcome, VerifyPort } from "@amb/runtime";
 import {
@@ -112,10 +120,32 @@ function executable(p: string): boolean {
   }
 }
 
-export function makeVerifyPort(workspaceRoot: string): VerifyPort | undefined {
+/** The project's verify scripts that exist, with their contents — what trusting the project covers. */
+export function verifyScripts(workspaceRoot: string): Array<{ file: string; content: string }> {
+  const out: Array<{ file: string; content: string }> = [];
+  for (const ext of ["", ".ps1", ".cmd", ".bat"]) {
+    const file = `${VERIFY_SCRIPT}${ext}`;
+    try {
+      out.push({ file, content: readFileSync(join(workspaceRoot, file), "utf8") });
+    } catch {
+      // not there (or unreadable, and then it can't run either)
+    }
+  }
+  return out;
+}
+
+/**
+ * Runs the project's verify script after the agent changes files — only while the project is trusted: the
+ * script comes with the repository, so a freshly cloned one can't run code before you've reviewed it. Trust
+ * is checked again before every run (it covers the script's exact contents).
+ */
+export function makeVerifyPort(
+  workspaceRoot: string,
+  trusted: () => boolean,
+): VerifyPort | undefined {
   const runner = verifyRunner(workspaceRoot);
-  if (!runner) return undefined;
-  return (signal) => runVerifyScript(runner, workspaceRoot, signal);
+  if (!runner || !trusted()) return undefined;
+  return async (signal) => (trusted() ? runVerifyScript(runner, workspaceRoot, signal) : null);
 }
 
 function runVerifyScript(

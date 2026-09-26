@@ -879,7 +879,10 @@ export function App(deps: AppDeps): ReactNode {
           ...(sessionImages.length > 0 ? { sessionImages } : {}),
           capabilities: deps.capabilities,
           workspace: workspacePortRef.current,
-          verify: makeVerifyPort(deps.workspaceRoot),
+          verify: makeVerifyPort(
+            deps.workspaceRoot,
+            () => deps.settings?.projectTrusted() === true,
+          ),
           checkpoint: (content) => saveObject(sessionId, content),
           artifact: (content) => saveObject(sessionId, content), // offload large tool outputs
           readArtifact: (handle) => readObject(sessionId, handle),
