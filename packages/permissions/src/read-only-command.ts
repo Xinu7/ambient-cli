@@ -84,6 +84,17 @@ const longOption = (t: string, name: string, minLength = 1) => {
   return opt.length >= minLength && name.startsWith(opt);
 };
 
+/** Folders whose programs are the system's own, not something a project put there. */
+const SYSTEM_BIN = new Set([
+  "/bin",
+  "/usr/bin",
+  "/usr/local/bin",
+  "/opt/homebrew/bin",
+  "/sbin",
+  "/usr/sbin",
+]);
+const dirOf = (p: string) => p.slice(0, p.lastIndexOf("/")) || "/";
+
 /** A plain command name (`ls`, `git`) or an absolute path to one (`/bin/ls`) — never an assignment. */
 const COMMAND_WORD = /^(?:[A-Za-z0-9._+-]+|\/[A-Za-z0-9._+/-]+)$/;
 
@@ -182,6 +193,8 @@ export function isReadOnlyCommand(command: string): boolean {
     // The first word must be the command itself: a plain name or an absolute path. `X=/ls rm -rf src` sets a
     // variable and runs `rm`; `GIT_EXTERNAL_DIFF=… git diff` runs a program of its choosing.
     if (!COMMAND_WORD.test(seg.argv[0] ?? "")) return false;
+    // An absolute path counts only in a system program folder — a repo can ship its own `tools/cat`.
+    if (seg.argv[0]?.startsWith("/") && !SYSTEM_BIN.has(dirOf(seg.argv[0]))) return false;
     const cmd = baseName(seg.argv[0] ?? "");
     if (!cmd) return false;
     // A diff-family write flag (`--output=<file>`) writes a file regardless of the subcommand — reject it.

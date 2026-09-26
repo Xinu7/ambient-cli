@@ -151,15 +151,22 @@ describe("isReadOnlyCommand — commands hidden behind assignments, quoting or g
     "git show --textconv HEAD",
     "git cat-file --textconv HEAD:a.txt",
     "tree -R -H . -L 1",
+    // a program the project ships, named like a safe one
+    "/w/proj/tools/cat README.md",
+    "/w/proj/git status",
+    "/usr/bin/../../w/proj/ls",
   ])("%s still needs approval", (cmd) => {
     expect(isReadOnlyCommand(cmd)).toBe(false);
   });
-  it.each(["/bin/ls -la", "git diff --stat", "git log --oneline -5", "ls src"])(
-    "%s stays read-only",
-    (cmd) => {
-      expect(isReadOnlyCommand(cmd)).toBe(true);
-    },
-  );
+  it.each([
+    "/bin/ls -la",
+    "/usr/bin/git status",
+    "git diff --stat",
+    "git log --oneline -5",
+    "ls src",
+  ])("%s stays read-only", (cmd) => {
+    expect(isReadOnlyCommand(cmd)).toBe(true);
+  });
 });
 
 describe("isReadOnlyCommand — shell expansion is never auto-approved", () => {
