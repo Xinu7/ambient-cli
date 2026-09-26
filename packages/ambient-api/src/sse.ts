@@ -186,6 +186,9 @@ export function accumulateChatStream(events: Iterable<SSEEvent>): AccumulatedCom
   return acc.result();
 }
 
+/** The most text one SSE event may run to before the stream is treated as broken. */
+const MAX_PENDING_EVENT_CHARS = 4 * 1024 * 1024;
+
 /**
  * Incrementally parse SSE events from a byte stream, respecting arbitrary chunk boundaries. `onBytes` fires for
  * every body chunk (including keep-alive comments) so a watchdog can treat any traffic as liveness.
@@ -209,6 +212,15 @@ export async function* readSSEStream(
       buf = buf.slice(m.index + m[0].length);
       for (const ev of parseSSE(block)) yield ev;
       m = sep.exec(buf);
+    }
+    // A real event is a few KB; megabytes with no event boundary is a broken stream, not a slow one.
+    if (buf.length > MAX_PENDING_EVENT_CHARS) {
+      await reader.cancel().catch(() => {});
+      throw new AmbError({
+        kind: "transport",
+        message: `the stream sent ${buf.length} characters without an event boundary`,
+        retryable: true,
+      });
     }
   }
   buf += decoder.decode();

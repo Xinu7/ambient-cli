@@ -122,6 +122,23 @@ describe("readSSEStream", () => {
     for await (const e of readSSEStream(stream)) seen.push(e.data);
     expect(seen).toEqual(['{"a":1}', '{"b":2}']);
   });
+  it("gives up with a retryable transport error on megabytes with no event boundary", async () => {
+    const chunk = new TextEncoder().encode(`data: ${"x".repeat(1024 * 1024)}`);
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (sent++ < 8) c.enqueue(chunk);
+        else c.close();
+      },
+    });
+    const drain = async () => {
+      for await (const _ of readSSEStream(stream)) {
+        // nothing arrives
+      }
+    };
+    await expect(drain()).rejects.toMatchObject({ kind: "transport", retryable: true });
+    expect(sent).toBeLessThan(8); // stopped reading early
+  });
 });
 
 describe("tool-call deltas without an index", () => {
